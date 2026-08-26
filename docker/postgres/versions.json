@@ -1,0 +1,19 @@
+{
+  "recorded_at": "2026-08-26",
+  "target_platform": "linux/amd64",
+  "postgresql": {
+    "version": "16.15",
+    "base_image": "postgres:16.15-bookworm",
+    "base_image_index_digest": "sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825",
+    "linux_amd64_manifest_digest": "sha256:1938c16e9d2f10a6a3623b344b64ae8d45f407f2c5f34f0979468bb689b9227a",
+    "linux_arm64_v8_manifest_digest": "sha256:82d79b2af75e0f30e9df79f4b1197bedf3be936b188b9a63cc2ea917051260db",
+    "docker_library_source_commit": "9d15534160ade17f2b6c455a39ee967c49b1937d",
+    "server_dev_package": "postgresql-server-dev-16=16.15-1.pgdg12+2"
+  },
+  "pg_hint_plan": {
+    "version": "1.6.2",
+    "tag": "REL16_1_6_2",
+    "tag_commit": "b35a03c789b5707a4f96e2ee719101d4f7016a88",
+    "source_archive_sha256": "657ff36bbfa8f9659af9faea48e497055b0e72715fb327eb72ab9b967200dc4e"
+  }
+}

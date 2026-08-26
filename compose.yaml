@@ -1,0 +1,25 @@
+name: qprl
+
+services:
+  postgres:
+    image: qprl-postgres:16.15-pg_hint_plan-1.6.2
+    platform: linux/amd64
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_DB: qprl
+      POSTGRES_USER: qprl_admin
+      POSTGRES_PASSWORD: ${QPRL_POSTGRES_PASSWORD:?Set QPRL_POSTGRES_PASSWORD in .env}
+      QPRL_AGENT_PASSWORD: ${QPRL_AGENT_PASSWORD:?Set QPRL_AGENT_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C --data-checksums
+    ports:
+      - 127.0.0.1:${QPRL_POSTGRES_PORT:-55432}:5432
+    shm_size: ${QPRL_POSTGRES_SHM_SIZE:-1gb}
+    stop_grace_period: 1m
+    volumes:
+      - qprl-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  qprl-postgres-data:
+
