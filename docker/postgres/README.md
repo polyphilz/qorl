@@ -166,3 +166,6 @@ assume matching tags imply matching bytes.
    `pg_hint_plan` release, join-order and join-method hints cannot take effect
    while GEQO is active; the future `PlanAction` compiler must lower such an
    action with `Set(geqo off)` so the requested semantics are actually applied.
+
+The separate [`scripts/job`](../../scripts/job/README.md) pipeline builds and
+clean-room verifies the immutable JOB data snapshot consumed by this image.
