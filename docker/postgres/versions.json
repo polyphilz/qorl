@@ -1,6 +1,10 @@
 {
   "recorded_at": "2026-08-26",
   "target_platform": "linux/amd64",
+  "benchmark": {
+    "config_id": "benchmark-v1",
+    "expected_schema_version": 1
+  },
   "postgresql": {
     "version": "16.15",
     "base_image": "postgres:16.15-bookworm",

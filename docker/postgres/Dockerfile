@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Pin the multi-platform index. compose.yaml deliberately selects linux/amd64,
 # which resolves to the amd64 manifest recorded in versions.json.
 ARG POSTGRES_BASE_IMAGE=postgres:16.15-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825
@@ -47,6 +49,7 @@ LABEL org.opencontainers.image.title="qprl-postgres" \
       org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QPRL plan-steering experiments" \
       org.opencontainers.image.version="16.15-pg_hint_plan-1.6.2" \
       org.opencontainers.image.source="https://github.com/ossc-db/pg_hint_plan" \
+      io.qprl.benchmark.config-id="benchmark-v1" \
       io.qprl.postgresql.version="16.15" \
       io.qprl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
       io.qprl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
@@ -61,7 +64,11 @@ COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/16
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/16/extension/ /usr/share/postgresql/16/extension/
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/qprl/ /usr/share/qprl/
 
-COPY postgresql.conf /etc/qprl/postgresql.conf
+COPY benchmark-v1.conf /etc/qprl/benchmark-v1.conf
+COPY benchmark-v1.expected.json /usr/share/qprl/benchmark-v1.expected.json
+COPY versions.json /usr/share/qprl/versions.json
+COPY --chmod=0555 assert-benchmark-config.sh /usr/local/bin/qprl-assert-benchmark-config
+COPY --chmod=0555 dump-postgres-state.sh /usr/local/bin/qprl-dump-postgres-state
 COPY --chmod=0555 initdb/001-qprl-bootstrap.sh /docker-entrypoint-initdb.d/001-qprl-bootstrap.sh
 
 RUN set -eux; \
@@ -72,8 +79,10 @@ RUN set -eux; \
     grep --fixed-strings "default_version = '${PG_HINT_PLAN_VERSION}'" \
         /usr/share/postgresql/16/extension/pg_hint_plan.control
 
-HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=12 \
-    CMD pg_isready --username="$POSTGRES_USER" --dbname="${POSTGRES_DB:-$POSTGRES_USER}" || exit 1
+# Run the full contract check during startup. The very long steady-state
+# interval avoids health probes adding noise to timed benchmark queries; the
+# orchestrator performs explicit pre/post checks for every run.
+HEALTHCHECK --interval=168h --timeout=15s --start-period=1m --start-interval=1s --retries=1 \
+    CMD ["/usr/local/bin/qprl-assert-benchmark-config"]
 
-CMD ["postgres", "-c", "config_file=/etc/qprl/postgresql.conf"]
-
+CMD ["postgres", "-c", "config_file=/etc/qprl/benchmark-v1.conf"]

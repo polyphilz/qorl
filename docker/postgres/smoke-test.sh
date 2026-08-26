@@ -7,6 +7,8 @@ cd "$project_root"
 
 compose=(docker compose --file compose.yaml)
 
+"${compose[@]}" exec --no-TTY postgres qprl-assert-benchmark-config
+
 # Expansion inside this single-quoted script intentionally happens in the
 # container, where the Compose-provided environment variables exist.
 # shellcheck disable=SC2016
@@ -15,6 +17,10 @@ compose=(docker compose --file compose.yaml)
 
     test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW server_version_num")" = "160015"
     test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW autovacuum")" = "off"
+    test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW qprl.benchmark_config_id")" = "benchmark-v1"
+    test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW jit")" = "off"
+    test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW max_logical_replication_workers")" = "0"
+    test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW huge_pages")" = "off"
     test "$(psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SELECT extversion FROM pg_extension WHERE extname = '\''pg_hint_plan'\''")" = "1.6.2"
     psql --username="$POSTGRES_USER" --dbname="$database_name" --tuples-only --no-align --command="SHOW shared_preload_libraries" | grep --fixed-strings --quiet pg_hint_plan
 
