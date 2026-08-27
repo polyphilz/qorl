@@ -57,6 +57,34 @@ The physical snapshot contains PostgreSQL's password hashes. Treat it as a
 private benchmark artifact, and supply the same runtime credentials used when
 it was built; neither plaintext password is written to the manifests.
 
+## Checked-in JOB task inventory
+
+`data/job/job-v1/queries/` contains the 113 exact, human-readable JOB SQL
+files. `data/job/job-v1/tasks.json` is the single machine-readable inventory:
+it declares the entire collection held-out test data and records each query's
+template, SQL checksum, relation instances, table set, join predicates, and
+alias-independent join-graph fingerprint.
+
+The inventory is generated from the pinned query archive and the validated
+snapshot manifest. Verify that neither the SQL nor its derived metadata has
+drifted with:
+
+```bash
+./scripts/job/build-job-task-inventory.py --check
+```
+
+That clean-clone check rebuilds the inventory metadata from the checked-in SQL
+and verifies the query-set checksum against the pinned source manifest. To also
+compare every file with a separately fetched upstream source directory, run:
+
+```bash
+./scripts/job/build-job-task-inventory.py \
+  --check \
+  --source-dir data/raw/job-v1/source
+```
+
+The normal fixture pipeline fetches and verifies that raw source directory.
+
 ## Exact construction order
 
 1. Verify every downloaded and extracted byte against `job-v1.json`.
