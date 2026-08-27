@@ -8,10 +8,10 @@
   "template_count": 33,
   "database": {
     "fixture_id": "job-v1",
-    "snapshot_id": "job-v1-sha256-206e837752ae2565",
-    "snapshot_archive_sha256": "206e837752ae2565581e40782c697db3ed02c45c3ae2e6451333fdf076629f0b",
-    "postgres_image_id": "sha256:136060ea633b03b501f90c8bcf722bdd31deae2f9caca92f137dc4c8183a6a23",
-    "postgres_system_identifier": "7678470394772414502"
+    "snapshot_id": "job-v1-sha256-8bdc353e4006b16a",
+    "snapshot_archive_sha256": "8bdc353e4006b16ab346189500c785beaf51d63b437b5ffea5a7bc8bab9ae58f",
+    "postgres_image_id": "sha256:59f9919412031264c8140be0006b1f525337654fea285a5394f14fd16b307edb",
+    "postgres_system_identifier": "7678779190369824806"
   },
   "query_source": {
     "repository_url": "https://github.com/gregrahn/join-order-benchmark",
