@@ -1,5 +1,9 @@
 **/.DS_Store
 .plans/
+.venv/
+__pycache__/
+*.py[cod]
+dist/
 
 .env
 
