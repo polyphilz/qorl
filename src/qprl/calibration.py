@@ -98,18 +98,10 @@ def buffers_stable(previous: dict[str, Any], current: dict[str, Any]) -> bool:
     return True
 
 
-def load_sql(fixture: JobFixture, task: dict[str, Any]) -> str:
-    path = fixture.inventory_path.parent / task["sql_path"]
-    content = path.read_bytes()
-    if hashlib.sha256(content).hexdigest() != task["sql_sha256"]:
-        raise RuntimeError(f"query checksum mismatch: {task['task_id']}")
-    return content.decode("utf-8")
-
-
 def calibrate_task(
     worker: PostgresWorker, fixture: JobFixture, task: dict[str, Any]
 ) -> dict[str, Any]:
-    sql = load_sql(fixture, task)
+    sql = fixture.load_sql(task)
     warmups: list[dict[str, Any]] = []
     for run_number in range(1, MAX_WARMUP_RUNS + 1):
         result = observation(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -13,13 +14,19 @@ class WorkerError(RuntimeError):
     pass
 
 
-def run(
+@dataclass(frozen=True)
+class ExplainResult:
+    document: dict[str, Any]
+    hint_diagnostics: str
+
+
+def execute(
     command: list[str],
     *,
     cwd: Path,
     input_text: str | None = None,
     check: bool = True,
-) -> str:
+) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
         command,
         cwd=cwd,
@@ -34,7 +41,19 @@ def run(
         raise WorkerError(
             f"command failed ({completed.returncode}): {' '.join(command)}\n{detail}"
         )
-    return completed.stdout
+    return completed
+
+
+def run(
+    command: list[str],
+    *,
+    cwd: Path,
+    input_text: str | None = None,
+    check: bool = True,
+) -> str:
+    return execute(
+        command, cwd=cwd, input_text=input_text, check=check
+    ).stdout
 
 
 class PostgresWorker:
@@ -71,6 +90,20 @@ class PostgresWorker:
         check: bool = True,
     ) -> str:
         return run(
+            command,
+            cwd=self.fixture.repository,
+            input_text=input_text,
+            check=check,
+        )
+
+    def execute(
+        self,
+        command: list[str],
+        *,
+        input_text: str | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        return execute(
             command,
             cwd=self.fixture.repository,
             input_text=input_text,
@@ -194,19 +227,37 @@ exec psql \
             input_text=sql,
         )
 
-    def explain_analyze(self, sql: str, timeout_ms: int) -> dict[str, Any]:
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult:
+        explain_options = (
+            "ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON"
+            if analyze
+            else "FORMAT JSON"
+        )
+        debug_options = (
+            " -c pg_hint_plan.debug_print=detailed"
+            " -c pg_hint_plan.message_level=notice"
+            if hint
+            else ""
+        )
         shell = rf"""
 exec env \
     PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
-    PGAPPNAME=qprl-calibration \
-    PGOPTIONS="-c statement_timeout={timeout_ms}" \
+    PGAPPNAME=qprl-worker \
+    PGOPTIONS="-c statement_timeout={timeout_ms}{debug_options}" \
     psql \
         --host=127.0.0.1 \
         --username=qprl_runner \
         --dbname="${{POSTGRES_DB:-$POSTGRES_USER}}" \
         --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
 """
-        output = self.command(
+        completed = self.execute(
             [
                 "docker",
                 "exec",
@@ -219,16 +270,38 @@ exec env \
                 shell,
             ],
             input_text=(
-                "EXPLAIN (ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON)\n"
+                f"EXPLAIN ({explain_options})\n"
+                + (hint + "\n" if hint else "")
                 + sql.strip()
                 + "\n"
             ),
         )
         try:
-            parsed = json.loads(output)
-            return parsed[0]
+            parsed = json.loads(completed.stdout)
+            return ExplainResult(parsed[0], completed.stderr)
         except (json.JSONDecodeError, IndexError, TypeError) as error:
             raise WorkerError("PostgreSQL returned invalid EXPLAIN JSON") from error
+
+    def explain_analyze(self, sql: str, timeout_ms: int) -> dict[str, Any]:
+        return self.explain(sql, timeout_ms, analyze=True).document
+
+    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
+        tables = sorted({relation["table"] for relation in task["relations"]})
+        literals = ", ".join("'" + table.replace("'", "''") + "'" for table in tables)
+        output = self.admin_sql(
+            "SELECT json_object_agg(tablename, indexes ORDER BY tablename) "
+            "FROM ("
+            "SELECT tablename, json_agg(indexname ORDER BY indexname) AS indexes "
+            "FROM pg_indexes "
+            f"WHERE schemaname = 'public' AND tablename IN ({literals}) "
+            "GROUP BY tablename"
+            ") AS listed;"
+        ).strip()
+        by_table = json.loads(output)
+        return {
+            relation["alias"]: set(by_table.get(relation["table"], []))
+            for relation in task["relations"]
+        }
 
     def capture_environment(self, output_dir: Path, phase: str) -> None:
         self.command(

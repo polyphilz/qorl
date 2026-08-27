@@ -78,3 +78,10 @@ class JobFixture:
             raise FixtureError("job-v1 snapshot archive size is incorrect")
         if sha256_file(self.archive_path) != self.snapshot["archive"]["sha256"]:
             raise FixtureError("job-v1 snapshot archive checksum is incorrect")
+
+    def load_sql(self, task: dict[str, Any]) -> str:
+        path = self.inventory_path.parent / task["sql_path"]
+        content = path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != task["sql_sha256"]:
+            raise FixtureError(f"query checksum mismatch: {task['task_id']}")
+        return content.decode("utf-8")
