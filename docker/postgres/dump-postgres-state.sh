@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${QPRL_AGENT_PASSWORD:?QPRL_AGENT_PASSWORD is required}"
+: "${QPRL_RUNNER_PASSWORD:?QPRL_RUNNER_PASSWORD is required}"
 
 database_name="${POSTGRES_DB:-$POSTGRES_USER}"
 mode="${1:-}"
@@ -106,11 +106,11 @@ ORDER BY name;
 SQL
         ;;
     show-all-csv)
-        PGPASSWORD="$QPRL_AGENT_PASSWORD" \
+        PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
         PGAPPNAME=qprl-baseline \
         psql \
             --host 127.0.0.1 \
-            --username qp_agent \
+            --username qprl_runner \
             --dbname "$database_name" \
             --no-psqlrc \
             --set ON_ERROR_STOP=1 \

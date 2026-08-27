@@ -48,7 +48,7 @@ which is less surprising here than Alpine/musl.
 - UTC logging/time settings, explicit durable PostgreSQL defaults, and
   startup assertions over every experiment-critical value.
 - A bootstrap superuser supplied at runtime and a minimally privileged
-  `qp_agent` login whose default transactions are read-only.
+  `qprl_runner` login whose default transactions are read-only.
 
 `CREATE EXTENSION pg_hint_plan` is run even though comment hints only require
 the library to be loaded. This makes the installed extension version directly

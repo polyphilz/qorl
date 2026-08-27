@@ -39,16 +39,16 @@ SQL
 )"
     grep --extended-regexp --quiet "Index (Only )?Scan using hint_smoke_pkey" <<<"$hinted_plan"
 
-    test "$(PGPASSWORD="$QPRL_AGENT_PASSWORD" psql --host=127.0.0.1 --username=qp_agent --dbname="$database_name" --tuples-only --no-align --command="SHOW default_transaction_read_only")" = "on"
-    PGPASSWORD="$QPRL_AGENT_PASSWORD" psql --host=127.0.0.1 --username=qp_agent --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="SELECT 1" >/dev/null
+    test "$(PGPASSWORD="$QPRL_RUNNER_PASSWORD" psql --host=127.0.0.1 --username=qprl_runner --dbname="$database_name" --tuples-only --no-align --command="SHOW default_transaction_read_only")" = "on"
+    PGPASSWORD="$QPRL_RUNNER_PASSWORD" psql --host=127.0.0.1 --username=qprl_runner --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="SELECT 1" >/dev/null
 
-    if PGPASSWORD="$QPRL_AGENT_PASSWORD" psql --host=127.0.0.1 --username=qp_agent --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="CREATE TABLE forbidden_smoke (id integer)" >/dev/null 2>&1; then
-        echo "qp_agent unexpectedly created a persistent table" >&2
+    if PGPASSWORD="$QPRL_RUNNER_PASSWORD" psql --host=127.0.0.1 --username=qprl_runner --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="CREATE TABLE forbidden_smoke (id integer)" >/dev/null 2>&1; then
+        echo "qprl_runner unexpectedly created a persistent table" >&2
         exit 1
     fi
 
-    if PGPASSWORD="$QPRL_AGENT_PASSWORD" psql --host=127.0.0.1 --username=qp_agent --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="CREATE TEMP TABLE forbidden_temp_smoke (id integer)" >/dev/null 2>&1; then
-        echo "qp_agent unexpectedly created a temporary table" >&2
+    if PGPASSWORD="$QPRL_RUNNER_PASSWORD" psql --host=127.0.0.1 --username=qprl_runner --dbname="$database_name" --set=ON_ERROR_STOP=1 --command="CREATE TEMP TABLE forbidden_temp_smoke (id integer)" >/dev/null 2>&1; then
+        echo "qprl_runner unexpectedly created a temporary table" >&2
         exit 1
     fi
 '

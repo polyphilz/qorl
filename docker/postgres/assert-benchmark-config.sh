@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${QPRL_AGENT_PASSWORD:?QPRL_AGENT_PASSWORD is required}"
+: "${QPRL_RUNNER_PASSWORD:?QPRL_RUNNER_PASSWORD is required}"
 
 database_name="${POSTGRES_DB:-$POSTGRES_USER}"
 
@@ -135,31 +135,31 @@ END
 $assert$;
 SQL
 
-PGPASSWORD="$QPRL_AGENT_PASSWORD" \
-PGAPPNAME=qprl-agent-config-assert \
+PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
+PGAPPNAME=qprl-runner-config-assert \
 psql \
     --host 127.0.0.1 \
-    --username qp_agent \
+    --username qprl_runner \
     --dbname "$database_name" \
     --no-psqlrc \
     --set ON_ERROR_STOP=1 \
     --quiet <<'SQL'
 DO $assert$
 BEGIN
-    IF current_user IS DISTINCT FROM 'qp_agent' THEN
-        RAISE EXCEPTION 'expected qp_agent login, actual=%', current_user;
+    IF current_user IS DISTINCT FROM 'qprl_runner' THEN
+        RAISE EXCEPTION 'expected qprl_runner login, actual=%', current_user;
     END IF;
 
     IF current_setting('default_transaction_read_only') IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION 'qp_agent default_transaction_read_only is not on';
+        RAISE EXCEPTION 'qprl_runner default_transaction_read_only is not on';
     END IF;
 
     IF current_setting('transaction_read_only') IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION 'qp_agent transaction_read_only is not on';
+        RAISE EXCEPTION 'qprl_runner transaction_read_only is not on';
     END IF;
 
     IF current_setting('search_path') IS DISTINCT FROM 'public, pg_catalog' THEN
-        RAISE EXCEPTION 'qp_agent search_path expected=% actual=%',
+        RAISE EXCEPTION 'qprl_runner search_path expected=% actual=%',
             'public, pg_catalog', current_setting('search_path');
     END IF;
 END

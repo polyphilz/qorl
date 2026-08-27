@@ -30,4 +30,4 @@ SET statement_timeout = 0;
 
 \ir /qprl/job-source/fkindexes.sql
 
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO qp_agent;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO qprl_runner;

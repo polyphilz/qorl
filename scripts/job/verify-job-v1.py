@@ -84,14 +84,14 @@ exec psql \
     ).strip()
 
 
-def agent_psql(container: str, sql: str) -> str:
+def runner_psql(container: str, sql: str) -> str:
     shell = r'''
 exec env \
-    PGPASSWORD="$QPRL_AGENT_PASSWORD" \
+    PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
     PGAPPNAME=qprl-job-v1-query-verifier \
     psql \
         --host=127.0.0.1 \
-        --username=qp_agent \
+        --username=qprl_runner \
         --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
         --no-psqlrc \
         --set=ON_ERROR_STOP=1 \
@@ -326,7 +326,7 @@ def representative_query_outputs(
     for query_name in query_names:
         query_path = source_dir / query_name
         sql = query_path.read_text(encoding="utf-8")
-        output = agent_psql(container, sql)
+        output = runner_psql(container, sql)
         encoded = output.encode("utf-8")
         outputs[query_name] = {
             "bytes": len(encoded),
