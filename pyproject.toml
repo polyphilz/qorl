@@ -1,13 +1,13 @@
 [project]
-name = "qprl"
+name = "qorl"
 version = "0.1.0"
-description = "PostgreSQL plan-steering research harness"
+description = "PostgreSQL query optimization with reinforcement learning"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-qprl = "qprl.cli:main"
+qorl = "qorl.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]

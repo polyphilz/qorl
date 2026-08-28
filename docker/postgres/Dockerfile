@@ -2,13 +2,13 @@
 
 # Pin the multi-platform index. compose.yaml deliberately selects linux/amd64,
 # which resolves to the amd64 manifest recorded in versions.json.
-ARG POSTGRES_BASE_IMAGE=postgres:16.15-bookworm@sha256:bb3e1a57e5407e0a5280b4211980a5e537f4abd234a87014ac979849a78dd825
+ARG POSTGRES_BASE_IMAGE=postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
 
 FROM ${POSTGRES_BASE_IMAGE} AS pg_hint_plan_builder
 
-ARG PG_HINT_PLAN_TAG=REL16_1_6_2
-ARG PG_HINT_PLAN_SOURCE_SHA256=657ff36bbfa8f9659af9faea48e497055b0e72715fb327eb72ab9b967200dc4e
-ARG POSTGRES_DEV_PACKAGE_VERSION=16.15-1.pgdg12+2
+ARG PG_HINT_PLAN_TAG=REL18_1_8_0
+ARG PG_HINT_PLAN_SOURCE_SHA256=c3d8aa1e468b6b8371fb09d971152b9ac1610118fbd0c76c7e308e88a1cc0ef7
+ARG POSTGRES_DEV_PACKAGE_VERSION=18.6-1.pgdg12+2
 
 RUN set -eux; \
     apt-get update; \
@@ -16,7 +16,8 @@ RUN set -eux; \
         build-essential \
         ca-certificates \
         curl \
-        "postgresql-server-dev-16=${POSTGRES_DEV_PACKAGE_VERSION}"; \
+        flex \
+        "postgresql-server-dev-18=${POSTGRES_DEV_PACKAGE_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /tmp/pg_hint_plan
@@ -30,59 +31,59 @@ RUN set -eux; \
     tar --extract --gzip --file pg_hint_plan.tar.gz --directory source --strip-components=1; \
     make --directory source --jobs="$(nproc)"; \
     make --directory source DESTDIR=/opt/pg_hint_plan-install install; \
-    mkdir -p /opt/pg_hint_plan-install/usr/share/qprl; \
+    mkdir -p /opt/pg_hint_plan-install/usr/share/qorl; \
     dpkg-query --show --showformat='${binary:Package}\t${Version}\n' \
         | LC_ALL=C sort \
-        > /opt/pg_hint_plan-install/usr/share/qprl/extension-build-packages.tsv; \
-    cd /opt/pg_hint_plan-install/usr/lib/postgresql/16/lib; \
+        > /opt/pg_hint_plan-install/usr/share/qorl/extension-build-packages.tsv; \
+    cd /opt/pg_hint_plan-install/usr/lib/postgresql/18/lib; \
     sha256sum pg_hint_plan.so \
-        > /opt/pg_hint_plan-install/usr/share/qprl/pg_hint_plan.so.sha256
+        > /opt/pg_hint_plan-install/usr/share/qorl/pg_hint_plan.so.sha256
 
 FROM ${POSTGRES_BASE_IMAGE}
 
-ARG PG_HINT_PLAN_TAG=REL16_1_6_2
-ARG PG_HINT_PLAN_VERSION=1.6.2
-ARG PG_HINT_PLAN_COMMIT=b35a03c789b5707a4f96e2ee719101d4f7016a88
-ARG PG_HINT_PLAN_SOURCE_SHA256=657ff36bbfa8f9659af9faea48e497055b0e72715fb327eb72ab9b967200dc4e
+ARG PG_HINT_PLAN_TAG=REL18_1_8_0
+ARG PG_HINT_PLAN_VERSION=1.8.0
+ARG PG_HINT_PLAN_COMMIT=88437bde5947e7bc40719e8b82eb8be2b39d71e8
+ARG PG_HINT_PLAN_SOURCE_SHA256=c3d8aa1e468b6b8371fb09d971152b9ac1610118fbd0c76c7e308e88a1cc0ef7
 
-LABEL org.opencontainers.image.title="qprl-postgres" \
-      org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QPRL plan-steering experiments" \
-      org.opencontainers.image.version="16.15-pg_hint_plan-1.6.2" \
+LABEL org.opencontainers.image.title="qorl-postgres" \
+      org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QORL plan-steering experiments" \
+      org.opencontainers.image.version="18.6-pg_hint_plan-1.8.0" \
       org.opencontainers.image.source="https://github.com/ossc-db/pg_hint_plan" \
-      io.qprl.benchmark.config-id="benchmark-v1" \
-      io.qprl.postgresql.version="16.15" \
-      io.qprl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
-      io.qprl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
-      io.qprl.pg_hint_plan.commit="${PG_HINT_PLAN_COMMIT}" \
-      io.qprl.pg_hint_plan.source-sha256="${PG_HINT_PLAN_SOURCE_SHA256}"
+      io.qorl.benchmark.config-id="benchmark-v1" \
+      io.qorl.postgresql.version="18.6" \
+      io.qorl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
+      io.qorl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
+      io.qorl.pg_hint_plan.commit="${PG_HINT_PLAN_COMMIT}" \
+      io.qorl.pg_hint_plan.source-sha256="${PG_HINT_PLAN_SOURCE_SHA256}"
 
 ENV PG_HINT_PLAN_VERSION=${PG_HINT_PLAN_VERSION} \
     PG_HINT_PLAN_TAG=${PG_HINT_PLAN_TAG} \
     PG_HINT_PLAN_COMMIT=${PG_HINT_PLAN_COMMIT}
 
-COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/16/lib/ /usr/lib/postgresql/16/lib/
-COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/16/extension/ /usr/share/postgresql/16/extension/
-COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/qprl/ /usr/share/qprl/
+COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/18/lib/ /usr/lib/postgresql/18/lib/
+COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/18/extension/ /usr/share/postgresql/18/extension/
+COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/qorl/ /usr/share/qorl/
 
-COPY benchmark-v1.conf /etc/qprl/benchmark-v1.conf
-COPY benchmark-v1.expected.json /usr/share/qprl/benchmark-v1.expected.json
-COPY versions.json /usr/share/qprl/versions.json
-COPY --chmod=0555 assert-benchmark-config.sh /usr/local/bin/qprl-assert-benchmark-config
-COPY --chmod=0555 dump-postgres-state.sh /usr/local/bin/qprl-dump-postgres-state
-COPY --chmod=0555 initdb/001-qprl-bootstrap.sh /docker-entrypoint-initdb.d/001-qprl-bootstrap.sh
+COPY benchmark-v1.conf /etc/qorl/benchmark-v1.conf
+COPY benchmark-v1.expected.json /usr/share/qorl/benchmark-v1.expected.json
+COPY versions.json /usr/share/qorl/versions.json
+COPY --chmod=0555 assert-benchmark-config.sh /usr/local/bin/qorl-assert-benchmark-config
+COPY --chmod=0555 dump-postgres-state.sh /usr/local/bin/qorl-dump-postgres-state
+COPY --chmod=0555 initdb/001-qorl-bootstrap.sh /docker-entrypoint-initdb.d/001-qorl-bootstrap.sh
 
 RUN set -eux; \
-    test -f /usr/lib/postgresql/16/lib/pg_hint_plan.so; \
-    test -f /usr/share/postgresql/16/extension/pg_hint_plan.control; \
-    cd /usr/lib/postgresql/16/lib; \
-    sha256sum --check /usr/share/qprl/pg_hint_plan.so.sha256; \
+    test -f /usr/lib/postgresql/18/lib/pg_hint_plan.so; \
+    test -f /usr/share/postgresql/18/extension/pg_hint_plan.control; \
+    cd /usr/lib/postgresql/18/lib; \
+    sha256sum --check /usr/share/qorl/pg_hint_plan.so.sha256; \
     grep --fixed-strings "default_version = '${PG_HINT_PLAN_VERSION}'" \
-        /usr/share/postgresql/16/extension/pg_hint_plan.control
+        /usr/share/postgresql/18/extension/pg_hint_plan.control
 
 # Run the full contract check during startup. The very long steady-state
 # interval avoids health probes adding noise to timed benchmark queries; the
 # orchestrator performs explicit pre/post checks for every run.
 HEALTHCHECK --interval=168h --timeout=15s --start-period=1m --start-interval=1s --retries=1 \
-    CMD ["/usr/local/bin/qprl-assert-benchmark-config"]
+    CMD ["/usr/local/bin/qorl-assert-benchmark-config"]
 
-CMD ["postgres", "-c", "config_file=/etc/qprl/benchmark-v1.conf"]
+CMD ["postgres", "-c", "config_file=/etc/qorl/benchmark-v1.conf"]

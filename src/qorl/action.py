@@ -17,7 +17,9 @@ SCAN_METHODS = {"seq", "tid", "index", "index_only", "bitmap"}
 BOOLEAN_SETTINGS = {
     "enable_async_append",
     "enable_bitmapscan",
+    "enable_distinct_reordering",
     "enable_gathermerge",
+    "enable_group_by_reordering",
     "enable_hashagg",
     "enable_hashjoin",
     "enable_incremental_sort",
@@ -33,6 +35,7 @@ BOOLEAN_SETTINGS = {
     "enable_partitionwise_aggregate",
     "enable_partitionwise_join",
     "enable_presorted_aggregate",
+    "enable_self_join_elimination",
     "enable_seqscan",
     "enable_sort",
     "enable_tidscan",
@@ -225,6 +228,7 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             "leading",
             "joins",
             "scans",
+            "disabled_indexes",
             "row_corrections",
             "parallel",
             "settings",
@@ -288,6 +292,28 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
     if scans:
         normalized["scans"] = sorted(scans, key=lambda item: item["relation"])
 
+    disabled_indexes: list[dict[str, Any]] = []
+    disabled_relations: set[str] = set()
+    for index, raw in enumerate(
+        require_list(action.get("disabled_indexes"), "disabled_indexes")
+    ):
+        label = f"disabled_indexes[{index}]"
+        item = require_object(raw, label, {"relation", "indexes"})
+        relation = require_relation(item.get("relation"), catalog, f"{label}.relation")
+        if relation in disabled_relations:
+            raise ActionError(f"{label} duplicates another disabled-index target")
+        disabled_relations.add(relation)
+        indexes = require_indexes(
+            item.get("indexes"), relation, catalog, f"{label}.indexes"
+        )
+        if not indexes:
+            raise ActionError(f"{label}.indexes must contain at least one index")
+        disabled_indexes.append({"relation": relation, "indexes": indexes})
+    if disabled_indexes:
+        normalized["disabled_indexes"] = sorted(
+            disabled_indexes, key=lambda item: item["relation"]
+        )
+
     corrections: list[dict[str, Any]] = []
     correction_targets: set[tuple[str, ...]] = set()
     for index, raw in enumerate(require_list(action.get("row_corrections"), "row_corrections")):
@@ -348,6 +374,26 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         setting = scan_setting.get(item["force"])
         if setting and settings.get(setting) is False:
             raise ActionError(f"action both forces {item['force']} and disables {setting}")
+        disabled = next(
+            (
+                set(target["indexes"])
+                for target in disabled_indexes
+                if target["relation"] == item["relation"]
+            ),
+            set(),
+        )
+        if disabled & set(item["indexes"]):
+            raise ActionError(
+                f"action both forces and disables an index on {item['relation']}"
+            )
+        if (
+            item["force"] in {"index", "index_only", "bitmap"}
+            and disabled
+            and disabled == set(catalog.indexes.get(item["relation"], ()))
+        ):
+            raise ActionError(
+                f"action disables every index for forced scan on {item['relation']}"
+            )
     if any(item["workers"] > 0 for item in parallel) and settings.get(
         "max_parallel_workers_per_gather"
     ) == 0:
@@ -405,6 +451,10 @@ def compile_action(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], st
             hints.append(f"{scan_names[scan['force']]}({arguments})")
         for method in scan["forbid"]:
             hints.append(f"No{scan_names[method]}({scan['relation']})")
+
+    for item in action.get("disabled_indexes", []):
+        arguments = " ".join([item["relation"], *item["indexes"]])
+        hints.append(f"DisableIndex({arguments})")
 
     correction_prefix = {"absolute": "#", "add": "+", "subtract": "-", "multiply": "*"}
     for item in action.get("row_corrections", []):

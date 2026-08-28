@@ -3,13 +3,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from qprl import __version__
-from qprl.benchmark import run_random_benchmark
-from qprl.calibration import calibrate
+from qorl import __version__
+from qorl.benchmark import run_random_benchmark
+from qorl.calibration import calibrate
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(prog="qprl")
+    root = argparse.ArgumentParser(prog="qorl")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
     commands.add_parser(
@@ -31,7 +31,7 @@ def main() -> int:
             else run_random_benchmark(Path.cwd())
         )
     except (RuntimeError, OSError) as error:
-        print(f"qprl: {error}")
+        print(f"qorl: {error}")
         return 1
-    print(f"QPRL {arguments.command} complete: {output_dir}")
+    print(f"QORL {arguments.command} complete: {output_dir}")
     return 0

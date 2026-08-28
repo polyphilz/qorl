@@ -3,17 +3,18 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from qprl.action import ActionError, TaskCatalog, normalize_action
+from qorl.action import ActionError, TaskCatalog, normalize_action
 
 
 SAMPLER_VERSION = 1
 FAMILY_WEIGHTS = {
     "leading": 30,
     "join": 25,
-    "scan": 27,
+    "scan": 25,
     "rows": 10,
     "parallel": 4,
     "setting": 4,
+    "disabled_index": 2,
 }
 
 SETTING_VALUES: dict[str, list[bool | int | float]] = {
@@ -163,6 +164,23 @@ def add_setting(action: dict[str, Any], rng: random.Random) -> None:
     action["settings"] = {name: rng.choice(SETTING_VALUES[name])}
 
 
+def add_disabled_index(
+    action: dict[str, Any], catalog: TaskCatalog, rng: random.Random
+) -> None:
+    relations = sorted(
+        relation for relation, indexes in catalog.indexes.items() if indexes
+    )
+    if not relations:
+        return
+    relation = rng.choice(relations)
+    action["disabled_indexes"] = [
+        {
+            "relation": relation,
+            "indexes": [rng.choice(sorted(catalog.indexes[relation]))],
+        }
+    ]
+
+
 def sample_action(catalog: TaskCatalog, rng: random.Random) -> dict[str, Any]:
     for _ in range(100):
         tree = random_join_tree(catalog, rng)
@@ -181,6 +199,8 @@ def sample_action(catalog: TaskCatalog, rng: random.Random) -> dict[str, Any]:
                 add_parallel(action, catalog, rng)
             elif family == "setting":
                 add_setting(action, rng)
+            elif family == "disabled_index":
+                add_disabled_index(action, catalog, rng)
         try:
             return normalize_action(action, catalog)
         except ActionError:
@@ -201,7 +221,7 @@ def sampler_manifest() -> dict[str, Any]:
         "scan_force_probability": 0.8,
         "named_index_probability_given_index_scan": 0.5,
         "tid_scan_sampling": False,
-        "disabled_index_sampling": False,
+        "disabled_index_sampling": True,
         "setting_values": SETTING_VALUES,
         "postgresql_applicability_filtering": False,
     }

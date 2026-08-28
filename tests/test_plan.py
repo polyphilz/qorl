@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qprl.plan import parse_hint_diagnostics, verify_action
+from qorl.plan import parse_hint_diagnostics, verify_action
 
 
 DIAGNOSTICS = (
@@ -94,6 +94,20 @@ class PlanTest(unittest.TestCase):
         )
         self.assertFalse(result.valid)
         self.assertTrue(any("uses hash, not merge" in error for error in result.errors))
+
+    def test_rejects_disabled_index_in_actual_plan(self) -> None:
+        result = verify_action(
+            {
+                "version": 1,
+                "disabled_indexes": [
+                    {"relation": "b", "indexes": ["b_id_idx"]}
+                ],
+            },
+            PLAN,
+            DIAGNOSTICS,
+        )
+        self.assertFalse(result.valid)
+        self.assertTrue(any("uses disabled indexes" in error for error in result.errors))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ database matches the original build.
 
 The files under `data/raw/job-v1/` are downloaded inputs and remain ignored by
 git. The loader uses the trusted PostgreSQL administrator connection; the model
-and `qprl_runner` never receives loading, indexing, vacuuming, or snapshot tools.
+and `qorl_runner` never receives loading, indexing, vacuuming, or snapshot tools.
 
 ## One-command build
 
@@ -88,13 +88,13 @@ The normal fixture pipeline fetches and verifies that raw source directory.
 ## Exact construction order
 
 1. Verify every downloaded and extracted byte against `job-v1.json`.
-2. Initialize a fresh database with the pinned QPRL PostgreSQL image.
+2. Initialize a fresh database with the pinned QORL PostgreSQL image.
 3. Apply upstream `schema.sql`, import all 21 CSV files, and apply
    `fkindexes.sql`.
 4. Grant the restricted agent read access, run the explicit
    `VACUUM (FREEZE, ANALYZE)` table list, and checkpoint.
 5. Verify row counts, schema, constraints, 44 indexes, statistics, and three
-   representative JOB queries as `qprl_runner`.
+   representative JOB queries as `qorl_runner`.
 6. Capture the environment, stop PostgreSQL cleanly, and create the normalized,
    checksummed physical archive.
 7. Restore into a fresh volume and require every logical and statistical

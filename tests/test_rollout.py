@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from qprl.rollout import RolloutEvaluator, score, task_timeout_ms
-from qprl.worker import ExplainResult
+from qorl.rollout import RolloutEvaluator, score, task_timeout_ms
+from qorl.worker import ExplainResult
 
 
 TASK = {

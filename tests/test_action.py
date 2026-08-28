@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qprl.action import ActionError, TaskCatalog, compile_action
+from qorl.action import ActionError, TaskCatalog, compile_action
 
 
 TASK = {
@@ -61,6 +61,9 @@ class ActionTest(unittest.TestCase):
                         "forbid": ["seq"],
                     }
                 ],
+                "disabled_indexes": [
+                    {"relation": "b", "indexes": ["table_b_pkey"]}
+                ],
                 "joins": [
                     {
                         "relations": ["b", "c"],
@@ -82,6 +85,7 @@ class ActionTest(unittest.TestCase):
             hint,
             "/*+ MergeJoin(b c) NoHashJoin(b c) NoMemoize(b c) "
             "IndexScan(a table_a_value_idx) NoSeqScan(a) "
+            "DisableIndex(b table_b_pkey) "
             "Rows(b c *10) Parallel(c 2 hard) "
             "Set(enable_hashagg off) Set(random_page_cost 1.1) */",
         )
@@ -125,11 +129,18 @@ class ActionTest(unittest.TestCase):
                 self.catalog,
             )
 
-    def test_rejects_unsupported_disabled_index(self) -> None:
-        with self.assertRaisesRegex(ActionError, "unknown fields"):
+    def test_rejects_forced_disabled_index(self) -> None:
+        with self.assertRaisesRegex(ActionError, "both forces and disables"):
             compile_action(
                 {
                     "version": 1,
+                    "scans": [
+                        {
+                            "relation": "a",
+                            "force": "index",
+                            "indexes": ["table_a_pkey"],
+                        }
+                    ],
                     "disabled_indexes": [
                         {"relation": "a", "indexes": ["table_a_pkey"]}
                     ],

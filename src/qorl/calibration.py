@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from qprl import __version__
-from qprl.fixture import JobFixture, sha256_file
-from qprl.worker import PostgresWorker, WorkerError
+from qorl import __version__
+from qorl.fixture import JobFixture, sha256_file
+from qorl.worker import PostgresWorker, WorkerError
 
 
 MEASUREMENT_RUNS = 20
@@ -20,22 +20,31 @@ MIN_WARMUP_RUNS = 2
 MAX_WARMUP_RUNS = 5
 BUFFER_STABILITY_TOLERANCE = 0.02
 STATEMENT_TIMEOUT_MS = 120_000
+PLAN_FINGERPRINT_VERSION = 2
 
 RUNTIME_PLAN_KEYS = {
-    "Actual Startup Time",
-    "Actual Total Time",
-    "Actual Rows",
-    "Actual Loops",
+    "Cache Evictions",
+    "Cache Hits",
+    "Cache Misses",
+    "Cache Overflows",
+    "Hash Batches",
+    "Hash Buckets",
     "Heap Fetches",
     "I/O Read Time",
     "I/O Write Time",
-    "Rows Removed by Filter",
-    "Rows Removed by Index Recheck",
-    "WAL Records",
-    "WAL FPI",
-    "WAL Bytes",
+    "Index Searches",
+    "Maximum Storage",
+    "Original Hash Batches",
+    "Original Hash Buckets",
+    "Peak Memory Usage",
+    "Sort Method",
+    "Sort Space Type",
+    "Sort Space Used",
+    "Storage",
     "Workers",
+    "Workers Launched",
 }
+RUNTIME_PLAN_PREFIXES = ("Actual ", "Rows Removed by ", "WAL ")
 
 
 def utc_now() -> str:
@@ -63,7 +72,9 @@ def canonical_plan(value: Any) -> Any:
     return {
         key: canonical_plan(item)
         for key, item in value.items()
-        if key not in RUNTIME_PLAN_KEYS and not key.endswith(" Blocks")
+        if key not in RUNTIME_PLAN_KEYS
+        and not key.startswith(RUNTIME_PLAN_PREFIXES)
+        and not key.endswith(" Blocks")
     }
 
 
@@ -128,6 +139,7 @@ def calibrate_task(
     fingerprints = sorted({item["plan_sha256"] for item in measurements})
     return {
         "schema_version": 1,
+        "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
         "task_id": task["task_id"],
         "template_id": task["template_id"],
         "status": "completed",
@@ -168,7 +180,7 @@ def calibrate(repository: Path) -> Path:
         "database": fixture.inventory["database"],
         "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "orchestrator": {
-            "qprl_version": __version__,
+            "qorl_version": __version__,
             "python_version": platform.python_version(),
         },
         "protocol": {
@@ -179,6 +191,7 @@ def calibrate(repository: Path) -> Path:
             "buffer_stability_relative_tolerance": BUFFER_STABILITY_TOLERANCE,
             "measurement_runs": MEASUREMENT_RUNS,
             "coefficient_of_variation": "sample standard deviation / arithmetic mean",
+            "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
         },
         "task_count": fixture.inventory["task_count"],
         "completed_task_count": 0,
@@ -187,7 +200,7 @@ def calibrate(repository: Path) -> Path:
     manifest_path = output_dir / "calibration.json"
     write_json(manifest_path, manifest)
 
-    project_name = f"qprl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
+    project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
     try:
         with PostgresWorker(fixture, project_name) as worker:

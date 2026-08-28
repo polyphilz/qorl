@@ -1,4 +1,4 @@
-# QPRL PostgreSQL image
+# QORL PostgreSQL image
 
 This directory builds the shared server image used by every PostgreSQL worker.
 
@@ -21,15 +21,15 @@ PostgreSQL base image, then *build* our thin project-specific image on top.
 
 ## What is pinned
 
-- PostgreSQL `16.15` on Debian Bookworm, by Docker image index digest.
+- PostgreSQL `18.6` on Debian Bookworm, by Docker image index digest.
 - The benchmark image platform, `linux/amd64`.
-- `pg_hint_plan` `1.6.2`, by tag, commit, and source-archive SHA-256.
+- `pg_hint_plan` `1.8.0`, by tag, commit, and source-archive SHA-256.
 
 See `versions.json` for the machine-readable provenance. A successful build
 produces a new project image. Its resulting image ID/digest must also be stored
 in each experiment manifest; the inputs above do not substitute for recording
 the actual output artifact. The image also carries the complete builder package
-list and a SHA-256 for the compiled extension under `/usr/share/qprl/`.
+list and a SHA-256 for the compiled extension under `/usr/share/qorl/`.
 
 Bookworm is explicit rather than relying on the floating default Debian suite.
 It also gives us the normal glibc/PGDG build environment for a C extension,
@@ -45,10 +45,12 @@ which is less surprising here than Alpine/musl.
 - The versioned `benchmark-v1` contract: explicit stock PostgreSQL planner,
   memory, cost, GEQO, and parallel settings; JIT disabled; and the unused
   logical-replication launcher disabled.
+- PostgreSQL 18's stock asynchronous-I/O policy: the worker I/O method, three
+  I/O workers, and its I/O concurrency and combine limits.
 - UTC logging/time settings, explicit durable PostgreSQL defaults, and
   startup assertions over every experiment-critical value.
 - A bootstrap superuser supplied at runtime and a minimally privileged
-  `qprl_runner` login whose default transactions are read-only.
+  `qorl_runner` login whose default transactions are read-only.
 
 `CREATE EXTENSION pg_hint_plan` is run even though comment hints only require
 the library to be loaded. This makes the installed extension version directly
@@ -64,7 +66,7 @@ itself remains disabled.
   do not need them, and mixing those layers would make every code change rebuild
   a large database image.
 - Hardware-tuned memory or cost-model values. The primary baseline explicitly
-  preserves PostgreSQL 16.15's stock values; any hardware-tuned comparison
+  preserves PostgreSQL 18.6's stock values; any hardware-tuned comparison
   will be a separately labeled secondary baseline.
 - A fixed `statement_timeout`. The protocol requires a task-relative timeout;
   the trusted harness will apply it per transaction.
@@ -74,9 +76,9 @@ itself remains disabled.
 - `benchmark-v1.conf` is the complete versioned PostgreSQL configuration.
 - `benchmark-v1.expected.json` is the machine-readable identity, critical
   settings, role, background-process, and container-runtime contract.
-- `qprl-assert-benchmark-config` fails if the running server, worker role, or
+- `qorl-assert-benchmark-config` fails if the running server, worker role, or
   container limits differ from that contract.
-- `qprl-dump-postgres-state` emits the effective PostgreSQL identity, every
+- `qorl-dump-postgres-state` emits the effective PostgreSQL identity, every
   setting, every value differing from PostgreSQL's compiled default, and
   `SHOW ALL` as the actual benchmark role.
 - `scripts/capture-benchmark-environment.py` combines those database artifacts
@@ -118,7 +120,7 @@ be exercised with an explicit output directory:
 
 ```bash
 python3 scripts/capture-benchmark-environment.py \
-  --output-dir /tmp/qprl-environment-smoke \
+  --output-dir /tmp/qorl-environment-smoke \
   --phase pre
 ```
 
@@ -138,13 +140,13 @@ intentionally not part of the normal workflow.
 Every worker on a single Docker host can refer to the same local tag:
 
 ```text
-qprl-postgres:16.15-pg_hint_plan-1.6.2
+qorl-postgres:18.6-pg_hint_plan-1.8.0
 ```
 
 Record the local content-addressed image ID with:
 
 ```bash
-docker image inspect qprl-postgres:16.15-pg_hint_plan-1.6.2 \
+docker image inspect qorl-postgres:18.6-pg_hint_plan-1.8.0 \
   --format '{{.Id}}'
 ```
 

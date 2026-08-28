@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${QPRL_RUNNER_PASSWORD:?QPRL_RUNNER_PASSWORD is required}"
+: "${QORL_RUNNER_PASSWORD:?QORL_RUNNER_PASSWORD is required}"
 
 database_name="${POSTGRES_DB:-$POSTGRES_USER}"
 
@@ -15,10 +15,10 @@ admin_psql=(
     --quiet
 )
 
-PGAPPNAME=qprl-config-assert "${admin_psql[@]}" <<'SQL'
+PGAPPNAME=qorl-config-assert "${admin_psql[@]}" <<'SQL'
 DO $assert$
 DECLARE
-    contract jsonb := pg_read_file('/usr/share/qprl/benchmark-v1.expected.json')::jsonb;
+    contract jsonb := pg_read_file('/usr/share/qorl/benchmark-v1.expected.json')::jsonb;
     mismatch text;
     actual_value text;
 BEGIN
@@ -64,7 +64,7 @@ BEGIN
         RAISE EXCEPTION 'PostgreSQL configuration-file errors:%', E'\n' || mismatch;
     END IF;
 
-    actual_value := current_setting('qprl.benchmark_config_id', true);
+    actual_value := current_setting('qorl.benchmark_config_id', true);
     IF actual_value IS DISTINCT FROM contract ->> 'benchmark_config_id' THEN
         RAISE EXCEPTION 'benchmark config ID expected=% actual=%',
             contract ->> 'benchmark_config_id', actual_value;
@@ -135,31 +135,31 @@ END
 $assert$;
 SQL
 
-PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
-PGAPPNAME=qprl-runner-config-assert \
+PGPASSWORD="$QORL_RUNNER_PASSWORD" \
+PGAPPNAME=qorl-runner-config-assert \
 psql \
     --host 127.0.0.1 \
-    --username qprl_runner \
+    --username qorl_runner \
     --dbname "$database_name" \
     --no-psqlrc \
     --set ON_ERROR_STOP=1 \
     --quiet <<'SQL'
 DO $assert$
 BEGIN
-    IF current_user IS DISTINCT FROM 'qprl_runner' THEN
-        RAISE EXCEPTION 'expected qprl_runner login, actual=%', current_user;
+    IF current_user IS DISTINCT FROM 'qorl_runner' THEN
+        RAISE EXCEPTION 'expected qorl_runner login, actual=%', current_user;
     END IF;
 
     IF current_setting('default_transaction_read_only') IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION 'qprl_runner default_transaction_read_only is not on';
+        RAISE EXCEPTION 'qorl_runner default_transaction_read_only is not on';
     END IF;
 
     IF current_setting('transaction_read_only') IS DISTINCT FROM 'on' THEN
-        RAISE EXCEPTION 'qprl_runner transaction_read_only is not on';
+        RAISE EXCEPTION 'qorl_runner transaction_read_only is not on';
     END IF;
 
     IF current_setting('search_path') IS DISTINCT FROM 'public, pg_catalog' THEN
-        RAISE EXCEPTION 'qprl_runner search_path expected=% actual=%',
+        RAISE EXCEPTION 'qorl_runner search_path expected=% actual=%',
             'public, pg_catalog', current_setting('search_path');
     END IF;
 END
@@ -177,33 +177,33 @@ assert_equal() {
     fi
 }
 
-if [[ "${QPRL_ASSERT_RUNTIME:-0}" == "1" ]]; then
-    : "${QPRL_EXPECTED_CPUSET:?QPRL_EXPECTED_CPUSET is required}"
-    : "${QPRL_EXPECTED_CPUSET_MEMS:?QPRL_EXPECTED_CPUSET_MEMS is required}"
-    : "${QPRL_EXPECTED_MEMORY_BYTES:?QPRL_EXPECTED_MEMORY_BYTES is required}"
-    : "${QPRL_EXPECTED_MEMORY_SWAP_BYTES:?QPRL_EXPECTED_MEMORY_SWAP_BYTES is required}"
-    : "${QPRL_EXPECTED_SHM_BYTES:?QPRL_EXPECTED_SHM_BYTES is required}"
+if [[ "${QORL_ASSERT_RUNTIME:-0}" == "1" ]]; then
+    : "${QORL_EXPECTED_CPUSET:?QORL_EXPECTED_CPUSET is required}"
+    : "${QORL_EXPECTED_CPUSET_MEMS:?QORL_EXPECTED_CPUSET_MEMS is required}"
+    : "${QORL_EXPECTED_MEMORY_BYTES:?QORL_EXPECTED_MEMORY_BYTES is required}"
+    : "${QORL_EXPECTED_MEMORY_SWAP_BYTES:?QORL_EXPECTED_MEMORY_SWAP_BYTES is required}"
+    : "${QORL_EXPECTED_SHM_BYTES:?QORL_EXPECTED_SHM_BYTES is required}"
 
     cpus_allowed="$(awk '/^Cpus_allowed_list:/ {print $2}' /proc/self/status)"
     mems_allowed="$(awk '/^Mems_allowed_list:/ {print $2}' /proc/self/status)"
-    assert_equal "Cpus_allowed_list" "$QPRL_EXPECTED_CPUSET" "$cpus_allowed"
-    assert_equal "Mems_allowed_list" "$QPRL_EXPECTED_CPUSET_MEMS" "$mems_allowed"
+    assert_equal "Cpus_allowed_list" "$QORL_EXPECTED_CPUSET" "$cpus_allowed"
+    assert_equal "Mems_allowed_list" "$QORL_EXPECTED_CPUSET_MEMS" "$mems_allowed"
 
     test -r /sys/fs/cgroup/memory.max
     test -r /sys/fs/cgroup/memory.swap.max
     assert_equal \
         "cgroup memory.max" \
-        "$QPRL_EXPECTED_MEMORY_BYTES" \
+        "$QORL_EXPECTED_MEMORY_BYTES" \
         "$(</sys/fs/cgroup/memory.max)"
     assert_equal \
         "cgroup memory.swap.max" \
-        "$QPRL_EXPECTED_MEMORY_SWAP_BYTES" \
+        "$QORL_EXPECTED_MEMORY_SWAP_BYTES" \
         "$(</sys/fs/cgroup/memory.swap.max)"
 
     read -r shm_block_size shm_blocks \
         < <(stat --file-system --format='%S %b' /dev/shm)
     shm_size_bytes=$((shm_block_size * shm_blocks))
-    assert_equal "shared memory bytes" "$QPRL_EXPECTED_SHM_BYTES" "$shm_size_bytes"
+    assert_equal "shared memory bytes" "$QORL_EXPECTED_SHM_BYTES" "$shm_size_bytes"
 fi
 
-echo "QPRL benchmark-v1 configuration assertions passed."
+echo "QORL benchmark-v1 configuration assertions passed."

@@ -3,8 +3,8 @@ from __future__ import annotations
 import random
 import unittest
 
-from qprl.action import TaskCatalog, normalize_action
-from qprl.random_policy import FAMILY_WEIGHTS, sample_action
+from qorl.action import TaskCatalog, normalize_action
+from qorl.random_policy import FAMILY_WEIGHTS, sample_action
 
 
 TASK = {
@@ -48,6 +48,7 @@ class RandomPolicyTest(unittest.TestCase):
             "row_corrections": "rows",
             "parallel": "parallel",
             "settings": "setting",
+            "disabled_indexes": "disabled_index",
         }
         for _ in range(2_000):
             action = sample_action(self.catalog, rng)

@@ -1,33 +1,33 @@
-name: qprl
+name: qorl
 
 services:
   postgres:
-    image: qprl-postgres:16.15-pg_hint_plan-1.6.2
+    image: qorl-postgres:18.6-pg_hint_plan-1.8.0
     platform: linux/amd64
     build:
       context: ./docker/postgres
       dockerfile: Dockerfile
     environment:
-      POSTGRES_DB: qprl
-      POSTGRES_USER: qprl_admin
-      POSTGRES_PASSWORD: ${QPRL_POSTGRES_PASSWORD:?Set QPRL_POSTGRES_PASSWORD in .env}
-      QPRL_RUNNER_PASSWORD: ${QPRL_RUNNER_PASSWORD:?Set QPRL_RUNNER_PASSWORD in .env}
+      POSTGRES_DB: qorl
+      POSTGRES_USER: qorl_admin
+      POSTGRES_PASSWORD: ${QORL_POSTGRES_PASSWORD:?Set QORL_POSTGRES_PASSWORD in .env}
+      QORL_RUNNER_PASSWORD: ${QORL_RUNNER_PASSWORD:?Set QORL_RUNNER_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C --data-checksums
-      QPRL_ASSERT_RUNTIME: "1"
-      QPRL_EXPECTED_CPUSET: 8-15,24-31
-      QPRL_EXPECTED_CPUSET_MEMS: "0"
-      QPRL_EXPECTED_MEMORY_BYTES: "34359738368"
-      QPRL_EXPECTED_MEMORY_SWAP_BYTES: "0"
-      QPRL_EXPECTED_SHM_BYTES: "1073741824"
+      QORL_ASSERT_RUNTIME: "1"
+      QORL_EXPECTED_CPUSET: 8-15,24-31
+      QORL_EXPECTED_CPUSET_MEMS: "0"
+      QORL_EXPECTED_MEMORY_BYTES: "34359738368"
+      QORL_EXPECTED_MEMORY_SWAP_BYTES: "0"
+      QORL_EXPECTED_SHM_BYTES: "1073741824"
     ports:
-      - 127.0.0.1:${QPRL_POSTGRES_PORT:-55432}:5432
+      - 127.0.0.1:${QORL_POSTGRES_PORT:-55432}:5432
     cpuset: 8-15,24-31
     mem_limit: 32g
     memswap_limit: 32g
     shm_size: 1g
     stop_grace_period: 1m
     volumes:
-      - qprl-postgres-data:/var/lib/postgresql/data
+      - qorl-postgres-data:/var/lib/postgresql
 
 volumes:
-  qprl-postgres-data:
+  qorl-postgres-data:

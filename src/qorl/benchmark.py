@@ -8,18 +8,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from qprl import __version__
-from qprl.calibration import utc_now, write_json
-from qprl.fixture import JobFixture, sha256_file
-from qprl.random_policy import sample_action, sampler_manifest
-from qprl.rollout import (
+from qorl import __version__
+from qorl.calibration import PLAN_FINGERPRINT_VERSION, utc_now, write_json
+from qorl.fixture import JobFixture, sha256_file
+from qorl.random_policy import sample_action, sampler_manifest
+from qorl.rollout import (
     DEFAULT_MEASUREMENTS,
     FINAL_PAIRS,
     GLOBAL_TIMEOUT_MS,
     MAX_CANDIDATES,
     RolloutEvaluator,
 )
-from qprl.worker import PostgresWorker, WorkerError
+from qorl.worker import PostgresWorker, WorkerError
 
 
 RUN_SEED = 20260827
@@ -133,7 +133,7 @@ def run_random_benchmark(repository: Path) -> Path:
             fixture.snapshot_manifest_path
         ),
         "orchestrator": {
-            "qprl_version": __version__,
+            "qorl_version": __version__,
             "python_version": platform.python_version(),
         },
         "policy": {
@@ -143,6 +143,7 @@ def run_random_benchmark(repository: Path) -> Path:
             "sampler": sampler_manifest(),
         },
         "protocol": {
+            "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
             "default_warmup_runs": 1,
             "default_measurement_runs": DEFAULT_MEASUREMENTS,
             "novel_candidate_warmup_runs": 1,
@@ -165,7 +166,7 @@ def run_random_benchmark(repository: Path) -> Path:
     write_json(manifest_path, manifest)
 
     project_name = (
-        f"qprl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
+        f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     )
     results: list[dict[str, Any]] = []
     try:

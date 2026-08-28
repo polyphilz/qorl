@@ -4,10 +4,10 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from qprl.fixture import JobFixture
+from qorl.fixture import JobFixture
 
 
 class WorkerError(RuntimeError):
@@ -145,19 +145,25 @@ class PostgresWorker:
                 "inspect",
                 self.container,
                 "--format",
-                "{{range .Mounts}}{{if eq .Destination \"/var/lib/postgresql/data\"}}{{.Name}}{{end}}{{end}}",
+                "{{range .Mounts}}{{if eq .Destination \"/var/lib/postgresql\"}}{{.Name}}{{end}}{{end}}",
             ]
         ).strip()
         if not volume:
             raise WorkerError("Docker did not create the PostgreSQL data volume")
 
         archive = self.fixture.archive_path
+        relative = PurePosixPath(
+            self.fixture.snapshot["postgresql"]["pgdata_volume_relative_path"]
+        )
+        if relative.is_absolute() or ".." in relative.parts:
+            raise WorkerError("job-v1 snapshot contains an invalid PGDATA path")
         restore_script = r"""
 test -z "$(find /target -mindepth 1 -print -quit)"
+mkdir -p "/target/$2"
 gzip --decompress --stdout "/snapshot/$1" \
-    | tar --extract --directory=/target --numeric-owner
-test -f /target/PG_VERSION
-test ! -e /target/postmaster.pid
+    | tar --extract --directory="/target/$2" --numeric-owner
+test -f "/target/$2/PG_VERSION"
+test ! -e "/target/$2/postmaster.pid"
 """
         self.command(
             [
@@ -176,8 +182,9 @@ test ! -e /target/postmaster.pid
                 "pipefail",
                 "-c",
                 restore_script,
-                "qprl-restore",
+                "qorl-restore",
                 archive.name,
+                str(relative),
             ]
         )
 
@@ -185,7 +192,7 @@ test ! -e /target/postmaster.pid
         self.compose_command("up", "--detach", "--wait", "--no-build", "postgres")
         self.container = self.compose_command("ps", "--quiet", "postgres").strip()
         self.command(
-            ["docker", "exec", self.container, "qprl-assert-benchmark-config"]
+            ["docker", "exec", self.container, "qorl-assert-benchmark-config"]
         )
         actual_system_identifier = self.admin_sql(
             "SELECT system_identifier FROM pg_control_system();"
@@ -248,12 +255,12 @@ exec psql \
         )
         shell = rf"""
 exec env \
-    PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
-    PGAPPNAME=qprl-worker \
+    PGPASSWORD="$QORL_RUNNER_PASSWORD" \
+    PGAPPNAME=qorl-worker \
     PGOPTIONS="-c statement_timeout={timeout_ms}{debug_options}" \
     psql \
         --host=127.0.0.1 \
-        --username=qprl_runner \
+        --username=qorl_runner \
         --dbname="${{POSTGRES_DB:-$POSTGRES_USER}}" \
         --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
 """

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 raw_dir="$repository_root/data/raw/job-v1"
-project_name="qprl-job-v1-restore"
+project_name="qorl-job-v1-restore"
 snapshot_manifest=""
 build_verification=""
 output_dir=""
@@ -72,6 +72,10 @@ print(manifest["archive"]["sha256"])
 print(manifest["image"]["id"])
 print(manifest["image"]["reference"])
 print(str(manifest_path.parent / archive_name))
+relative = Path(manifest["postgresql"]["pgdata_volume_relative_path"])
+if relative.is_absolute() or ".." in relative.parts:
+    raise SystemExit("invalid PGDATA path in snapshot manifest")
+print(relative.as_posix())
 PY
 )
 
@@ -79,6 +83,7 @@ expected_archive_sha256="${snapshot_fields[0]}"
 snapshot_image_id="${snapshot_fields[1]}"
 snapshot_image_reference="${snapshot_fields[2]}"
 archive_path="${snapshot_fields[3]}"
+pgdata_relative_path="${snapshot_fields[4]}"
 
 actual_archive_sha256="$(sha256sum "$archive_path" | awk '{print $1}')"
 if [[ "$actual_archive_sha256" != "$expected_archive_sha256" ]]; then
@@ -92,8 +97,8 @@ if [[ "$actual_image_id" != "$snapshot_image_id" ]]; then
     exit 1
 fi
 
-export QPRL_JOB_DATA_DIR="$raw_dir/imdb"
-export QPRL_JOB_SOURCE_DIR="$raw_dir/source"
+export QORL_JOB_DATA_DIR="$raw_dir/imdb"
+export QORL_JOB_SOURCE_DIR="$raw_dir/source"
 compose=(
     docker compose
     --project-name "$project_name"
@@ -103,7 +108,7 @@ compose=(
 
 "${compose[@]}" config --quiet
 
-volume_name="${project_name}_qprl-postgres-data"
+volume_name="${project_name}_qorl-postgres-data"
 if docker volume inspect "$volume_name" >/dev/null 2>&1; then
     echo "refusing to restore into existing Docker volume: $volume_name" >&2
     exit 1
@@ -117,7 +122,7 @@ trap 'echo "JOB restore verification failed; Compose project retained for diagno
 
 "${compose[@]}" create --no-build postgres
 container="$("${compose[@]}" ps --all --quiet postgres)"
-volume_name="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}')"
+volume_name="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}')"
 if [[ -z "$volume_name" ]]; then
     echo "could not identify the restore PGDATA volume" >&2
     exit 1
@@ -134,11 +139,12 @@ docker run \
     "$snapshot_image_id" \
     -Eeuo pipefail -c '
         test -z "$(find /target -mindepth 1 -print -quit)"
+        mkdir -p "/target/$1"
         gzip --decompress --stdout "/snapshot/'"$archive_name"'" \
-            | tar --extract --directory=/target --numeric-owner
-        test -f /target/PG_VERSION
-        test ! -e /target/postmaster.pid
-    '
+            | tar --extract --directory="/target/$1" --numeric-owner
+        test -f "/target/$1/PG_VERSION"
+        test ! -e "/target/$1/postmaster.pid"
+    ' qorl-restore "$pgdata_relative_path"
 
 "${compose[@]}" up --detach --wait --no-build postgres
 container="$("${compose[@]}" ps --quiet postgres)"

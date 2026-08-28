@@ -213,6 +213,20 @@ def verify_action(
                     f"scan {item['relation']} uses unexpected indexes: {sorted(used)}"
                 )
 
+    for item in action.get("disabled_indexes", []):
+        scan = matching_scan(plan, item["relation"])
+        if scan is None:
+            errors.append(
+                f"disabled-index target does not exist in the plan: {item['relation']}"
+            )
+            continue
+        used = index_names(scan)
+        forbidden = used & set(item["indexes"])
+        if forbidden:
+            errors.append(
+                f"scan {item['relation']} uses disabled indexes: {sorted(forbidden)}"
+            )
+
     for item in action.get("parallel", []):
         scan = matching_scan(plan, item["relation"])
         if scan is None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qprl.benchmark import summarize
+from qorl.benchmark import summarize
 
 
 class BenchmarkTest(unittest.TestCase):

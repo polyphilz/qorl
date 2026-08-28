@@ -4,7 +4,7 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 raw_dir="$repository_root/data/raw/job-v1"
-project_name="qprl-job-v1-build"
+project_name="qorl-job-v1-build"
 skip_fetch=0
 
 usage() {
@@ -45,8 +45,8 @@ if ((skip_fetch == 0)); then
 fi
 
 raw_dir="$(cd -- "$raw_dir" && pwd)"
-export QPRL_JOB_DATA_DIR="$raw_dir/imdb"
-export QPRL_JOB_SOURCE_DIR="$raw_dir/source"
+export QORL_JOB_DATA_DIR="$raw_dir/imdb"
+export QORL_JOB_SOURCE_DIR="$raw_dir/source"
 
 compose=(
     docker compose
@@ -57,7 +57,7 @@ compose=(
 
 "${compose[@]}" config --quiet
 
-volume_name="${project_name}_qprl-postgres-data"
+volume_name="${project_name}_qorl-postgres-data"
 if docker volume inspect "$volume_name" >/dev/null 2>&1; then
     echo "refusing to load into existing Docker volume: $volume_name" >&2
     exit 1
@@ -113,7 +113,7 @@ docker exec --interactive "$container" bash -Eeuo pipefail -c '
         --file=-
 ' < "$script_dir/finalize-job-v1.sql"
 
-docker exec "$container" qprl-assert-benchmark-config
+docker exec "$container" qorl-assert-benchmark-config
 
 trap - ERR
 printf 'job-v1 load and finalization passed: project=%s container=%s volume=%s\n' \

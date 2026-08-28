@@ -1,4 +1,4 @@
-from qprl.cli import main
+from qorl.cli import main
 
 
 raise SystemExit(main())

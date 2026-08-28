@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture the QPRL worker environment without recording container secrets.
+"""Capture the QORL worker environment without recording container secrets.
 
 The benchmark orchestrator will call this before and after a run. It is also a
 standalone primitive for smoke tests while the orchestrator is being built.
@@ -248,10 +248,10 @@ printf 'shm_size_bytes=%s\n' "$((shm_block_size * shm_blocks))"
 
 def image_file_digests(container: str) -> dict[str, str]:
     paths = (
-        "/etc/qprl/benchmark-v1.conf",
-        "/usr/share/qprl/benchmark-v1.expected.json",
-        "/usr/share/qprl/versions.json",
-        "/usr/lib/postgresql/16/lib/pg_hint_plan.so",
+        "/etc/qorl/benchmark-v1.conf",
+        "/usr/share/qorl/benchmark-v1.expected.json",
+        "/usr/share/qorl/versions.json",
+        "/usr/lib/postgresql/18/lib/pg_hint_plan.so",
     )
     output = run(["docker", "exec", container, "sha256sum", *paths])
     return {
@@ -305,7 +305,7 @@ def capture_postgres(container: str, mode: str) -> str:
             "docker",
             "exec",
             container,
-            "/usr/local/bin/qprl-dump-postgres-state",
+            "/usr/local/bin/qorl-dump-postgres-state",
             mode,
         ]
     )
@@ -320,7 +320,7 @@ def main() -> None:
 
     container = resolve_container(args.container)
     assertion_output = run(
-        ["docker", "exec", container, "/usr/local/bin/qprl-assert-benchmark-config"]
+        ["docker", "exec", container, "/usr/local/bin/qorl-assert-benchmark-config"]
     ).strip()
 
     artifact_contents = {

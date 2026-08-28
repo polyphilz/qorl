@@ -1,12 +1,13 @@
-# QPRL
+# QORL
 
-QPRL is a focused research harness for training and evaluating an agent that
-steers PostgreSQL query plans.
+QORL (Query Optimization with Reinforcement Learning) is a focused research
+harness for training and evaluating an agent that steers PostgreSQL's query
+optimizer toward faster physical plans.
 
 ```bash
 uv sync
-uv run qprl calibrate
-uv run qprl run
+uv run qorl calibrate
+uv run qorl run
 ```
 
 `calibrate` restores the pinned JOB snapshot, starts one isolated PostgreSQL

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qprl.calibration import buffers_stable, observation, plan_sha256
+from qorl.calibration import buffers_stable, observation, plan_sha256
 
 
 def explain(*, rows: int = 10, hits: int = 100, reads: int = 5) -> dict:
@@ -24,7 +24,29 @@ def explain(*, rows: int = 10, hits: int = 100, reads: int = 5) -> dict:
 class CalibrationTest(unittest.TestCase):
     def test_plan_fingerprint_ignores_runtime_observations(self) -> None:
         first = explain(rows=10, hits=100, reads=5)["Plan"]
+        first.update(
+            {
+                "Cache Hits": 10,
+                "Hash Batches": 1,
+                "Index Searches": 3,
+                "Peak Memory Usage": 12,
+                "Rows Removed by Join Filter": 4,
+                "Sort Space Used": 8,
+                "Workers Launched": 2,
+            }
+        )
         second = explain(rows=20, hits=200, reads=9)["Plan"]
+        second.update(
+            {
+                "Cache Hits": 100,
+                "Hash Batches": 2,
+                "Index Searches": 30,
+                "Peak Memory Usage": 24,
+                "Rows Removed by Join Filter": 40,
+                "Sort Space Used": 16,
+                "Workers Launched": 1,
+            }
+        )
         self.assertEqual(plan_sha256(first), plan_sha256(second))
 
     def test_plan_fingerprint_detects_physical_plan_change(self) -> None:

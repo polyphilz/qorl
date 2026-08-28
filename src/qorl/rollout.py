@@ -5,11 +5,11 @@ import random
 import statistics
 from typing import Any
 
-from qprl.action import ActionError, TaskCatalog, compile_action
-from qprl.calibration import plan_sha256
-from qprl.fixture import JobFixture
-from qprl.plan import Verification, compact_plan, hint_status, verify_action
-from qprl.worker import ExplainResult, PostgresWorker, WorkerError
+from qorl.action import ActionError, TaskCatalog, compile_action
+from qorl.calibration import plan_sha256
+from qorl.fixture import JobFixture
+from qorl.plan import Verification, compact_plan, hint_status, verify_action
+from qorl.worker import ExplainResult, PostgresWorker, WorkerError
 
 
 DEFAULT_MEASUREMENTS = 3

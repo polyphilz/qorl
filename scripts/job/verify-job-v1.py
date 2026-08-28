@@ -87,11 +87,11 @@ exec psql \
 def runner_psql(container: str, sql: str) -> str:
     shell = r'''
 exec env \
-    PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
-    PGAPPNAME=qprl-job-v1-query-verifier \
+    PGPASSWORD="$QORL_RUNNER_PASSWORD" \
+    PGAPPNAME=qorl-job-v1-query-verifier \
     psql \
         --host=127.0.0.1 \
-        --username=qprl_runner \
+        --username=qorl_runner \
         --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
         --no-psqlrc \
         --set=ON_ERROR_STOP=1 \
@@ -368,7 +368,7 @@ def main() -> None:
             "docker",
             "exec",
             args.container,
-            "/usr/local/bin/qprl-assert-benchmark-config",
+            "/usr/local/bin/qorl-assert-benchmark-config",
         ]
     )
 

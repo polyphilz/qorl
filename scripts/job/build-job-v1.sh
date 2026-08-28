@@ -5,8 +5,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 raw_dir="$repository_root/data/raw/job-v1"
 output_dir="$repository_root/artifacts/job-v1"
-build_project="qprl-job-v1-build"
-restore_project="qprl-job-v1-restore"
+build_project="qorl-job-v1-build"
+restore_project="qorl-job-v1-restore"
 
 usage() {
     echo "usage: $0 [--raw-dir PATH] [--output-dir PATH] [--build-project NAME] [--restore-project NAME]" >&2
@@ -72,8 +72,8 @@ cp "$repository_root/data/manifests/job-v1.json" "$source_manifest_copy"
     --project-name "$build_project" \
     --skip-fetch
 
-export QPRL_JOB_DATA_DIR="$raw_dir/imdb"
-export QPRL_JOB_SOURCE_DIR="$raw_dir/source"
+export QORL_JOB_DATA_DIR="$raw_dir/imdb"
+export QORL_JOB_SOURCE_DIR="$raw_dir/source"
 compose=(
     docker compose
     --project-name "$build_project"
@@ -81,7 +81,7 @@ compose=(
     --file "$repository_root/compose.job.yaml"
 )
 container="$("${compose[@]}" ps --quiet postgres)"
-build_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}')"
+build_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}')"
 if [[ -z "$build_volume" ]]; then
     echo "could not identify the build PGDATA volume" >&2
     exit 1

@@ -1,7 +1,7 @@
 \set ON_ERROR_STOP on
 \timing on
 
-SET application_name = 'qprl-job-v1-finalizer';
+SET application_name = 'qorl-job-v1-finalizer';
 SET statement_timeout = 0;
 
 VACUUM (FREEZE, ANALYZE)

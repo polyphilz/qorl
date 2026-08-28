@@ -56,7 +56,7 @@ def download(url: str, target: Path, spec: dict[str, Any]) -> None:
 
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.part.{os.getpid()}")
-    request = urllib.request.Request(url, headers={"User-Agent": "qprl-job-v1-loader/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "qorl-job-v1-loader/1"})
     downloaded = 0
     next_progress = 128 * 1024 * 1024
     try:

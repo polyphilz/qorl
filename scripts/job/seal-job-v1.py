@@ -10,7 +10,7 @@ import os
 import subprocess
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -89,14 +89,22 @@ def main() -> None:
             f"PostgreSQL container exited unsuccessfully: {container['State']['ExitCode']}"
         )
 
-    data_mounts = [
-        mount
-        for mount in container["Mounts"]
-        if mount["Destination"] == "/var/lib/postgresql/data"
-    ]
+    environment = dict(
+        item.split("=", 1)
+        for item in container["Config"]["Env"]
+        if "=" in item
+    )
+    pgdata = PurePosixPath(environment["PGDATA"])
+    data_mounts = []
+    for mount in container["Mounts"]:
+        destination = PurePosixPath(mount["Destination"])
+        if pgdata == destination or destination in pgdata.parents:
+            data_mounts.append(mount)
     if len(data_mounts) != 1 or data_mounts[0]["Type"] != "volume":
         raise RuntimeError("container must have one named PGDATA volume")
-    volume_name = data_mounts[0]["Name"]
+    data_mount = data_mounts[0]
+    volume_name = data_mount["Name"]
+    pgdata_relative_path = pgdata.relative_to(data_mount["Destination"])
 
     image_reference = container["Config"]["Image"]
     image_id = container["Image"]
@@ -119,12 +127,13 @@ def main() -> None:
     archive_script = f"""
 set -Eeuo pipefail
 partial=/output/{partial.name}
+source=/source/$1
 trap 'chown {uid}:{gid} "$partial" 2>/dev/null || true' EXIT
-test -f /source/PG_VERSION
-test ! -e /source/postmaster.pid
+test -f "$source/PG_VERSION"
+test ! -e "$source/postmaster.pid"
 tar \
     --create \
-    --directory=/source \
+    --directory="$source" \
     --sort=name \
     --mtime=@0 \
     --owner=999 \
@@ -154,6 +163,8 @@ test -s "$partial"
                 "pipefail",
                 "-c",
                 archive_script,
+                "qorl-seal",
+                str(pgdata_relative_path),
             ]
         )
         partial.replace(archive)
@@ -176,7 +187,7 @@ test -s "$partial"
         "snapshot_id": f"job-v1-sha256-{archive_sha256[:16]}",
         "fixture_id": manifest["fixture_id"],
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "format": "qprl-pgdata-tar-gzip-v1",
+        "format": "qorl-pgdata-tar-gzip-v1",
         "archive": {
             "filename": archive.name,
             "bytes": archive.stat().st_size,
@@ -199,6 +210,9 @@ test -s "$partial"
             "server_version_num": verification["database"]["identity"][
                 "server_version_num"
             ],
+            "pgdata": str(pgdata),
+            "volume_destination": data_mount["Destination"],
+            "pgdata_volume_relative_path": str(pgdata_relative_path),
             "clean_shutdown": True,
         },
         "image": {
@@ -207,7 +221,7 @@ test -s "$partial"
             "architecture": image["Architecture"],
             "os": image["Os"],
             "benchmark_config_id": (image["Config"].get("Labels") or {}).get(
-                "io.qprl.benchmark.config-id"
+                "io.qorl.benchmark.config-id"
             ),
         },
         "source_volume": volume_name,

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 : "${POSTGRES_USER:?POSTGRES_USER is required}"
-: "${QPRL_RUNNER_PASSWORD:?QPRL_RUNNER_PASSWORD is required}"
+: "${QORL_RUNNER_PASSWORD:?QORL_RUNNER_PASSWORD is required}"
 
 database_name="${POSTGRES_DB:-$POSTGRES_USER}"
 mode="${1:-}"
@@ -17,7 +17,7 @@ admin_psql=(
 
 case "$mode" in
     identity-json)
-        PGAPPNAME=qprl-state-dump "${admin_psql[@]}" \
+        PGAPPNAME=qorl-state-dump "${admin_psql[@]}" \
             --quiet --tuples-only --no-align <<'SQL'
 SELECT jsonb_pretty(jsonb_build_object(
     'schema_version', 1,
@@ -56,7 +56,7 @@ SELECT jsonb_pretty(jsonb_build_object(
 SQL
         ;;
     nondefaults-json)
-        PGAPPNAME=qprl-state-dump "${admin_psql[@]}" \
+        PGAPPNAME=qorl-state-dump "${admin_psql[@]}" \
             --quiet --tuples-only --no-align <<'SQL'
 SELECT jsonb_pretty(jsonb_build_object(
     'schema_version', 1,
@@ -88,7 +88,7 @@ FROM (
 SQL
         ;;
     all-settings-csv)
-        PGAPPNAME=qprl-state-dump "${admin_psql[@]}" --csv <<'SQL'
+        PGAPPNAME=qorl-state-dump "${admin_psql[@]}" --csv <<'SQL'
 SELECT
     name,
     setting,
@@ -106,11 +106,11 @@ ORDER BY name;
 SQL
         ;;
     show-all-csv)
-        PGPASSWORD="$QPRL_RUNNER_PASSWORD" \
-        PGAPPNAME=qprl-baseline \
+        PGPASSWORD="$QORL_RUNNER_PASSWORD" \
+        PGAPPNAME=qorl-baseline \
         psql \
             --host 127.0.0.1 \
-            --username qprl_runner \
+            --username qorl_runner \
             --dbname "$database_name" \
             --no-psqlrc \
             --set ON_ERROR_STOP=1 \
