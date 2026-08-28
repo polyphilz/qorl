@@ -67,11 +67,15 @@ INTEGER_SETTINGS = {
 }
 
 
-def plan_action_schema() -> dict[str, Any]:
+def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
     """JSON schema shown to models; normalize_action remains authoritative."""
+    relation = {
+        "type": "string",
+        **({"enum": relations} if relations is not None else {}),
+    }
     relation_list = {
         "type": "array",
-        "items": {"type": "string"},
+        "items": relation,
         "minItems": 2,
         "uniqueItems": True,
     }
@@ -100,30 +104,40 @@ def plan_action_schema() -> dict[str, Any]:
                 "description": "PlanAction schema version.",
             },
             "leading": {
-                "$ref": "#/$defs/join_tree",
+                "$ref": "#/$defs/join_node",
                 "description": "Binary join order containing every query alias once.",
             },
             "joins": {
                 "type": "array",
-                "description": "Join-method constraints for connected alias sets.",
+                "description": (
+                    "Join-method constraints. Each relations value must equal all "
+                    "leaf aliases beneath one internal node of the candidate plan. "
+                    "When leading is present, use only sets created by that tree."
+                ),
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
                     "required": ["relations"],
+                    "anyOf": [
+                        {"required": ["force"]},
+                        {"required": ["forbid"]},
+                        {"required": ["memoize"]},
+                    ],
                     "properties": {
                         "relations": relation_list,
                         "force": {
                             "type": "string",
-                            "enum": ["auto", "hash", "merge", "nestloop"],
+                            "enum": ["hash", "merge", "nestloop"],
                         },
                         "forbid": {
                             "type": "array",
                             "items": {"type": "string", "enum": sorted(JOIN_METHODS)},
+                            "minItems": 1,
                             "uniqueItems": True,
                         },
                         "memoize": {
                             "type": "string",
-                            "enum": ["auto", "force", "forbid"],
+                            "enum": ["force", "forbid"],
                         },
                     },
                 },
@@ -135,21 +149,29 @@ def plan_action_schema() -> dict[str, Any]:
                     "type": "object",
                     "additionalProperties": False,
                     "required": ["relation"],
+                    "anyOf": [
+                        {"required": ["force"]},
+                        {"required": ["forbid"]},
+                    ],
                     "properties": {
-                        "relation": {"type": "string"},
+                        "relation": relation,
                         "force": {
                             "type": "string",
-                            "enum": ["auto", *sorted(SCAN_METHODS)],
+                            "enum": sorted(SCAN_METHODS),
                         },
                         "forbid": {
                             "type": "array",
                             "items": {"type": "string", "enum": sorted(SCAN_METHODS)},
+                            "minItems": 1,
                             "uniqueItems": True,
                         },
                         "indexes": {
                             "type": "array",
                             "items": {"type": "string"},
                             "uniqueItems": True,
+                            "description": (
+                                "Use only with force=index, index_only, or bitmap."
+                            ),
                         },
                     },
                 },
@@ -162,7 +184,7 @@ def plan_action_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "required": ["relation", "indexes"],
                     "properties": {
-                        "relation": {"type": "string"},
+                        "relation": relation,
                         "indexes": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -197,7 +219,7 @@ def plan_action_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "required": ["relation", "workers", "mode"],
                     "properties": {
-                        "relation": {"type": "string"},
+                        "relation": relation,
                         "workers": {"type": "integer", "minimum": 0, "maximum": 8},
                         "mode": {"type": "string", "enum": ["soft", "hard"]},
                     },
@@ -211,18 +233,19 @@ def plan_action_schema() -> dict[str, Any]:
             },
         },
         "$defs": {
+            "join_node": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["left", "right"],
+                "properties": {
+                    "left": {"$ref": "#/$defs/join_tree"},
+                    "right": {"$ref": "#/$defs/join_tree"},
+                },
+            },
             "join_tree": {
                 "oneOf": [
-                    {"type": "string"},
-                    {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "required": ["left", "right"],
-                        "properties": {
-                            "left": {"$ref": "#/$defs/join_tree"},
-                            "right": {"$ref": "#/$defs/join_tree"},
-                        },
-                    },
+                    relation,
+                    {"$ref": "#/$defs/join_node"},
                 ]
             }
         },

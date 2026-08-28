@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "run_id_prefix": "qwen35-2b-vanilla-v1",
+  "run_id_prefix": "qwen38-4b-distill-untrained-v1",
   "policy": {
     "type": "qo_agent",
-    "model": "Qwen/Qwen3.5-2B",
-    "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+    "model": "empero-ai/Qwen3.8-4B-Distill",
+    "revision": "c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e",
     "vllm_version": "0.27.1",
     "use_flashinfer_sampler": false,
     "base_url": "http://127.0.0.1:8000/v1",
-    "context_length": 8192,
-    "maximum_model_turns": 20,
+    "context_length": 262144,
+    "maximum_model_turns": 64,
     "request_timeout_seconds": 300,
     "seed": 20260827,
     "sampling": {

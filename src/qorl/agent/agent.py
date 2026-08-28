@@ -13,6 +13,9 @@ from qorl.agent.tools import AgentEnvironment, agent_tools
 from qorl.rollout import MAX_CANDIDATES, RolloutEvaluator
 
 
+RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
+
+
 def sha256_json(value: Any) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -32,14 +35,22 @@ class QoAgentPolicy:
 
     def preflight(self) -> dict[str, Any]:
         response = self.client.models()
-        model_ids = sorted(
-            item["id"]
+        models = [
+            item
             for item in response.get("data", [])
             if isinstance(item, dict) and isinstance(item.get("id"), str)
-        )
+        ]
+        model_ids = sorted(item["id"] for item in models)
         if self.config.model not in model_ids:
             raise ModelError(
                 f"model server does not advertise {self.config.model}: {model_ids}"
+            )
+        model = next(item for item in models if item["id"] == self.config.model)
+        if model.get("max_model_len") != self.config.context_length:
+            raise ModelError(
+                "model context length mismatch: "
+                f"expected={self.config.context_length} "
+                f"actual={model.get('max_model_len')}"
             )
         version = self.client.version()
         if version.get("version") != self.config.vllm_version:
@@ -50,6 +61,7 @@ class QoAgentPolicy:
         self.server_identity = {
             "base_url": self.config.base_url,
             "advertised_models": model_ids,
+            "model": model,
             "vllm": version,
         }
         return self.server_identity
@@ -89,6 +101,26 @@ class QoAgentPolicy:
     def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
         aliases = sorted(evaluator.catalog.relations)
         tools = agent_tools(aliases)
+        decision_tools = [
+            tool
+            for tool in tools
+            if tool["function"]["name"] in {"evaluate_candidate", "finish"}
+        ]
+        inspection_tools = [
+            tool for tool in tools if tool["function"]["name"] != "finish"
+        ]
+        evaluate_tool = [
+            tool
+            for tool in decision_tools
+            if tool["function"]["name"] == "evaluate_candidate"
+        ]
+        finish_tool = [
+            tool for tool in decision_tools if tool["function"]["name"] == "finish"
+        ]
+        inspection_turn_limit = min(
+            len(aliases) * 3,
+            max(0, self.config.maximum_model_turns - RESERVED_DECISION_TURNS),
+        )
         expected_path = (
             evaluator.worker.fixture.repository
             / "docker/postgres/benchmark-v1.expected.json"
@@ -119,6 +151,15 @@ class QoAgentPolicy:
             ],
             "candidate_attempts": MAX_CANDIDATES,
             "candidate_timeout_ms": evaluator.timeout_ms,
+            "turn_budget": {
+                "total_model_turns": self.config.maximum_model_turns,
+                "maximum_inspection_turns": inspection_turn_limit,
+                "reserved_final_turns": RESERVED_DECISION_TURNS,
+                "reserved_for": {
+                    "candidate_evaluations": MAX_CANDIDATES,
+                    "finish": 1,
+                },
+            },
         }
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -131,10 +172,19 @@ class QoAgentPolicy:
 
         for turn in range(1, self.config.maximum_model_turns + 1):
             if len(evaluator.candidates) >= MAX_CANDIDATES:
-                stop_reason = "candidate_budget"
-                break
+                available_tools = finish_tool
+            elif turn > inspection_turn_limit:
+                available_tools = (
+                    decision_tools if evaluator.candidates else evaluate_tool
+                )
+            else:
+                available_tools = (
+                    tools if evaluator.candidates else inspection_tools
+                )
             response = self.client.chat(
-                self.request_body(messages, tools, evaluator.task["task_id"], turn)
+                self.request_body(
+                    messages, available_tools, evaluator.task["task_id"], turn
+                )
             )
             responses.append(response)
             try:
@@ -174,6 +224,19 @@ class QoAgentPolicy:
                     environment.execute(name, arguments)
                     if index == 0
                     else ({"error": "call one tool at a time"}, False)
+                )
+                budget = {
+                    "current_turn": turn,
+                    "turns_remaining": self.config.maximum_model_turns - turn,
+                    "unrestricted_turns_remaining": max(
+                        0, inspection_turn_limit - turn
+                    ),
+                    "reserved_final_turns": RESERVED_DECISION_TURNS,
+                }
+                result = (
+                    {**result, "_turn_budget": budget}
+                    if isinstance(result, dict)
+                    else {"result": result, "_turn_budget": budget}
                 )
                 if index == 0:
                     if name == "evaluate_candidate" and "candidate_id" in result:

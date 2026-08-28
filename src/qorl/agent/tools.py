@@ -30,7 +30,7 @@ def function(
 
 def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
     relation = {"type": "string", "enum": relations}
-    action = plan_action_schema()
+    action = plan_action_schema(relations)
     definitions = action.pop("$defs")
     evaluate = function(
         "evaluate_candidate",
