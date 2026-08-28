@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "run_id_prefix": "qwen35-2b-vanilla-v1",
+  "policy": {
+    "type": "qo_agent",
+    "model": "Qwen/Qwen3.5-2B",
+    "revision": "15852e8c16360a2fea060d615a32b45270f8a8fc",
+    "vllm_version": "0.27.1",
+    "use_flashinfer_sampler": false,
+    "base_url": "http://127.0.0.1:8000/v1",
+    "context_length": 8192,
+    "maximum_model_turns": 20,
+    "request_timeout_seconds": 300,
+    "seed": 20260827,
+    "sampling": {
+      "max_tokens": 2048,
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 2.0,
+      "repetition_penalty": 1.0
+    },
+    "thinking": false,
+    "tool_call_parser": "qwen3_coder"
+  }
+}

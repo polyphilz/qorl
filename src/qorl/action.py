@@ -67,6 +67,168 @@ INTEGER_SETTINGS = {
 }
 
 
+def plan_action_schema() -> dict[str, Any]:
+    """JSON schema shown to models; normalize_action remains authoritative."""
+    relation_list = {
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 2,
+        "uniqueItems": True,
+    }
+    settings = {
+        **{
+            name: {"type": "boolean"}
+            for name in sorted(BOOLEAN_SETTINGS)
+        },
+        **{
+            name: {"type": "number", "minimum": bounds[0], "maximum": bounds[1]}
+            for name, bounds in sorted(NUMERIC_SETTINGS.items())
+        },
+        **{
+            name: {"type": "integer", "minimum": bounds[0], "maximum": bounds[1]}
+            for name, bounds in sorted(INTEGER_SETTINGS.items())
+        },
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["version"],
+        "properties": {
+            "version": {
+                "type": "integer",
+                "const": 1,
+                "description": "PlanAction schema version.",
+            },
+            "leading": {
+                "$ref": "#/$defs/join_tree",
+                "description": "Binary join order containing every query alias once.",
+            },
+            "joins": {
+                "type": "array",
+                "description": "Join-method constraints for connected alias sets.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["relations"],
+                    "properties": {
+                        "relations": relation_list,
+                        "force": {
+                            "type": "string",
+                            "enum": ["auto", "hash", "merge", "nestloop"],
+                        },
+                        "forbid": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": sorted(JOIN_METHODS)},
+                            "uniqueItems": True,
+                        },
+                        "memoize": {
+                            "type": "string",
+                            "enum": ["auto", "force", "forbid"],
+                        },
+                    },
+                },
+            },
+            "scans": {
+                "type": "array",
+                "description": "Scan-method and index constraints by query alias.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["relation"],
+                    "properties": {
+                        "relation": {"type": "string"},
+                        "force": {
+                            "type": "string",
+                            "enum": ["auto", *sorted(SCAN_METHODS)],
+                        },
+                        "forbid": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": sorted(SCAN_METHODS)},
+                            "uniqueItems": True,
+                        },
+                        "indexes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "uniqueItems": True,
+                        },
+                    },
+                },
+            },
+            "disabled_indexes": {
+                "type": "array",
+                "description": "Indexes PostgreSQL must not use by query alias.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["relation", "indexes"],
+                    "properties": {
+                        "relation": {"type": "string"},
+                        "indexes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "uniqueItems": True,
+                        },
+                    },
+                },
+            },
+            "row_corrections": {
+                "type": "array",
+                "description": "Planner row-estimate corrections for alias sets.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["relations", "mode", "value"],
+                    "properties": {
+                        "relations": relation_list,
+                        "mode": {
+                            "type": "string",
+                            "enum": ["absolute", "add", "subtract", "multiply"],
+                        },
+                        "value": {"type": "number"},
+                    },
+                },
+            },
+            "parallel": {
+                "type": "array",
+                "description": "Parallel worker requests by query alias.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["relation", "workers", "mode"],
+                    "properties": {
+                        "relation": {"type": "string"},
+                        "workers": {"type": "integer", "minimum": 0, "maximum": 8},
+                        "mode": {"type": "string", "enum": ["soft", "hard"]},
+                    },
+                },
+            },
+            "settings": {
+                "type": "object",
+                "additionalProperties": False,
+                "description": "Safe per-query PostgreSQL planner settings.",
+                "properties": settings,
+            },
+        },
+        "$defs": {
+            "join_tree": {
+                "oneOf": [
+                    {"type": "string"},
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["left", "right"],
+                        "properties": {
+                            "left": {"$ref": "#/$defs/join_tree"},
+                            "right": {"$ref": "#/$defs/join_tree"},
+                        },
+                    },
+                ]
+            }
+        },
+    }
+
+
 @dataclass(frozen=True)
 class TaskCatalog:
     relations: frozenset[str]

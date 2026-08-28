@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import platform
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
+from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.calibration import PLAN_FINGERPRINT_VERSION, utc_now, write_json
 from qorl.fixture import JobFixture, sha256_file
 from qorl.random_policy import sample_action, sampler_manifest
@@ -23,6 +25,7 @@ from qorl.worker import PostgresWorker, WorkerError
 
 
 RUN_SEED = 20260827
+DEFAULT_RUN_CONFIG = "configs/evaluation/run-v1.json"
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -79,44 +82,79 @@ def run_task(
     worker: PostgresWorker,
     fixture: JobFixture,
     task: dict[str, Any],
+    policy: dict[str, Any],
+    agent: QoAgentPolicy | None,
 ) -> dict[str, Any]:
     evaluator = RolloutEvaluator(worker, fixture, task)
     baseline = evaluator.start()
-    action_rng = random.Random(f"{RUN_SEED}:{task['task_id']}:actions")
-    candidates: list[dict[str, Any]] = []
-    for _ in range(MAX_CANDIDATES):
-        candidate = evaluator.evaluate(
-            sample_action(evaluator.catalog, action_rng)
-        )
-        candidates.append(candidate)
-        if candidate["constraints_satisfied"]:
-            print(
-                f"  {candidate['candidate_id']}: "
-                f"{candidate['provisional_speedup']:.3f}x"
+    trace: dict[str, Any]
+    if policy["type"] == "random_structured_action":
+        action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
+        for _ in range(MAX_CANDIDATES):
+            candidate = evaluator.evaluate(
+                sample_action(evaluator.catalog, action_rng)
             )
-        else:
-            print(f"  {candidate['candidate_id']}: invalid")
+            if candidate["constraints_satisfied"]:
+                print(
+                    f"  {candidate['candidate_id']}: "
+                    f"{candidate['provisional_speedup']:.3f}x"
+                )
+            else:
+                print(f"  {candidate['candidate_id']}: invalid")
+        trace = {"random_seed": policy["seed"]}
+    else:
+        if agent is None:
+            raise RuntimeError("qo-agent policy is not initialized")
+        trace = agent.search(evaluator)
 
-    final = evaluator.finish(
-        random.Random(f"{RUN_SEED}:{task['task_id']}:pairs")
-    )
+    final = evaluator.finish(random.Random(f"{RUN_SEED}:{task['task_id']}:pairs"))
     return {
         "schema_version": 1,
         "task_id": task["task_id"],
         "template_id": task["template_id"],
         "status": final["status"],
         "completed_at_utc": utc_now(),
-        "random_seed": RUN_SEED,
+        "policy_trace": trace,
         "default": baseline,
-        "candidates": candidates,
+        "candidates": evaluator.candidates,
         "final": final,
     }
 
 
-def run_random_benchmark(repository: Path) -> Path:
+def load_run_config(
+    repository: Path, configured: str | None = None
+) -> tuple[Path, dict[str, Any]]:
+    configured = Path(
+        configured or os.environ.get("QORL_RUN_CONFIG", DEFAULT_RUN_CONFIG)
+    )
+    path = configured if configured.is_absolute() else repository / configured
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(f"cannot load run configuration {path}: {error}") from error
+    if value.get("schema_version") != 1:
+        raise RuntimeError("run configuration schema_version must equal 1")
+    policy = value.get("policy")
+    if not isinstance(policy, dict) or policy.get("type") not in {
+        "random_structured_action",
+        "qo_agent",
+    }:
+        raise RuntimeError("run configuration has an unknown policy type")
+    return path, value
+
+
+def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     fixture = JobFixture.load(repository)
+    config_path, config = load_run_config(repository, configured)
+    policy = config["policy"]
+    agent: QoAgentPolicy | None = None
+    if policy["type"] == "qo_agent":
+        agent = QoAgentPolicy(QoAgentConfig.from_dict(policy))
+        agent.preflight()
     started_at = datetime.now(timezone.utc)
-    benchmark_id = started_at.strftime("random-v1-%Y%m%dT%H%M%SZ")
+    benchmark_id = started_at.strftime(
+        f"{config['run_id_prefix']}-%Y%m%dT%H%M%SZ"
+    )
     output_dir = repository / "outputs/runs" / benchmark_id
     output_dir.mkdir(parents=True, exist_ok=False)
     task_dir = output_dir / "tasks"
@@ -132,16 +170,23 @@ def run_random_benchmark(repository: Path) -> Path:
         "snapshot_manifest_sha256": sha256_file(
             fixture.snapshot_manifest_path
         ),
+        "run_config": {
+            "path": str(config_path.relative_to(repository)),
+            "sha256": sha256_file(config_path),
+        },
         "orchestrator": {
             "qorl_version": __version__,
             "python_version": platform.python_version(),
         },
-        "policy": {
-            "type": "random_structured_action",
-            "seed": RUN_SEED,
-            "candidate_count": MAX_CANDIDATES,
-            "sampler": sampler_manifest(),
-        },
+        "policy": (
+            {
+                **policy,
+                "candidate_count": MAX_CANDIDATES,
+                "sampler": sampler_manifest(),
+            }
+            if policy["type"] == "random_structured_action"
+            else {**agent.manifest(), "candidate_count": MAX_CANDIDATES}
+        ),
         "protocol": {
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
             "default_warmup_runs": 1,
@@ -180,7 +225,7 @@ def run_random_benchmark(repository: Path) -> Path:
                     flush=True,
                 )
                 try:
-                    result = run_task(worker, fixture, task)
+                    result = run_task(worker, fixture, task, policy, agent)
                     if result["status"] == "completed":
                         manifest["completed_task_count"] += 1
                         print(f"  final={result['final']['score']:.3f}x")
@@ -218,3 +263,8 @@ def run_random_benchmark(repository: Path) -> Path:
     manifest["summary"] = summarize(results)
     write_json(manifest_path, manifest)
     return output_dir
+
+
+def run_random_benchmark(repository: Path) -> Path:
+    """Compatibility entry point for the original frozen random baseline."""
+    return run_benchmark(repository, "configs/evaluation/random-v1.json")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.action import ActionError, TaskCatalog, compile_action
+from qorl.action import ActionError, TaskCatalog, compile_action, plan_action_schema
 
 
 TASK = {
@@ -164,6 +164,11 @@ class ActionTest(unittest.TestCase):
                 },
                 self.catalog,
             )
+
+    def test_model_schema_matches_the_setting_allowlist(self) -> None:
+        settings = plan_action_schema()["properties"]["settings"]["properties"]
+        self.assertIn("enable_hashjoin", settings)
+        self.assertNotIn("work_mem", settings)
 
 
 if __name__ == "__main__":

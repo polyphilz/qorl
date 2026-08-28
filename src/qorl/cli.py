@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from qorl import __version__
-from qorl.benchmark import run_random_benchmark
+from qorl.benchmark import run_benchmark
 from qorl.calibration import calibrate
 
 
@@ -28,7 +28,7 @@ def main() -> int:
         output_dir = (
             calibrate(Path.cwd())
             if arguments.command == "calibrate"
-            else run_random_benchmark(Path.cwd())
+            else run_benchmark(Path.cwd())
         )
     except (RuntimeError, OSError) as error:
         print(f"qorl: {error}")
