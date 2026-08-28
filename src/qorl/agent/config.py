@@ -10,6 +10,7 @@ class QoAgentConfig:
     revision: str
     vllm_version: str
     use_flashinfer_sampler: bool
+    enable_prefix_caching: bool
     base_url: str
     context_length: int
     maximum_model_turns: int
@@ -28,6 +29,7 @@ class QoAgentConfig:
             revision=value["revision"],
             vllm_version=value["vllm_version"],
             use_flashinfer_sampler=value["use_flashinfer_sampler"],
+            enable_prefix_caching=value["enable_prefix_caching"],
             base_url=value["base_url"],
             context_length=value["context_length"],
             maximum_model_turns=value["maximum_model_turns"],

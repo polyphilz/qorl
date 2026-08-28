@@ -158,6 +158,7 @@ def config() -> QoAgentConfig:
             "revision": "revision",
             "vllm_version": "test",
             "use_flashinfer_sampler": False,
+            "enable_prefix_caching": True,
             "base_url": "http://127.0.0.1:8000/v1",
             "context_length": 262144,
             "maximum_model_turns": 64,

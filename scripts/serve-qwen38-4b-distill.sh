@@ -14,6 +14,7 @@ exec vllm serve empero-ai/Qwen3.8-4B-Distill \
   --tensor-parallel-size 1 \
   --max-model-len 262144 \
   --max-num-seqs 1 \
+  --enable-prefix-caching \
   --language-model-only \
   --generation-config vllm \
   --enable-auto-tool-choice \
