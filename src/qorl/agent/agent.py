@@ -5,15 +5,12 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from qorl.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 from qorl.agent.client import ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
+from qorl.agent.protocol import AgentProtocol
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.tools import AgentEnvironment, agent_tools
-from qorl.rollout import MAX_CANDIDATES, RolloutEvaluator
-
-
-RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
+from qorl.agent.tools import AgentEnvironment
+from qorl.rollout import RolloutEvaluator
 
 
 def sha256_json(value: Any) -> str:
@@ -99,88 +96,19 @@ class QoAgentPolicy:
         }
 
     def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
-        aliases = sorted(evaluator.catalog.relations)
-        tools = agent_tools(aliases)
-        decision_tools = [
-            tool
-            for tool in tools
-            if tool["function"]["name"] in {"evaluate_candidate", "finish"}
-        ]
-        inspection_tools = [
-            tool for tool in tools if tool["function"]["name"] != "finish"
-        ]
-        evaluate_tool = [
-            tool
-            for tool in decision_tools
-            if tool["function"]["name"] == "evaluate_candidate"
-        ]
-        finish_tool = [
-            tool for tool in decision_tools if tool["function"]["name"] == "finish"
-        ]
-        inspection_turn_limit = min(
-            len(aliases) * 3,
-            max(0, self.config.maximum_model_turns - RESERVED_DECISION_TURNS),
+        protocol = AgentProtocol.from_evaluator(
+            evaluator, self.config.maximum_model_turns
         )
-        expected_path = (
-            evaluator.worker.fixture.repository
-            / "docker/postgres/benchmark-v1.expected.json"
-        )
-        expected = json.loads(expected_path.read_text(encoding="utf-8"))
-        configurable_settings = set(BOOLEAN_SETTINGS)
-        configurable_settings.update(NUMERIC_SETTINGS, INTEGER_SETTINGS)
-        observation = {
-            "task_id": evaluator.task["task_id"],
-            "objective": "minimize measured warm-cache execution time",
-            "sql": evaluator.sql,
-            "relations": evaluator.task["relations"],
-            "join_edges": evaluator.task["join_edges"],
-            "indexes": {
-                alias: sorted(indexes)
-                for alias, indexes in sorted(evaluator.catalog.indexes.items())
-            },
-            "postgresql_server_version_num": evaluator.worker.fixture.snapshot[
-                "postgresql"
-            ]["server_version_num"],
-            "planner_settings": {
-                name: expected["settings"][name]
-                for name in sorted(configurable_settings)
-            },
-            "default_plan": evaluator.default["compact_plan"],
-            "default_median_execution_time_ms": evaluator.default[
-                "median_execution_time_ms"
-            ],
-            "candidate_attempts": MAX_CANDIDATES,
-            "candidate_timeout_ms": evaluator.timeout_ms,
-            "turn_budget": {
-                "total_model_turns": self.config.maximum_model_turns,
-                "maximum_inspection_turns": inspection_turn_limit,
-                "reserved_final_turns": RESERVED_DECISION_TURNS,
-                "reserved_for": {
-                    "candidate_evaluations": MAX_CANDIDATES,
-                    "finish": 1,
-                },
-            },
-        }
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(observation, sort_keys=True)},
-        ]
+        messages = protocol.initial_messages()
         responses: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         environment = AgentEnvironment(evaluator)
         stop_reason = "model_turn_limit"
 
         for turn in range(1, self.config.maximum_model_turns + 1):
-            if len(evaluator.candidates) >= MAX_CANDIDATES:
-                available_tools = finish_tool
-            elif turn > inspection_turn_limit:
-                available_tools = (
-                    decision_tools if evaluator.candidates else evaluate_tool
-                )
-            else:
-                available_tools = (
-                    tools if evaluator.candidates else inspection_tools
-                )
+            available_tools = protocol.available_tools(
+                turn, len(evaluator.candidates)
+            )
             response = self.client.chat(
                 self.request_body(
                     messages, available_tools, evaluator.task["task_id"], turn
@@ -225,14 +153,7 @@ class QoAgentPolicy:
                     if index == 0
                     else ({"error": "call one tool at a time"}, False)
                 )
-                budget = {
-                    "current_turn": turn,
-                    "turns_remaining": self.config.maximum_model_turns - turn,
-                    "unrestricted_turns_remaining": max(
-                        0, inspection_turn_limit - turn
-                    ),
-                    "reserved_final_turns": RESERVED_DECISION_TURNS,
-                }
+                budget = protocol.budget(turn)
                 result = (
                     {**result, "_turn_budget": budget}
                     if isinstance(result, dict)
@@ -276,9 +197,9 @@ class QoAgentPolicy:
                     usage[name] = usage.get(name, 0) + value
         return {
             "stop_reason": stop_reason,
-            "initial_observation": observation,
-            "tools": tools,
-            "tools_sha256": sha256_json(tools),
+            "initial_observation": protocol.observation,
+            "tools": protocol.tools,
+            "tools_sha256": sha256_json(protocol.tools),
             "transcript": messages,
             "model_responses": responses,
             "tool_events": events,
