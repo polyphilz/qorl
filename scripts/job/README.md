@@ -70,7 +70,7 @@ snapshot manifest. Verify that neither the SQL nor its derived metadata has
 drifted with:
 
 ```bash
-./scripts/job/build-job-task-inventory.py --check
+uv run python -m scripts.job.build_job_task_inventory --check
 ```
 
 That clean-clone check rebuilds the inventory metadata from the checked-in SQL
@@ -78,7 +78,7 @@ and verifies the query-set checksum against the pinned source manifest. To also
 compare every file with a separately fetched upstream source directory, run:
 
 ```bash
-./scripts/job/build-job-task-inventory.py \
+uv run python -m scripts.job.build_job_task_inventory \
   --check \
   --source-dir data/raw/job-v1/source
 ```

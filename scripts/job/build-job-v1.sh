@@ -57,7 +57,8 @@ output_dir="$(cd -- "$output_dir" && pwd)"
 
 trap 'echo "job-v1 build stopped; failed resources were retained for diagnosis" >&2' ERR
 
-python3 "$script_dir/fetch-job-v1.py" --raw-dir "$raw_dir"
+PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
+    python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 raw_dir="$(cd -- "$raw_dir" && pwd)"
 
 source_manifest_copy="$output_dir/job-v1.source.json"
@@ -87,7 +88,8 @@ if [[ -z "$build_volume" ]]; then
     exit 1
 fi
 
-python3 "$script_dir/verify-job-v1.py" \
+PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
+python3 -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \
     --phase build \
@@ -101,7 +103,8 @@ python3 "$repository_root/scripts/capture-benchmark-environment.py" \
 "${compose[@]}" stop --timeout 60 postgres
 container="$("${compose[@]}" ps --all --quiet postgres)"
 
-python3 "$script_dir/seal-job-v1.py" \
+PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
+python3 -m scripts.job.seal_job_v1 \
     --container "$container" \
     --manifest "$output_dir/job-v1.source.json" \
     --build-verification "$output_dir/job-v1.database.build.json" \

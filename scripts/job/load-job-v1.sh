@@ -41,7 +41,8 @@ command -v docker >/dev/null
 command -v python3 >/dev/null
 
 if ((skip_fetch == 0)); then
-    python3 "$script_dir/fetch-job-v1.py" --raw-dir "$raw_dir"
+    PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
+        python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 fi
 
 raw_dir="$(cd -- "$raw_dir" && pwd)"

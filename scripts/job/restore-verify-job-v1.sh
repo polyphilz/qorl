@@ -149,7 +149,8 @@ docker run \
 "${compose[@]}" up --detach --wait --no-build postgres
 container="$("${compose[@]}" ps --quiet postgres)"
 
-python3 "$script_dir/verify-job-v1.py" \
+PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
+python3 -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \
     --phase restore \
