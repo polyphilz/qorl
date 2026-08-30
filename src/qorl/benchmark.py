@@ -12,7 +12,7 @@ from typing import Any
 from qorl import __version__
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.calibration import PLAN_FINGERPRINT_VERSION, utc_now, write_json
-from qorl.fixture import JobFixture, sha256_file
+from qorl.fixture import DatabaseFixture, TaskSet, sha256_file
 from qorl.random_policy import sample_action, sampler_manifest
 from qorl.rollout import (
     DEFAULT_MEASUREMENTS,
@@ -80,12 +80,12 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def run_task(
     worker: PostgresWorker,
-    fixture: JobFixture,
+    task_set: TaskSet,
     task: dict[str, Any],
     policy: dict[str, Any],
     agent: QoAgentPolicy | None,
 ) -> dict[str, Any]:
-    evaluator = RolloutEvaluator(worker, fixture, task)
+    evaluator = RolloutEvaluator(worker, task_set, task)
     baseline = evaluator.start()
     trace: dict[str, Any]
     if policy["type"] == "random_structured_action":
@@ -144,7 +144,8 @@ def load_run_config(
 
 
 def run_benchmark(repository: Path, configured: str | None = None) -> Path:
-    fixture = JobFixture.load(repository)
+    fixture = DatabaseFixture.load(repository)
+    task_set = TaskSet.load(repository, "job-v1", fixture.identity)
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
     agent: QoAgentPolicy | None = None
@@ -164,9 +165,9 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         "status": "running",
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
-        "inventory_id": fixture.inventory["inventory_id"],
-        "inventory_sha256": sha256_file(fixture.inventory_path),
-        "database": fixture.inventory["database"],
+        "inventory_id": task_set.inventory["inventory_id"],
+        "inventory_sha256": sha256_file(task_set.inventory_path),
+        "database": task_set.inventory["database"],
         "snapshot_manifest_sha256": sha256_file(
             fixture.snapshot_manifest_path
         ),
@@ -202,7 +203,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             ),
             "score": "clip(default_median / candidate_median, 0.1, 10)",
         },
-        "task_count": fixture.inventory["task_count"],
+        "task_count": task_set.inventory["task_count"],
         "completed_task_count": 0,
         "failed_task_count": 0,
         "summary": None,
@@ -218,14 +219,14 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         with PostgresWorker(fixture, project_name) as worker:
             worker.capture_environment(output_dir, "pre")
             for index, task in enumerate(
-                fixture.inventory["tasks"], start=1
+                task_set.inventory["tasks"], start=1
             ):
                 print(
                     f"[{index}/{manifest['task_count']}] {task['task_id']}",
                     flush=True,
                 )
                 try:
-                    result = run_task(worker, fixture, task, policy, agent)
+                    result = run_task(worker, task_set, task, policy, agent)
                     if result["status"] == "completed":
                         manifest["completed_task_count"] += 1
                         print(f"  final={result['final']['score']:.3f}x")

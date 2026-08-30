@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
-from qorl.fixture import JobFixture, sha256_file
+from qorl.fixture import DatabaseFixture, TaskSet, sha256_file
 from qorl.worker import PostgresWorker, WorkerError
 
 
@@ -110,9 +110,9 @@ def buffers_stable(previous: dict[str, Any], current: dict[str, Any]) -> bool:
 
 
 def calibrate_task(
-    worker: PostgresWorker, fixture: JobFixture, task: dict[str, Any]
+    worker: PostgresWorker, task_set: TaskSet, task: dict[str, Any]
 ) -> dict[str, Any]:
-    sql = fixture.load_sql(task)
+    sql = task_set.load_sql(task)
     warmups: list[dict[str, Any]] = []
     for run_number in range(1, MAX_WARMUP_RUNS + 1):
         result = observation(
@@ -162,7 +162,8 @@ def calibrate_task(
 
 
 def calibrate(repository: Path) -> Path:
-    fixture = JobFixture.load(repository)
+    fixture = DatabaseFixture.load(repository)
+    task_set = TaskSet.load(repository, "job-v1", fixture.identity)
     started_at = datetime.now(timezone.utc)
     calibration_id = started_at.strftime("job-v1-%Y%m%dT%H%M%SZ")
     output_dir = repository / "outputs/calibration" / calibration_id
@@ -175,9 +176,9 @@ def calibrate(repository: Path) -> Path:
         "status": "running",
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
-        "inventory_id": fixture.inventory["inventory_id"],
-        "inventory_sha256": sha256_file(fixture.inventory_path),
-        "database": fixture.inventory["database"],
+        "inventory_id": task_set.inventory["inventory_id"],
+        "inventory_sha256": sha256_file(task_set.inventory_path),
+        "database": task_set.inventory["database"],
         "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "orchestrator": {
             "qorl_version": __version__,
@@ -193,7 +194,7 @@ def calibrate(repository: Path) -> Path:
             "coefficient_of_variation": "sample standard deviation / arithmetic mean",
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
         },
-        "task_count": fixture.inventory["task_count"],
+        "task_count": task_set.inventory["task_count"],
         "completed_task_count": 0,
         "failed_task_count": 0,
     }
@@ -205,11 +206,11 @@ def calibrate(repository: Path) -> Path:
     try:
         with PostgresWorker(fixture, project_name) as worker:
             worker.capture_environment(output_dir, "pre")
-            for index, task in enumerate(fixture.inventory["tasks"], start=1):
+            for index, task in enumerate(task_set.inventory["tasks"], start=1):
                 task_id = task["task_id"]
                 print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
                 try:
-                    result = calibrate_task(worker, fixture, task)
+                    result = calibrate_task(worker, task_set, task)
                     summary = result["summary"]
                     print(
                         f"  median={summary['median_execution_time_ms']:.3f} ms "

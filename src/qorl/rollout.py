@@ -7,7 +7,7 @@ from typing import Any
 
 from qorl.action import ActionError, TaskCatalog, compile_action
 from qorl.calibration import plan_sha256
-from qorl.fixture import JobFixture
+from qorl.fixture import TaskSet
 from qorl.plan import Verification, compact_plan, hint_status, verify_action
 from qorl.worker import ExplainResult, PostgresWorker, WorkerError
 
@@ -39,14 +39,14 @@ class RolloutEvaluator:
     def __init__(
         self,
         worker: PostgresWorker,
-        fixture: JobFixture,
+        task_set: TaskSet,
         task: dict[str, Any],
         *,
         global_timeout_ms: int = GLOBAL_TIMEOUT_MS,
     ) -> None:
         self.worker = worker
         self.task = task
-        self.sql = fixture.load_sql(task)
+        self.sql = task_set.load_sql(task)
         self.global_timeout_ms = global_timeout_ms
         self.catalog = TaskCatalog.from_task(task, worker.task_indexes(task))
         self.default: dict[str, Any] = {}

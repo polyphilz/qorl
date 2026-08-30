@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from qorl.fixture import JobFixture
+from qorl.fixture import DatabaseFixture
 
 
 class WorkerError(RuntimeError):
@@ -57,7 +57,7 @@ def run(
 
 
 class PostgresWorker:
-    def __init__(self, fixture: JobFixture, project_name: str) -> None:
+    def __init__(self, fixture: DatabaseFixture, project_name: str) -> None:
         self.fixture = fixture
         self.project_name = project_name
         self.container = ""
@@ -114,7 +114,8 @@ class PostgresWorker:
         return self.command([*self.compose, *arguments], check=check)
 
     def start(self) -> None:
-        print("Verifying job-v1 snapshot...")
+        fixture_id = self.fixture.snapshot["fixture_id"]
+        print(f"Verifying {fixture_id} database snapshot...")
         self.fixture.verify_archive()
 
         image = self.fixture.snapshot["image"]
@@ -123,7 +124,8 @@ class PostgresWorker:
         ).strip()
         if actual_image_id != image["id"]:
             raise WorkerError(
-                f"job-v1 image mismatch: expected={image['id']} actual={actual_image_id}"
+                f"database image mismatch: expected={image['id']} "
+                f"actual={actual_image_id}"
             )
 
         self.compose_command("config", "--quiet")
@@ -156,7 +158,7 @@ class PostgresWorker:
             self.fixture.snapshot["postgresql"]["pgdata_volume_relative_path"]
         )
         if relative.is_absolute() or ".." in relative.parts:
-            raise WorkerError("job-v1 snapshot contains an invalid PGDATA path")
+            raise WorkerError("database snapshot contains an invalid PGDATA path")
         restore_script = r"""
 test -z "$(find /target -mindepth 1 -print -quit)"
 mkdir -p "/target/$2"
@@ -202,7 +204,7 @@ test ! -e "/target/$2/postmaster.pid"
         ]
         if actual_system_identifier != expected_system_identifier:
             raise WorkerError(
-                "job-v1 PostgreSQL system identifier does not match the inventory"
+                "PostgreSQL system identifier does not match the database snapshot"
             )
 
     def close(self) -> None:
