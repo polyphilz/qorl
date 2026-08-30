@@ -17,7 +17,7 @@ def parser() -> argparse.ArgumentParser:
         "calibrate", help="measure PostgreSQL's default plans on JOB"
     )
     commands.add_parser("run", help="run the configured policy on JOB")
-    commands.add_parser("sft", help="run the protocol-SFT compatibility step")
+    commands.add_parser("sft", help="train the protocol-SFT LoRA adapter")
     return root
 
 

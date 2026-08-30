@@ -102,7 +102,7 @@ def main() -> None:
         "--lora-modules",
         f"{ADAPTER_MODEL}={arguments.adapter}",
         "--max-model-len",
-        "16384",
+        str(audit["packed_sequence_length"]),
         "--max-num-seqs",
         "1",
         "--gpu-memory-utilization",

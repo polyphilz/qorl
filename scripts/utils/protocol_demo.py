@@ -67,7 +67,12 @@ def validate_protocol_demo(
         None,
     )
     require(task is not None, "demo task is absent from its task inventory")
-    require(task["partition"] == "train", "demo task is not in the train split")
+    partition = metadata.get("partition", task["partition"])
+    require(
+        partition in {"train", "validation"},
+        "demo partition must be train or validation",
+    )
+    require(task["partition"] == partition, "demo task partition mismatch")
     require(
         metadata.get("database") == task_set.inventory["database"],
         "demo database identity differs from its task inventory",
@@ -126,6 +131,7 @@ def validate_protocol_demo(
     tail = messages[2:]
     require(len(tail) % 2 == 0, "assistant/tool messages are not paired")
     issued_candidates: list[str] = []
+    normalized_actions: set[str] = set()
     call_ids: set[str] = set()
     inspections: set[tuple[str, str]] = set()
     call_sequence: list[str] = []
@@ -167,9 +173,31 @@ def validate_protocol_demo(
             require(result.get("candidate_id") == expected_id, f"turn {turn}: candidate ID mismatch")
             raw_action = arguments.get("action")
             action, hint = compile_action(raw_action, catalog)
+            encoded_action = json.dumps(
+                action, sort_keys=True, separators=(",", ":")
+            )
+            require(
+                encoded_action not in normalized_actions,
+                f"turn {turn}: duplicate normalized action",
+            )
+            normalized_actions.add(encoded_action)
             require(result.get("action_valid") is True, f"turn {turn}: invalid action")
             require(result.get("constraints_satisfied") is True, f"turn {turn}: unsatisfied constraints")
             require(result.get("compiled_hint") == hint, f"turn {turn}: hint mismatch")
+            if metadata.get("measurement_mode") == "plan_validation_only":
+                require(
+                    result.get("measurement_status") == "not_measured",
+                    f"turn {turn}: unexpected measurement status",
+                )
+                require(
+                    result.get("provisional_speedup") is None,
+                    f"turn {turn}: plan-only demo contains a speedup",
+                )
+                require(
+                    result.get("planning_time_ms") == []
+                    and result.get("execution_time_ms") == [],
+                    f"turn {turn}: plan-only demo contains timings",
+                )
 
             candidate_evidence = evidence.get("candidates", {}).get(expected_id)
             require(isinstance(candidate_evidence, dict), f"turn {turn}: missing candidate evidence")
@@ -212,7 +240,15 @@ def validate_protocol_demo(
             inspections.add(key)
 
     require(finished, "demo never called finish")
-    require(len(issued_candidates) == 1, "demo must submit exactly one candidate")
+    require(
+        1 <= len(issued_candidates) <= MAX_CANDIDATES,
+        f"demo must submit between 1 and {MAX_CANDIDATES} candidates",
+    )
+    if "candidate_count" in metadata:
+        require(
+            metadata["candidate_count"] == len(issued_candidates),
+            "candidate count differs from metadata",
+        )
     require(
         call_sequence == metadata.get("call_sequence"),
         "call sequence differs from metadata",
@@ -225,4 +261,3 @@ def validate_protocol_demo(
         "call_sequence": call_sequence,
         "canonical_sha256": hashlib.sha256(encoded).hexdigest(),
     }
-
