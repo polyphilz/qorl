@@ -1,0 +1,50 @@
+max_steps = 1
+output_dir = "outputs/sft"
+clean = true
+dashboard = false
+
+[run]
+name = "protocol-sft-spike"
+
+[model]
+name = "empero-ai/Qwen3.8-4B-Distill"
+impl = "custom"
+attn = "flash_attention_2"
+seq_len = 16384
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+compile = "None"
+
+[model.lora]
+rank = 16
+alpha = 32
+dropout = 0.0
+
+[data]
+name = "outputs/sft/prime-protocol-demo"
+seq_len = 16384
+batch_size = 1
+micro_batch_size = 1
+num_workers = 1
+shuffle = false
+seed = 20260830
+
+[data.loss_mask]
+system = false
+user = false
+assistant = true
+tool = false
+
+[renderer]
+name = "qwen3.5"
+enable_thinking = false
+
+[optim]
+lr = 1e-4
+weight_decay = 0.0
+
+[ckpt]
+
+[deployment]
+gpus_per_node = 1
+num_train_gpus = 1

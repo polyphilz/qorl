@@ -6,6 +6,7 @@ from pathlib import Path
 from qorl import __version__
 from qorl.benchmark import run_benchmark
 from qorl.calibration import calibrate
+from qorl.sft import sft
 
 
 def parser() -> argparse.ArgumentParser:
@@ -16,6 +17,7 @@ def parser() -> argparse.ArgumentParser:
         "calibrate", help="measure PostgreSQL's default plans on JOB"
     )
     commands.add_parser("run", help="run the configured policy on JOB")
+    commands.add_parser("sft", help="run the protocol-SFT compatibility step")
     return root
 
 
@@ -25,11 +27,12 @@ def main() -> int:
         parser().print_help()
         return 0
     try:
-        output_dir = (
-            calibrate(Path.cwd())
-            if arguments.command == "calibrate"
-            else run_benchmark(Path.cwd())
-        )
+        actions = {
+            "calibrate": calibrate,
+            "run": run_benchmark,
+            "sft": sft,
+        }
+        output_dir = actions[arguments.command](Path.cwd())
     except (RuntimeError, OSError) as error:
         print(f"qorl: {error}")
         return 1
