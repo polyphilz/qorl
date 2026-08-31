@@ -2545,11 +2545,17 @@ wheels = [
 ]
 
 [[package]]
+name = "qorl"
+version = "0.1.0"
+source = { editable = "../" }
+
+[[package]]
 name = "qorl-training"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "prime-rl", extra = ["flash-attn", "gpu"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "qorl", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "wandb", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "wandb-workspaces", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -2557,6 +2563,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "prime-rl", extras = ["gpu", "flash-attn"], git = "https://github.com/PrimeIntellect-ai/prime-rl.git?rev=v0.9.0" },
+    { name = "qorl", editable = "../" },
     { name = "wandb", specifier = "==0.27.0" },
     { name = "wandb-workspaces", specifier = "==0.4.3" },
 ]

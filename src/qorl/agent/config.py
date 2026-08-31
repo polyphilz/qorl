@@ -15,7 +15,7 @@ class QoAgentConfig:
     context_length: int
     maximum_model_turns: int
     request_timeout_seconds: int
-    seed: int
+    seed: int | None
     sampling: dict[str, int | float]
     thinking: bool
     tool_call_parser: str

@@ -15,16 +15,22 @@ class ModelError(RuntimeError):
 class OpenAIModelClient:
     """Tiny client for the subset of the OpenAI-compatible API we use."""
 
-    def __init__(self, base_url: str, timeout_seconds: int) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: int,
+        api_key: str | None = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.api_key = api_key
 
     def request(
         self, path: str, body: dict[str, Any] | None = None
     ) -> dict[str, Any]:
         data = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Content-Type": "application/json"}
-        api_key = os.environ.get("QORL_MODEL_API_KEY")
+        api_key = self.api_key or os.environ.get("QORL_MODEL_API_KEY")
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         request = urllib.request.Request(

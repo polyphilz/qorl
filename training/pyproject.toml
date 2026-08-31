@@ -3,6 +3,7 @@ name = "qorl-training"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
+    "qorl",
     "prime-rl[gpu,flash-attn] @ git+https://github.com/PrimeIntellect-ai/prime-rl.git@v0.9.0",
     "wandb==0.27.0",
     "wandb-workspaces==0.4.3",
@@ -21,6 +22,7 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
+qorl = { path = "..", editable = true }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
@@ -53,3 +55,7 @@ requires-dist = [
     "pydantic>=2.0.0",
     "torch>=2.6.0",
 ]
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"

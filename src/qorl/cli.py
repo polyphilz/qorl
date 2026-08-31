@@ -6,6 +6,7 @@ from pathlib import Path
 from qorl import __version__
 from qorl.benchmark import run_benchmark
 from qorl.calibration import calibrate
+from qorl.rl import rl
 from qorl.sft import sft
 
 
@@ -18,6 +19,7 @@ def parser() -> argparse.ArgumentParser:
     )
     commands.add_parser("run", help="run the configured policy on JOB")
     commands.add_parser("sft", help="train the protocol-SFT LoRA adapter")
+    commands.add_parser("rl", help="run reinforcement learning on CEB")
     return root
 
 
@@ -31,6 +33,7 @@ def main() -> int:
             "calibrate": calibrate,
             "run": run_benchmark,
             "sft": sft,
+            "rl": rl,
         }
         output_dir = actions[arguments.command](Path.cwd())
     except (RuntimeError, OSError) as error:

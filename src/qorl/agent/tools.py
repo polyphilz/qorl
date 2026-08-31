@@ -246,5 +246,5 @@ class AgentEnvironment:
             if method is None:
                 raise ValueError("unknown tool")
             return method(arguments), False
-        except (ValueError, json.JSONDecodeError) as error:
+        except (ValueError, RuntimeError, json.JSONDecodeError) as error:
             return {"error": str(error)}, False

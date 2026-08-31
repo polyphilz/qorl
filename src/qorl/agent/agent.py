@@ -94,19 +94,21 @@ class QoAgentPolicy:
         task_id: str,
         turn: int,
     ) -> dict[str, Any]:
-        seed_bytes = hashlib.sha256(
-            f"{self.config.seed}:{task_id}:{turn}".encode("utf-8")
-        ).digest()
-        return {
+        body = {
             "model": self.config.model,
             "messages": messages,
             "tools": tools,
             "tool_choice": "required",
             "parallel_tool_calls": False,
-            "seed": int.from_bytes(seed_bytes[:4], "big"),
             **self.config.sampling,
             "chat_template_kwargs": {"enable_thinking": self.config.thinking},
         }
+        if self.config.seed is not None:
+            seed_bytes = hashlib.sha256(
+                f"{self.config.seed}:{task_id}:{turn}".encode("utf-8")
+            ).digest()
+            body["seed"] = int.from_bytes(seed_bytes[:4], "big")
+        return body
 
     def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
         protocol = AgentProtocol.from_evaluator(

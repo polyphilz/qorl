@@ -14,7 +14,8 @@ from qorl.action import (
     TaskCatalog,
 )
 from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.tools import agent_tools
+from qorl.agent.client import OpenAIModelClient
+from qorl.agent.tools import AgentEnvironment, agent_tools
 
 
 TASK = {
@@ -186,6 +187,34 @@ def config() -> QoAgentConfig:
 
 
 class QoAgentTest(unittest.TestCase):
+    def test_exhausted_candidate_budget_is_tool_feedback(self) -> None:
+        evaluator = FakeEvaluator()
+
+        def exhausted(_: object) -> dict:
+            raise RuntimeError("rollout candidate budget is exhausted")
+
+        evaluator.evaluate = exhausted
+        result, finished = AgentEnvironment(evaluator).execute(
+            "evaluate_candidate", {"action": {"version": 1}}
+        )
+
+        self.assertEqual(
+            result, {"error": "rollout candidate budget is exhausted"}
+        )
+        self.assertFalse(finished)
+        evaluator.temporary_directory.cleanup()
+
+    def test_model_client_accepts_a_rollout_scoped_api_key(self) -> None:
+        client = OpenAIModelClient("http://example.test/v1", 10, "secret")
+
+        self.assertEqual(client.api_key, "secret")
+
+    def test_request_seed_can_be_left_to_the_rollout_server(self) -> None:
+        policy = QoAgentPolicy(replace(config(), seed=None), FakeClient())
+        body = policy.request_body([], [], "job-test", 1)
+
+        self.assertNotIn("seed", body)
+
     def test_preflight_inherits_lora_context_length_from_parent(self) -> None:
         policy = QoAgentPolicy(
             replace(config(), model="qorl-protocol-adapter"), FakeLoraClient()

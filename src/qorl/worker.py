@@ -62,6 +62,8 @@ class PostgresWorker:
         self.project_name = project_name
         self.container = ""
         self.created = False
+        self.explain_calls = 0
+        self.explain_analyze_calls = 0
         self.compose = [
             "docker",
             "compose",
@@ -244,6 +246,8 @@ exec psql \
         analyze: bool = False,
         hint: str = "",
     ) -> ExplainResult:
+        self.explain_calls += 1
+        self.explain_analyze_calls += int(analyze)
         explain_options = (
             "ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON"
             if analyze
