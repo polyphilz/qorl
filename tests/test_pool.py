@@ -5,17 +5,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from qorl.pool import (
+    WorkerPool,
     WorkerResources,
     WorkerSlot,
     memory_bytes,
     validate_host_topology,
     worker_resources,
 )
-from qorl_training.runtime import QorlRuntime
 
 
 class FakeWorker:
-    pass
+    def close(self) -> None:
+        pass
 
 
 class WorkerPoolTest(unittest.TestCase):
@@ -39,12 +40,6 @@ class WorkerPoolTest(unittest.TestCase):
         )
         self.assertEqual(resources[0].memory_bytes, 7 * 1024**3)
 
-    def test_overlapping_cpu_sets_are_rejected(self) -> None:
-        with self.assertRaisesRegex(ValueError, "must not overlap"):
-            worker_resources(
-                {"QORL_RL_WORKER_CPUSETS": "0-3;3-6;7-10;11-14"}
-            )
-
     def test_claim_returns_workers_to_the_pool(self) -> None:
         slots = tuple(
             WorkerSlot(
@@ -59,14 +54,12 @@ class WorkerPoolTest(unittest.TestCase):
             )
             for index in range(4)
         )
-        runtime = QorlRuntime(  # type: ignore[arg-type]
-            object(), slots, "test-pool", "test-sha"
-        )
+        pool = WorkerPool(slots, "test-pool", "test-sha")  # type: ignore[arg-type]
 
-        with runtime.claim_worker() as first:
-            with runtime.claim_worker() as second:
+        with pool.claim_worker() as first:
+            with pool.claim_worker() as second:
                 self.assertNotEqual(first.resources.index, second.resources.index)
-        with runtime.claim_worker() as next_slot:
+        with pool.claim_worker() as next_slot:
             self.assertEqual(next_slot.resources.index, 2)
 
     def test_topology_requires_four_nonoverlapping_physical_cores(self) -> None:

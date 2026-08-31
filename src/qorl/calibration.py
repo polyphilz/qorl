@@ -6,12 +6,14 @@ import os
 import platform
 import statistics
 import tempfile
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from qorl import __version__
 from qorl.fixture import DatabaseFixture, TaskSet, sha256_file
+from qorl.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.worker import PostgresWorker, WorkerError
 
 
@@ -161,11 +163,105 @@ def calibrate_task(
     }
 
 
-def calibrate(repository: Path) -> Path:
+def selected_tasks(
+    task_set: TaskSet, selection_path: Path, split: str | None = None
+) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
+    if selection.get("source", {}).get("inventory_id") != task_set.inventory.get(
+        "inventory_id"
+    ):
+        raise RuntimeError("calibration selection references a different inventory")
+    splits = selection.get("splits")
+    if not isinstance(splits, dict) or not splits:
+        raise RuntimeError("calibration selection has no splits")
+    if split is None:
+        if len(splits) != 1:
+            raise RuntimeError(
+                "calibration selection has multiple splits; pass --split"
+            )
+        split = next(iter(splits))
+    try:
+        selected = splits[split]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError(f"calibration selection has no {split!r} split") from error
+    by_id = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    task_ids = [item.get("task_id") for item in selected]
+    if any(not isinstance(task_id, str) for task_id in task_ids):
+        raise RuntimeError("calibration selection contains an invalid task ID")
+    if len(task_ids) != len(set(task_ids)):
+        raise RuntimeError("calibration selection contains duplicate task IDs")
+    missing = sorted(set(task_ids) - set(by_id))
+    if missing:
+        raise RuntimeError(
+            f"calibration selection contains unknown task: {missing[0]}"
+        )
+    return selection, split, [by_id[task_id] for task_id in task_ids]
+
+
+def calibrate_on_worker(
+    pool: WorkerPool, task_set: TaskSet, task: dict[str, Any]
+) -> tuple[WorkerSlot, dict[str, Any]]:
+    with pool.claim_worker() as slot:
+        result = calibrate_task(slot.worker, task_set, task)
+        result["worker"] = slot.resources.manifest()
+        return slot, result
+
+
+def failed_task(task: dict[str, Any], error: Exception) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "task_id": task["task_id"],
+        "template_id": task["template_id"],
+        "status": "failed",
+        "completed_at_utc": utc_now(),
+        "error": str(error),
+    }
+
+
+def display_path(repository: Path, path: Path) -> str:
+    try:
+        return str(path.relative_to(repository))
+    except ValueError:
+        return str(path)
+
+
+def calibrate(
+    repository: Path,
+    workload: str = "job",
+    selection_path: Path | None = None,
+    split: str | None = None,
+) -> Path:
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "job-v1", fixture.identity)
+    task_set_ids = {"job": "job-v1", "ceb": "ceb-v1"}
+    if workload not in task_set_ids:
+        raise RuntimeError(f"unknown calibration workload: {workload}")
+    if selection_path is None and split is not None:
+        raise RuntimeError("--split requires --selection")
+
+    task_set = TaskSet.load(
+        repository, task_set_ids[workload], fixture.identity
+    )
+    selection: dict[str, Any] | None = None
+    selected_split: str | None = None
+    if selection_path is None:
+        tasks = task_set.inventory["tasks"]
+        calibration_name = task_set.task_set_id
+    else:
+        selection_path = (
+            selection_path
+            if selection_path.is_absolute()
+            else repository / selection_path
+        ).resolve()
+        selection, selected_split, tasks = selected_tasks(
+            task_set, selection_path, split
+        )
+        calibration_name = selection["inventory_id"]
+    worker_count = 1 if workload == "job" else 4
+
     started_at = datetime.now(timezone.utc)
-    calibration_id = started_at.strftime("job-v1-%Y%m%dT%H%M%SZ")
+    calibration_id = started_at.strftime(
+        f"{calibration_name}-%Y%m%dT%H%M%SZ"
+    )
     output_dir = repository / "outputs/calibration" / calibration_id
     output_dir.mkdir(parents=True, exist_ok=False)
     task_dir = output_dir / "tasks"
@@ -173,10 +269,16 @@ def calibrate(repository: Path) -> Path:
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "calibration_id": calibration_id,
+        "purpose": (
+            "training timeout calibration"
+            if workload == "ceb"
+            else "evaluation baseline calibration"
+        ),
         "status": "running",
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
         "inventory_id": task_set.inventory["inventory_id"],
+        "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "database": task_set.inventory["database"],
         "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
@@ -193,8 +295,21 @@ def calibrate(repository: Path) -> Path:
             "measurement_runs": MEASUREMENT_RUNS,
             "coefficient_of_variation": "sample standard deviation / arithmetic mean",
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
+            "concurrent_tasks": worker_count,
+            "one_query_per_worker": True,
         },
-        "task_count": task_set.inventory["task_count"],
+        "selection": (
+            {
+                "inventory_id": selection["inventory_id"],
+                "path": display_path(repository, selection_path),
+                "sha256": sha256_file(selection_path),
+                "split": selected_split,
+            }
+            if selection is not None and selection_path is not None
+            else None
+        ),
+        "worker_pool": None,
+        "task_count": len(tasks),
         "completed_task_count": 0,
         "failed_task_count": 0,
     }
@@ -204,9 +319,12 @@ def calibrate(repository: Path) -> Path:
     project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
     try:
-        with PostgresWorker(fixture, project_name) as worker:
+        if workload == "job":
+            worker = PostgresWorker(fixture, project_name)
+            worker.start()
+            pool = None
             worker.capture_environment(output_dir, "pre")
-            for index, task in enumerate(task_set.inventory["tasks"], start=1):
+            for index, task in enumerate(tasks, start=1):
                 task_id = task["task_id"]
                 print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
                 try:
@@ -219,20 +337,64 @@ def calibrate(repository: Path) -> Path:
                     manifest["completed_task_count"] += 1
                 except WorkerError as error:
                     failures += 1
-                    result = {
-                        "schema_version": 1,
-                        "task_id": task_id,
-                        "template_id": task["template_id"],
-                        "status": "failed",
-                        "completed_at_utc": utc_now(),
-                        "error": str(error),
-                    }
+                    result = failed_task(task, error)
                     manifest["failed_task_count"] += 1
                     print(f"  failed: {error}")
                 write_json(task_dir / f"{task_id}.json", result)
                 write_json(manifest_path, manifest)
             worker.capture_environment(output_dir, "post")
+            worker.close()
+        else:
+            pool = start_pool(fixture, project_name)
+            manifest["worker_pool"] = pool.manifest()
+            write_json(manifest_path, manifest)
+            for slot in pool.workers:
+                slot.worker.capture_environment(
+                    output_dir / f"worker-{slot.resources.index}", "pre"
+                )
+
+            with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
+                futures: dict[
+                    Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
+                ] = {
+                    executor.submit(
+                        calibrate_on_worker, pool, task_set, task
+                    ): task
+                    for task in tasks
+                }
+                for index, future in enumerate(as_completed(futures), start=1):
+                    task = futures[future]
+                    task_id = task["task_id"]
+                    print(
+                        f"[{index}/{manifest['task_count']}] {task_id}", flush=True
+                    )
+                    try:
+                        slot, result = future.result()
+                        summary = result["summary"]
+                        print(
+                            f"  worker={slot.resources.index} "
+                            f"median={summary['median_execution_time_ms']:.3f} ms "
+                            f"cv={summary['coefficient_of_variation']:.4f}"
+                        )
+                        manifest["completed_task_count"] += 1
+                    except WorkerError as error:
+                        failures += 1
+                        result = failed_task(task, error)
+                        manifest["failed_task_count"] += 1
+                        print(f"  failed: {error}")
+                    write_json(task_dir / f"{task_id}.json", result)
+                    write_json(manifest_path, manifest)
+
+            for slot in pool.workers:
+                slot.worker.capture_environment(
+                    output_dir / f"worker-{slot.resources.index}", "post"
+                )
+            pool.close()
     except BaseException:
+        if workload == "job" and "worker" in locals():
+            worker.close()
+        if workload == "ceb" and "pool" in locals() and pool is not None:
+            pool.close()
         manifest["status"] = "interrupted"
         manifest["completed_at_utc"] = utc_now()
         write_json(manifest_path, manifest)

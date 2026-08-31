@@ -7,12 +7,25 @@ optimizer toward faster physical plans.
 ```bash
 uv sync
 uv run qorl calibrate
+uv run qorl calibrate ceb
 uv run qorl run
 ```
 
-`calibrate` restores the pinned JOB snapshot, starts one isolated PostgreSQL
-worker, measures all 113 default queries, records results and environment
-identity under `outputs/calibration/`, and removes the worker afterward.
+`calibrate` measures all 113 JOB queries on one isolated PostgreSQL worker.
+`calibrate ceb` measures the complete CEB workload concurrently on the same
+persistent four-worker pool used by training. Both record results and
+environment identity under `outputs/calibration/` and remove their workers
+afterward.
+
+Pass a versioned selection manifest to calibrate only a workload slice. If the
+manifest contains multiple splits, select one explicitly:
+
+```bash
+uv run qorl calibrate ceb \
+  --selection data/ceb/ceb-v1/rl-run-v2.json
+uv run qorl calibrate ceb \
+  --selection path/to/selection.json --split validation
+```
 
 `run` loads `configs/evaluation/run-v1.json`, runs the configured five-candidate
 policy over JOB, and records trusted results plus the complete policy trace

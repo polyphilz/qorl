@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from qorl.calibration import buffers_stable, observation, plan_sha256
+from qorl.calibration import (
+    buffers_stable,
+    observation,
+    plan_sha256,
+    selected_tasks,
+)
+from qorl.fixture import TaskSet
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def explain(*, rows: int = 10, hits: int = 100, reads: int = 5) -> dict:
@@ -22,6 +34,43 @@ def explain(*, rows: int = 10, hits: int = 100, reads: int = 5) -> dict:
 
 
 class CalibrationTest(unittest.TestCase):
+    def test_ceb_calibration_resolves_the_400_task_training_selection(self) -> None:
+        task_set = TaskSet.load(ROOT, "ceb-v1")
+        selection, split, tasks = selected_tasks(
+            task_set,
+            ROOT / "data/ceb/ceb-v1/rl-run-v2.json",
+        )
+
+        self.assertEqual(selection["inventory_id"], "qorl-rl-run-v2")
+        self.assertEqual(split, "train")
+        self.assertEqual(len(tasks), 400)
+        self.assertEqual(
+            [task["task_id"] for task in tasks],
+            [item["task_id"] for item in selection["splits"]["train"]],
+        )
+
+    def test_multiple_selection_splits_require_an_explicit_name(self) -> None:
+        task_set = TaskSet.load(ROOT, "ceb-v1")
+        first, second = task_set.inventory["tasks"][:2]
+        selection = {
+            "inventory_id": "test-selection",
+            "source": {"inventory_id": task_set.inventory["inventory_id"]},
+            "splits": {
+                "train": [{"task_id": first["task_id"]}],
+                "validation": [{"task_id": second["task_id"]}],
+            },
+        }
+        with TemporaryDirectory() as temporary:
+            path = Path(temporary) / "selection.json"
+            path.write_text(json.dumps(selection), encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "pass --split"):
+                selected_tasks(task_set, path)
+            _, split, tasks = selected_tasks(task_set, path, "validation")
+
+        self.assertEqual(split, "validation")
+        self.assertEqual([task["task_id"] for task in tasks], [second["task_id"]])
+
     def test_plan_fingerprint_ignores_runtime_observations(self) -> None:
         first = explain(rows=10, hits=100, reads=5)["Plan"]
         first.update(

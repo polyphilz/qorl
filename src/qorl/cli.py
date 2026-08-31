@@ -14,8 +14,24 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="qorl")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
-    commands.add_parser(
-        "calibrate", help="measure PostgreSQL's default plans on JOB"
+    calibrate_parser = commands.add_parser(
+        "calibrate", help="measure PostgreSQL's default plans"
+    )
+    calibrate_parser.add_argument(
+        "workload",
+        nargs="?",
+        default="job",
+        choices=("job", "ceb"),
+        help="query workload to calibrate (default: job)",
+    )
+    calibrate_parser.add_argument(
+        "--selection",
+        type=Path,
+        help="versioned task-selection manifest (default: entire workload)",
+    )
+    calibrate_parser.add_argument(
+        "--split",
+        help="selection split; inferred when the manifest has only one",
     )
     commands.add_parser("run", help="run the configured policy on JOB")
     commands.add_parser("sft", help="train the protocol-SFT LoRA adapter")
@@ -30,12 +46,19 @@ def main() -> int:
         return 0
     try:
         actions = {
-            "calibrate": calibrate,
             "run": run_benchmark,
             "sft": sft,
             "rl": rl,
         }
-        output_dir = actions[arguments.command](Path.cwd())
+        if arguments.command == "calibrate":
+            output_dir = calibrate(
+                Path.cwd(),
+                arguments.workload,
+                arguments.selection,
+                arguments.split,
+            )
+        else:
+            output_dir = actions[arguments.command](Path.cwd())
     except (RuntimeError, OSError) as error:
         print(f"qorl: {error}")
         return 1
