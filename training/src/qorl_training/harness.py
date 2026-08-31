@@ -11,7 +11,7 @@ import verifiers.v1 as vf
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.agent.tools import candidate_feedback
-from qorl.rollout import RolloutEvaluator
+from qorl.rollout import TrainingRolloutEvaluatorV1
 import qorl_training.runtime as runtime
 
 
@@ -71,7 +71,9 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
 
         with active.lock:
-            evaluator = RolloutEvaluator(active.worker, active.task_set, task)
+            evaluator = TrainingRolloutEvaluatorV1(
+                active.worker, active.task_set, task
+            )
             baseline = evaluator.start()
             policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
             final = evaluator.finish(
@@ -81,6 +83,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         trace.info["qorl"] = {
             "task_id": task["task_id"],
             "template_id": task["template_id"],
+            "measurement_protocol": evaluator.measurement_protocol.manifest(),
             "default": {
                 "plan_sha256": baseline["plan_sha256"],
                 "median_execution_time_ms": baseline[

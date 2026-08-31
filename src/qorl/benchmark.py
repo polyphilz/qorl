@@ -19,6 +19,7 @@ from qorl.rollout import (
     FINAL_PAIRS,
     GLOBAL_TIMEOUT_MS,
     MAX_CANDIDATES,
+    RIGOROUS_EVALUATION_PROTOCOL_V1,
     RolloutEvaluator,
 )
 from qorl.worker import PostgresWorker, WorkerError
@@ -189,6 +190,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             else {**agent.manifest(), "candidate_count": MAX_CANDIDATES}
         ),
         "protocol": {
+            "id": RIGOROUS_EVALUATION_PROTOCOL_V1.protocol_id,
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
             "default_warmup_runs": 1,
             "default_measurement_runs": DEFAULT_MEASUREMENTS,
@@ -196,6 +198,9 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             "novel_candidate_measurement_runs": 1,
             "final_warmup_runs_per_plan": 1,
             "final_randomized_pair_count": FINAL_PAIRS,
+            "max_explain_analyze_executions": (
+                RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions
+            ),
             "global_timeout_ms": GLOBAL_TIMEOUT_MS,
             "task_timeout": (
                 "min(global_timeout_ms, max(5000, "

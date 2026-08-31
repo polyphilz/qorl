@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 import unittest
+import random
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from qorl.rollout import RolloutEvaluator, score, task_timeout_ms
+from qorl.rollout import (
+    RIGOROUS_EVALUATION_PROTOCOL_V1,
+    RL_TRAINING_PROTOCOL_V1,
+    RolloutEvaluator,
+    TrainingRolloutEvaluatorV1,
+    score,
+    task_timeout_ms,
+)
 from qorl.worker import ExplainResult
 
 
@@ -73,6 +82,45 @@ class Worker:
         return ExplainResult(document, diagnostic)
 
 
+class CountingWorker:
+    def __init__(self) -> None:
+        self.analyze_calls = 0
+        self.plain_calls = 0
+        self.plan_ids: dict[str, int] = {}
+
+    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
+        return {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
+
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult:
+        del sql, timeout_ms
+        self.analyze_calls += int(analyze)
+        self.plain_calls += int(not analyze)
+        plan_id = self.plan_ids.setdefault(hint, len(self.plan_ids))
+        plan = deepcopy(DEFAULT_PLAN)
+        plan["Plan Rows"] = plan_id
+        document: dict[str, Any] = {"Plan": plan}
+        if analyze:
+            document |= {
+                "Planning Time": 1.0,
+                "Execution Time": 10.0 + plan_id,
+            }
+        diagnostic = (
+            "HintStateDump: {used hints:Set(seq_page_cost)}, "
+            "{not used hints:(none)}, {duplicate hints:(none)}, "
+            "{error hints:(none)}"
+            if hint
+            else ""
+        )
+        return ExplainResult(document, diagnostic)
+
+
 class RolloutTest(unittest.TestCase):
     def test_task_relative_timeout(self) -> None:
         self.assertEqual(task_timeout_ms(10, 120_000), 5_000)
@@ -101,6 +149,63 @@ class RolloutTest(unittest.TestCase):
         self.assertTrue(result["action_valid"])
         self.assertEqual(result["duplicate_of"], "default")
         self.assertEqual(result["provisional_speedup"], 1.0)
+
+    def test_rigorous_protocol_remains_26_executions(self) -> None:
+        worker = CountingWorker()
+        evaluator = RolloutEvaluator(
+            worker, Fixture(), TASK  # type: ignore[arg-type]
+        )
+
+        default, candidates, final = self.run_full_rollout(evaluator)
+
+        self.assertEqual(worker.analyze_calls, 26)
+        self.assertEqual(worker.plain_calls, 6)
+        self.assertEqual(len(default["measurements"]), 3)
+        self.assertIsNotNone(candidates[0]["warmup"])
+        self.assertEqual(len(final["pair_orders"]), 5)
+        self.assertEqual(
+            final["measurement_protocol_id"], "rigorous-evaluation-v1"
+        )
+        self.assertEqual(
+            RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions,
+            26,
+        )
+
+    def test_training_protocol_uses_13_executions(self) -> None:
+        worker = CountingWorker()
+        evaluator = TrainingRolloutEvaluatorV1(
+            worker, Fixture(), TASK  # type: ignore[arg-type]
+        )
+
+        default, candidates, final = self.run_full_rollout(evaluator)
+
+        self.assertEqual(worker.analyze_calls, 13)
+        self.assertEqual(worker.plain_calls, 6)
+        self.assertEqual(len(default["measurements"]), 1)
+        self.assertIsNone(candidates[0]["warmup"])
+        self.assertEqual(len(final["pair_orders"]), 3)
+        self.assertEqual(final["measurement_protocol_id"], "rl-training-v1")
+        self.assertEqual(
+            RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13
+        )
+
+    @staticmethod
+    def run_full_rollout(
+        evaluator: RolloutEvaluator,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+        default = evaluator.start()
+        candidates = [
+            evaluator.evaluate(
+                {
+                    "version": 1,
+                    "settings": {"seq_page_cost": float(value)},
+                }
+            )
+            for value in range(1, 6)
+        ]
+        if not all(candidate["constraints_satisfied"] for candidate in candidates):
+            raise AssertionError("test candidates must all be valid")
+        return default, candidates, evaluator.finish(random.Random(0))
 
 
 if __name__ == "__main__":
