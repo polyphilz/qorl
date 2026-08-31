@@ -10,18 +10,17 @@ from pathlib import Path
 from qorl.fixture import sha256_file
 from qorl.sft import model_snapshot, run
 
-
-CONFIG = Path("configs/training/rl-spike-v1.toml")
+CONFIG = Path("configs/training/rl-pilot-v1.toml")
 INVENTORY_CHECK = Path("scripts/rl/build_pilot_inventory.py")
 MERGE_SCRIPT = Path("scripts/rl/merge_sft_adapter.py")
 SFT_RUN = Path("outputs/sft/protocol-sft-train-v1")
 MERGED_MODEL = Path("outputs/rl/protocol-sft-v1-merged")
-RUN = Path("outputs/rl/rl-spike-v1")
+PRE_RL_REPORT = Path("outputs/rl/qorl-rl-pilot-validation-v1/pre/report.json")
+RUN = Path("outputs/rl/rl-pilot-v1")
+FINAL_STEP = 12
 
 
-def verify_merged_model(
-    base: Path, adapter: Path, merged: Path
-) -> None:
+def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
     manifest_path = merged / "qorl-merge.json"
     model_path = merged / "model.safetensors"
     if not manifest_path.is_file() or not model_path.is_file():
@@ -29,16 +28,42 @@ def verify_merged_model(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = {
         "base_model_sha256": sha256_file(base / "model.safetensors"),
-        "adapter_model_sha256": sha256_file(
-            adapter / "adapter_model.safetensors"
-        ),
-        "adapter_config_sha256": sha256_file(
-            adapter / "adapter_config.json"
-        ),
+        "adapter_model_sha256": sha256_file(adapter / "adapter_model.safetensors"),
+        "adapter_config_sha256": sha256_file(adapter / "adapter_config.json"),
         "merged_model_sha256": sha256_file(model_path),
     }
     if any(manifest.get(key) != value for key, value in expected.items()):
         raise RuntimeError("merged SFT model checksum mismatch")
+
+
+def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None:
+    path = repository / PRE_RL_REPORT
+    if not path.is_file():
+        raise RuntimeError("frozen pre-RL validation report is missing")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    summary = report.get("summary", {})
+    expected_hashes = {
+        "config_sha256": sha256_file(
+            repository / "configs/training/rl-pilot-validation-v1.json"
+        ),
+        "selection_sha256": sha256_file(
+            repository / "data/ceb/ceb-v1/rl-pilot-v1.json"
+        ),
+        "run_config_sha256": sha256_file(repository / "configs/evaluation/run-v1.json"),
+    }
+    if any(report.get(key) != value for key, value in expected_hashes.items()):
+        raise RuntimeError("frozen pre-RL validation inputs have changed")
+    if report.get("model", {}).get("model_safetensors_sha256") != merged_model_sha256:
+        raise RuntimeError("frozen pre-RL validation used a different model")
+    if not (
+        report.get("status") == "completed"
+        and report.get("phase") == "pre"
+        and summary.get("completed_rollout_count") == 64
+        and summary.get("orchestration_failure_count") == 0
+        and summary.get("task_group_count") == 16
+        and summary.get("nonzero_reward_variance_group_count") == 16
+    ):
+        raise RuntimeError("frozen pre-RL validation did not pass its gates")
 
 
 def rl(repository: Path) -> Path:
@@ -106,6 +131,10 @@ def rl(repository: Path) -> Path:
             repository,
         )
     verify_merged_model(base, adapter, merged)
+    merged_manifest = json.loads(
+        (merged / "qorl-merge.json").read_text(encoding="utf-8")
+    )
+    verify_pre_rl_validation(repository, merged_manifest["merged_model_sha256"])
 
     run(
         [
@@ -118,7 +147,7 @@ def rl(repository: Path) -> Path:
         ],
         repository,
     )
-    checkpoint = repository / RUN / "checkpoints/step_1"
+    checkpoint = repository / RUN / f"checkpoints/step_{FINAL_STEP}"
     if not checkpoint.is_dir():
-        raise RuntimeError("RL spike completed without a step-1 checkpoint")
+        raise RuntimeError(f"RL pilot completed without a step-{FINAL_STEP} checkpoint")
     return checkpoint
