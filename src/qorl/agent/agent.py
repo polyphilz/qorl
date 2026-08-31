@@ -43,11 +43,23 @@ class QoAgentPolicy:
                 f"model server does not advertise {self.config.model}: {model_ids}"
             )
         model = next(item for item in models if item["id"] == self.config.model)
-        if model.get("max_model_len") != self.config.context_length:
+        effective_context_model = model
+        if model.get("max_model_len") is None and model.get("parent"):
+            effective_context_model = next(
+                (item for item in models if item["id"] == model["parent"]),
+                model,
+            )
+        if (
+            effective_context_model.get("max_model_len")
+            != self.config.context_length
+        ):
             raise ModelError(
                 "model context length mismatch: "
                 f"expected={self.config.context_length} "
-                f"actual={model.get('max_model_len')}"
+                f"actual={model.get('max_model_len')} "
+                f"parent={model.get('parent')} "
+                "parent_actual="
+                f"{effective_context_model.get('max_model_len')}"
             )
         version = self.client.version()
         if version.get("version") != self.config.vllm_version:
@@ -59,6 +71,7 @@ class QoAgentPolicy:
             "base_url": self.config.base_url,
             "advertised_models": model_ids,
             "model": model,
+            "effective_context_model": effective_context_model,
             "vllm": version,
         }
         return self.server_identity

@@ -93,6 +93,20 @@ class FakeClient:
         return self.responses.pop(0)
 
 
+class FakeLoraClient(FakeClient):
+    def models(self) -> dict:
+        return {
+            "data": [
+                {"id": "qorl-base", "max_model_len": 262144},
+                {
+                    "id": "qorl-protocol-adapter",
+                    "parent": "qorl-base",
+                    "max_model_len": None,
+                },
+            ]
+        }
+
+
 class FakeEvaluator:
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -172,6 +186,18 @@ def config() -> QoAgentConfig:
 
 
 class QoAgentTest(unittest.TestCase):
+    def test_preflight_inherits_lora_context_length_from_parent(self) -> None:
+        policy = QoAgentPolicy(
+            replace(config(), model="qorl-protocol-adapter"), FakeLoraClient()
+        )
+
+        identity = policy.preflight()
+
+        self.assertEqual(identity["model"]["id"], "qorl-protocol-adapter")
+        self.assertEqual(
+            identity["effective_context_model"]["id"], "qorl-base"
+        )
+
     def test_runs_evaluate_then_finish_tool_loop(self) -> None:
         client = FakeClient()
         policy = QoAgentPolicy(config(), client)
