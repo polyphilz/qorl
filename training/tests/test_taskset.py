@@ -5,10 +5,22 @@ import inspect
 import unittest
 from types import SimpleNamespace
 
-from qorl_training.taskset import QorlTask
+from qorl_training.taskset import QorlTask, selected_items
 
 
 class QorlTaskTest(unittest.TestCase):
+    def test_known_inventories_only_expose_their_declared_splits(self) -> None:
+        run = {
+            "inventory_id": "qorl-rl-run-v2",
+            "splits": {"train": [{"task_id": "task", "template_id": "template"}]},
+        }
+
+        self.assertEqual(selected_items(run, "train"), run["splits"]["train"])
+        with self.assertRaisesRegex(ValueError, "not allowed"):
+            selected_items(run, "validation")
+        with self.assertRaisesRegex(ValueError, "unexpected"):
+            selected_items({"inventory_id": "unknown"}, "train")
+
     def test_scoring_hooks_are_async_and_return_numeric_signals(self) -> None:
         trace = SimpleNamespace(
             calls=[object(), object()],

@@ -10,6 +10,21 @@ import verifiers.v1 as vf
 from qorl.fixture import TaskSet
 
 
+SELECTION_SPLITS = {
+    "qorl-rl-pilot-v1": {"spike", "train", "validation"},
+    "qorl-rl-run-v2": {"train"},
+}
+
+
+def selected_items(selection: dict, split: str) -> list[dict[str, str]]:
+    inventory_id = selection.get("inventory_id")
+    if inventory_id not in SELECTION_SPLITS:
+        raise ValueError(f"unexpected QORL RL inventory: {inventory_id}")
+    if split not in SELECTION_SPLITS[inventory_id]:
+        raise ValueError(f"split {split!r} is not allowed by {inventory_id}")
+    return selection["splits"][split]
+
+
 class QorlTasksetConfig(vf.TasksetConfig):
     repository: Path = Path(".")
     selection: Path = Path("data/ceb/ceb-v1/rl-pilot-v1.json")
@@ -64,9 +79,7 @@ class QorlTaskset(vf.Taskset[QorlTask, QorlTasksetConfig]):
             else repository / self.config.selection
         )
         selection = json.loads(selection_path.read_text(encoding="utf-8"))
-        if selection.get("inventory_id") != "qorl-rl-pilot-v1":
-            raise ValueError("unexpected QORL RL pilot inventory")
-        selected = selection["splits"][self.config.split]
+        selected = selected_items(selection, self.config.split)
         tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
         for index, item in enumerate(selected):
             task = tasks[item["task_id"]]
