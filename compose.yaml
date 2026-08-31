@@ -14,16 +14,16 @@ services:
       QORL_RUNNER_PASSWORD: ${QORL_RUNNER_PASSWORD:?Set QORL_RUNNER_PASSWORD in .env}
       POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C --data-checksums
       QORL_ASSERT_RUNTIME: "1"
-      QORL_EXPECTED_CPUSET: 8-15,24-31
+      QORL_EXPECTED_CPUSET: ${QORL_POSTGRES_CPUSET:-8-15,24-31}
       QORL_EXPECTED_CPUSET_MEMS: "0"
-      QORL_EXPECTED_MEMORY_BYTES: "34359738368"
+      QORL_EXPECTED_MEMORY_BYTES: ${QORL_POSTGRES_MEMORY_BYTES:-34359738368}
       QORL_EXPECTED_MEMORY_SWAP_BYTES: "0"
       QORL_EXPECTED_SHM_BYTES: "1073741824"
     ports:
       - 127.0.0.1:${QORL_POSTGRES_PORT:-55432}:5432
-    cpuset: 8-15,24-31
-    mem_limit: 32g
-    memswap_limit: 32g
+    cpuset: ${QORL_POSTGRES_CPUSET:-8-15,24-31}
+    mem_limit: ${QORL_POSTGRES_MEMORY_LIMIT:-32g}
+    memswap_limit: ${QORL_POSTGRES_MEMORY_LIMIT:-32g}
     shm_size: 1g
     stop_grace_period: 1m
     volumes:

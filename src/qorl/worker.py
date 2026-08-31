@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -26,6 +28,7 @@ def execute(
     cwd: Path,
     input_text: str | None = None,
     check: bool = True,
+    environment: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
         command,
@@ -35,6 +38,7 @@ def execute(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        env=environment,
     )
     if check and completed.returncode != 0:
         detail = completed.stderr.strip() or completed.stdout.strip()
@@ -50,20 +54,34 @@ def run(
     cwd: Path,
     input_text: str | None = None,
     check: bool = True,
+    environment: Mapping[str, str] | None = None,
 ) -> str:
     return execute(
-        command, cwd=cwd, input_text=input_text, check=check
+        command,
+        cwd=cwd,
+        input_text=input_text,
+        check=check,
+        environment=environment,
     ).stdout
 
 
 class PostgresWorker:
-    def __init__(self, fixture: DatabaseFixture, project_name: str) -> None:
+    def __init__(
+        self,
+        fixture: DatabaseFixture,
+        project_name: str,
+        *,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
         self.fixture = fixture
         self.project_name = project_name
         self.container = ""
         self.created = False
         self.explain_calls = 0
         self.explain_analyze_calls = 0
+        self.environment = (
+            {**os.environ, **environment} if environment is not None else None
+        )
         self.compose = [
             "docker",
             "compose",
@@ -96,6 +114,7 @@ class PostgresWorker:
             cwd=self.fixture.repository,
             input_text=input_text,
             check=check,
+            environment=self.environment,
         )
 
     def execute(
@@ -110,6 +129,7 @@ class PostgresWorker:
             cwd=self.fixture.repository,
             input_text=input_text,
             check=check,
+            environment=self.environment,
         )
 
     def compose_command(self, *arguments: str, check: bool = True) -> str:

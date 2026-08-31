@@ -70,9 +70,9 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             api_key=secret,
         )
 
-        with active.lock:
+        with active.claim_worker() as slot:
             evaluator = TrainingRolloutEvaluatorV1(
-                active.worker, active.task_set, task
+                slot.worker, active.task_set, task
             )
             baseline = evaluator.start()
             policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
@@ -83,6 +83,8 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         trace.info["qorl"] = {
             "task_id": task["task_id"],
             "template_id": task["template_id"],
+            "database_pool": active.pool_manifest(),
+            "database_worker": slot.resources.manifest(),
             "measurement_protocol": evaluator.measurement_protocol.manifest(),
             "default": {
                 "plan_sha256": baseline["plan_sha256"],

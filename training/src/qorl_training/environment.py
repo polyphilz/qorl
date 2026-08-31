@@ -11,7 +11,7 @@ from qorl_training.taskset import QorlTaskset
 
 
 class QorlEnvironment(SingleAgentEnv):
-    """Own one persistent PostgreSQL worker for every served QORL episode."""
+    """Own the persistent PostgreSQL worker pool used by QORL episodes."""
 
     async def start(self) -> None:
         repository = Path(
