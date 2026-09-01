@@ -62,7 +62,10 @@ class QorlTask(vf.Task[QorlTaskData]):
                 sum(candidate["duplicate_of"] is not None for candidate in candidates)
             ),
             "timeout_candidate_attempts": float(
-                sum(candidate["execution_timed_out"] for candidate in candidates)
+                sum(
+                    candidate.get("execution_timed_out", False)
+                    for candidate in candidates
+                )
             ),
             "has_valid_candidate": float(final["status"] == "completed"),
             "final_candidate_timeout": float(
