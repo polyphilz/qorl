@@ -60,7 +60,9 @@ def fingerprint(value: Any) -> str:
     ).hexdigest()
 
 
-def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
+def summarize(
+    results: list[dict[str, Any]], planned_rollout_count: int = 64
+) -> dict[str, Any]:
     completed = [result for result in results if result["status"] == "completed"]
     finals = [result["final"] for result in completed]
     scored = [final for final in finals if final["status"] == "completed"]
@@ -95,7 +97,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         float(final["default_median_execution_time_ms"]) for final in scored
     )
     return {
-        "planned_rollout_count": 64,
+        "planned_rollout_count": planned_rollout_count,
         "completed_rollout_count": len(completed),
         "orchestration_failure_count": len(results) - len(completed),
         "valid_rollout_count": len(scored),
