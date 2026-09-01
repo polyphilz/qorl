@@ -61,7 +61,13 @@ class QorlTask(vf.Task[QorlTaskData]):
             "duplicate_candidate_attempts": float(
                 sum(candidate["duplicate_of"] is not None for candidate in candidates)
             ),
+            "timeout_candidate_attempts": float(
+                sum(candidate["execution_timed_out"] for candidate in candidates)
+            ),
             "has_valid_candidate": float(final["status"] == "completed"),
+            "final_candidate_timeout": float(
+                final["status"] == "candidate_timeout"
+            ),
             "final_speedup": float(final.get("score", 0.0)),
             "model_turns": float(len(trace.calls)),
             "total_tokens": float(trace.num_total_tokens),

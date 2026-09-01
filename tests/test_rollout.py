@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-import unittest
 import random
+import unittest
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from qorl.calibration import plan_sha256
 from qorl.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RL_TRAINING_PROTOCOL_V1,
+    RL_TRAINING_PROTOCOL_V2,
     RolloutEvaluator,
     TrainingRolloutEvaluatorV1,
+    TrainingRolloutEvaluatorV2,
     score,
     task_timeout_ms,
 )
-from qorl.worker import ExplainResult
+from qorl.timeouts import TaskTimeout
+from qorl.worker import ExplainResult, QueryTimeout
 
 
 TASK = {
@@ -121,6 +125,20 @@ class CountingWorker:
         return ExplainResult(document, diagnostic)
 
 
+class TimeoutWorker(CountingWorker):
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult:
+        if analyze and hint:
+            raise QueryTimeout(timeout_ms)
+        return super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
+
+
 class RolloutTest(unittest.TestCase):
     def test_task_relative_timeout(self) -> None:
         self.assertEqual(task_timeout_ms(10, 120_000), 5_000)
@@ -187,6 +205,55 @@ class RolloutTest(unittest.TestCase):
         self.assertEqual(final["measurement_protocol_id"], "rl-training-v1")
         self.assertEqual(
             RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13
+        )
+
+    def test_calibrated_candidate_timeout_is_a_handled_failure(self) -> None:
+        default_plan = deepcopy(DEFAULT_PLAN)
+        default_plan["Plan Rows"] = 0
+        default_plan_sha256 = plan_sha256(default_plan)
+        evaluator = TrainingRolloutEvaluatorV2(
+            TimeoutWorker(),  # type: ignore[arg-type]
+            Fixture(),  # type: ignore[arg-type]
+            TASK,
+            TaskTimeout(
+                "job-test", 1_500.0, 5_000, (default_plan_sha256,)
+            ),
+            "test-timeouts",
+        )
+        baseline = evaluator.start()
+
+        candidate = evaluator.evaluate(
+            {"version": 1, "settings": {"seq_page_cost": 2.0}}
+        )
+        final = evaluator.finish(random.Random(0))
+
+        self.assertEqual(evaluator.timeout_ms, 5_000)
+        self.assertEqual(
+            baseline["candidate_timeout"]["source"], "calibrated"
+        )
+        self.assertTrue(candidate["action_valid"])
+        self.assertTrue(candidate["constraints_satisfied"])
+        self.assertTrue(candidate["execution_timed_out"])
+        self.assertEqual(candidate["provisional_speedup"], 0.1)
+        self.assertEqual(final["status"], "no_valid_candidate")
+        self.assertEqual(final["timeout_attempt_count"], 1)
+
+    def test_calibrated_default_plan_must_still_match(self) -> None:
+        evaluator = TrainingRolloutEvaluatorV2(
+            CountingWorker(),  # type: ignore[arg-type]
+            Fixture(),  # type: ignore[arg-type]
+            TASK,
+            TaskTimeout("job-test", 1_500.0, 5_000, ("stale-plan",)),
+            "test-timeouts",
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "default plan differs"):
+            evaluator.start()
+        self.assertEqual(
+            evaluator.measurement_protocol.protocol_id, "rl-training-v2"
+        )
+        self.assertEqual(
+            RL_TRAINING_PROTOCOL_V2.max_explain_analyze_executions, 13
         )
 
     @staticmethod

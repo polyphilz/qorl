@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from qorl.action import IDENTIFIER, plan_action_schema
+from qorl.plan import compact_plan
 from qorl.rollout import RolloutEvaluator
 
 
@@ -72,7 +73,7 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
         ),
         function(
             "get_plan",
-            "Return the full raw plan for default or a server-issued candidate ID.",
+            "Return the compact physical plan for default or a server-issued candidate ID.",
             {"candidate_id": {"type": "string"}},
             ["candidate_id"],
         ),
@@ -98,6 +99,8 @@ def candidate_feedback(candidate: dict[str, Any]) -> dict[str, Any]:
         "planning_time_ms": [item["planning_time_ms"] for item in measurements],
         "execution_time_ms": [item["execution_time_ms"] for item in measurements],
         "provisional_speedup": candidate["provisional_speedup"],
+        "execution_timed_out": candidate.get("execution_timed_out", False),
+        "timeout_ms": candidate.get("timeout_ms"),
         "errors_or_diagnostics": candidate["errors_or_diagnostics"],
         "attempts_remaining": candidate["attempts_remaining"],
     }
@@ -201,7 +204,8 @@ class AgentEnvironment:
     def get_plan(self, arguments: dict[str, Any]) -> Any:
         candidate_id = arguments.get("candidate_id")
         if candidate_id == "default":
-            return self.evaluator.default["plain_explain"]
+            plan = self.evaluator.default["plain_explain"]
+            return {"Plan": compact_plan(plan["Plan"])}
         candidate = next(
             (
                 item
@@ -217,7 +221,7 @@ class AgentEnvironment:
         )
         if plan is None:
             raise ValueError("candidate has no PostgreSQL plan")
-        return plan
+        return {"Plan": compact_plan(plan["Plan"])}
 
     def execute(self, name: str, arguments: Any) -> tuple[Any, bool]:
         if not isinstance(arguments, dict):

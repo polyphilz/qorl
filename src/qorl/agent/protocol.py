@@ -24,7 +24,11 @@ class AgentProtocol:
 
     @classmethod
     def from_evaluator(
-        cls, evaluator: RolloutEvaluator, maximum_model_turns: int
+        cls,
+        evaluator: RolloutEvaluator,
+        maximum_model_turns: int,
+        context_length: int | None = None,
+        completion_reserve: int | None = None,
     ) -> AgentProtocol:
         aliases = sorted(evaluator.catalog.relations)
         tools = agent_tools(aliases)
@@ -72,6 +76,11 @@ class AgentProtocol:
                 },
             },
         }
+        if context_length is not None and completion_reserve is not None:
+            observation["context_budget"] = {
+                "maximum_tokens": context_length,
+                "reserved_for_next_completion": completion_reserve,
+            }
         return cls(
             maximum_model_turns=maximum_model_turns,
             inspection_turn_limit=inspection_turn_limit,

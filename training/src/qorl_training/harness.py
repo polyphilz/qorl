@@ -11,13 +11,17 @@ import verifiers.v1 as vf
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.agent.tools import candidate_feedback
-from qorl.rollout import TrainingRolloutEvaluatorV1
+from qorl.rollout import (
+    TrainingRolloutEvaluatorV1,
+    TrainingRolloutEvaluatorV2,
+)
 import qorl_training.runtime as runtime
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
     id: str = "qorl-training"
     run_config: Path = Path("configs/evaluation/run-v1.json")
+    context_length: int = 20_480
 
 
 class QorlHarness(vf.Harness[QorlHarnessConfig]):
@@ -62,6 +66,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             QoAgentConfig.from_dict(policy_data),
             model=ctx.model,
             base_url=endpoint.rstrip("/"),
+            context_length=self.config.context_length,
             seed=None,
         )
         client = OpenAIModelClient(
@@ -71,9 +76,18 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
 
         with active.claim_worker() as slot:
-            evaluator = TrainingRolloutEvaluatorV1(
-                slot.worker, active.task_set, task
-            )
+            if active.calibrated_timeouts is None:
+                evaluator = TrainingRolloutEvaluatorV1(
+                    slot.worker, active.task_set, task
+                )
+            else:
+                evaluator = TrainingRolloutEvaluatorV2(
+                    slot.worker,
+                    active.task_set,
+                    task,
+                    active.calibrated_timeouts.task(task["task_id"]),
+                    active.calibrated_timeouts.manifest["manifest_id"],
+                )
             baseline = evaluator.start()
             policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
             final = evaluator.finish(
@@ -85,12 +99,18 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             "template_id": task["template_id"],
             "database_pool": active.pool_manifest(),
             "database_worker": slot.resources.manifest(),
+            "candidate_timeout_manifest": (
+                active.calibrated_timeouts.identity()
+                if active.calibrated_timeouts is not None
+                else None
+            ),
             "measurement_protocol": evaluator.measurement_protocol.manifest(),
             "default": {
                 "plan_sha256": baseline["plan_sha256"],
                 "median_execution_time_ms": baseline[
                     "median_execution_time_ms"
                 ],
+                "candidate_timeout": baseline["candidate_timeout"],
             },
             "candidates": [
                 {**candidate_feedback(candidate), "action": candidate["action"]}
@@ -101,5 +121,8 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 "stop_reason": policy_trace["stop_reason"],
                 "tools_sha256": policy_trace["tools_sha256"],
                 "usage": policy_trace["usage"],
+                "context_estimate_tokens": policy_trace[
+                    "context_estimate_tokens"
+                ],
             },
         }

@@ -326,6 +326,15 @@ def require_enum(value: Any, allowed: set[str], label: str) -> str:
     return value
 
 
+def require_enum_list(value: Any, allowed: set[str], label: str) -> list[str]:
+    values = require_list(value, label)
+    if any(not isinstance(item, str) or item not in allowed for item in values):
+        raise ActionError(f"{label} must contain only {sorted(allowed)}")
+    if len(values) != len(set(values)):
+        raise ActionError(f"{label} contains duplicate methods")
+    return values
+
+
 def require_relation(value: Any, catalog: TaskCatalog, label: str) -> str:
     if not isinstance(value, str) or value not in catalog.relations:
         raise ActionError(f"{label} is not a relation in this query")
@@ -437,9 +446,9 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another join target")
         join_targets.add(target)
         force = require_enum(item.get("force", "auto"), JOIN_METHODS | {"auto"}, f"{label}.force")
-        forbid = require_list(item.get("forbid"), f"{label}.forbid")
-        if len(forbid) != len(set(forbid)) or any(method not in JOIN_METHODS for method in forbid):
-            raise ActionError(f"{label}.forbid contains invalid or duplicate methods")
+        forbid = require_enum_list(
+            item.get("forbid"), JOIN_METHODS, f"{label}.forbid"
+        )
         if set(forbid) == JOIN_METHODS:
             raise ActionError(f"{label}.forbid cannot disable every join method")
         if force in forbid:
@@ -461,9 +470,9 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another scan target")
         scan_relations.add(relation)
         force = require_enum(item.get("force", "auto"), SCAN_METHODS | {"auto"}, f"{label}.force")
-        forbid = require_list(item.get("forbid"), f"{label}.forbid")
-        if len(forbid) != len(set(forbid)) or any(method not in SCAN_METHODS for method in forbid):
-            raise ActionError(f"{label}.forbid contains invalid or duplicate methods")
+        forbid = require_enum_list(
+            item.get("forbid"), SCAN_METHODS, f"{label}.forbid"
+        )
         if set(forbid) == SCAN_METHODS:
             raise ActionError(f"{label}.forbid cannot disable every scan method")
         if force in forbid:

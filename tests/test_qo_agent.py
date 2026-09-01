@@ -108,6 +108,22 @@ class FakeLoraClient(FakeClient):
         }
 
 
+class ContextLimitClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses[0]["usage"] = {
+            "prompt_tokens": 18_500,
+            "completion_tokens": 500,
+            "total_tokens": 19_000,
+        }
+
+
+class MissingUsageClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses[0].pop("usage")
+
+
 class FakeEvaluator:
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -138,6 +154,13 @@ class FakeEvaluator:
         )
         self.default = {
             "compact_plan": {"Node Type": "Result"},
+            "plain_explain": {
+                "Plan": {
+                    "Node Type": "Result",
+                    "Plan Rows": 1,
+                    "Total Cost": 99.0,
+                }
+            },
             "median_execution_time_ms": 1.0,
         }
         self.timeout_ms = 5_000
@@ -187,6 +210,19 @@ def config() -> QoAgentConfig:
 
 
 class QoAgentTest(unittest.TestCase):
+    def test_get_default_plan_returns_only_compact_fields(self) -> None:
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+
+        result, finished = AgentEnvironment(evaluator).execute(
+            "get_plan", {"candidate_id": "default"}
+        )
+
+        self.assertEqual(
+            result, {"Plan": {"Node Type": "Result", "Plan Rows": 1}}
+        )
+        self.assertFalse(finished)
+
     def test_exhausted_candidate_budget_is_tool_feedback(self) -> None:
         evaluator = FakeEvaluator()
 
@@ -288,6 +324,31 @@ class QoAgentTest(unittest.TestCase):
             tool["function"]["name"] for tool in client.requests[0]["tools"]
         }
         self.assertEqual(first_tools, {"evaluate_candidate"})
+
+    def test_stops_before_the_next_turn_would_exceed_context(self) -> None:
+        client = ContextLimitClient()
+        policy = QoAgentPolicy(
+            replace(config(), context_length=20_480), client
+        )
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+
+        trace = policy.search(evaluator)  # type: ignore[arg-type]
+
+        self.assertEqual(trace["stop_reason"], "context_budget")
+        self.assertEqual(len(client.requests), 1)
+        self.assertGreater(trace["context_estimate_tokens"], 19_000)
+
+    def test_stops_if_the_server_omits_token_usage(self) -> None:
+        client = MissingUsageClient()
+        policy = QoAgentPolicy(config(), client)
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+
+        trace = policy.search(evaluator)  # type: ignore[arg-type]
+
+        self.assertEqual(trace["stop_reason"], "missing_token_usage")
+        self.assertEqual(len(client.requests), 1)
 
     def test_evaluate_tool_contains_resolvable_join_tree_schema(self) -> None:
         evaluate = next(

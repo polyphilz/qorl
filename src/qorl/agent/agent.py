@@ -111,14 +111,21 @@ class QoAgentPolicy:
         return body
 
     def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
+        completion_reserve = max(
+            256, int(self.config.sampling.get("max_tokens", 0))
+        )
         protocol = AgentProtocol.from_evaluator(
-            evaluator, self.config.maximum_model_turns
+            evaluator,
+            self.config.maximum_model_turns,
+            self.config.context_length,
+            completion_reserve,
         )
         messages = protocol.initial_messages()
         responses: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         environment = AgentEnvironment(evaluator)
         stop_reason = "model_turn_limit"
+        context_estimate_tokens: int | None = None
 
         for turn in range(1, self.config.maximum_model_turns + 1):
             available_tools = protocol.available_tools(
@@ -151,6 +158,7 @@ class QoAgentPolicy:
                 continue
 
             should_finish = False
+            pending_tool_tokens = 0
             for index, call in enumerate(calls):
                 call_id = call.get("id", f"turn-{turn}-call-{index + 1}")
                 name = call.get("function", {}).get("name", "")
@@ -184,12 +192,16 @@ class QoAgentPolicy:
                         print(f"  {result['candidate_id']}: {label}", flush=True)
                     elif name != "finish":
                         print(f"  turn-{turn:02d}: {name}", flush=True)
+                content = json.dumps(result, sort_keys=True)
+                # A byte-fallback tokenizer cannot produce more tokens than
+                # input bytes. Include a small allowance for message framing.
+                pending_tool_tokens += len(content.encode("utf-8")) + 64
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": call_id,
                         "name": name,
-                        "content": json.dumps(result, sort_keys=True),
+                        "content": content,
                     }
                 )
                 events.append(
@@ -203,6 +215,28 @@ class QoAgentPolicy:
                 should_finish = should_finish or finished
             if should_finish:
                 stop_reason = "model_finish"
+                break
+            response_usage = response.get("usage", {})
+            total_tokens = response_usage.get("total_tokens")
+            if not isinstance(total_tokens, int):
+                prompt_tokens = response_usage.get("prompt_tokens")
+                completion_tokens = response_usage.get("completion_tokens")
+                if isinstance(prompt_tokens, int) and isinstance(
+                    completion_tokens, int
+                ):
+                    total_tokens = prompt_tokens + completion_tokens
+            if isinstance(total_tokens, int):
+                context_estimate_tokens = total_tokens + pending_tool_tokens
+                if (
+                    context_estimate_tokens + completion_reserve
+                    >= self.config.context_length
+                ):
+                    stop_reason = "context_budget"
+                    break
+            else:
+                # Continuing without server-reported usage would make the next
+                # request's fit unknowable. End this rollout cleanly instead.
+                stop_reason = "missing_token_usage"
                 break
 
         usage: dict[str, int] = {}
@@ -219,4 +253,5 @@ class QoAgentPolicy:
             "model_responses": responses,
             "tool_events": events,
             "usage": usage,
+            "context_estimate_tokens": context_estimate_tokens,
         }

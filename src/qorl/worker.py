@@ -16,6 +16,12 @@ class WorkerError(RuntimeError):
     pass
 
 
+class QueryTimeout(WorkerError):
+    def __init__(self, timeout_ms: int) -> None:
+        super().__init__(f"query exceeded statement_timeout={timeout_ms} ms")
+        self.timeout_ms = timeout_ms
+
+
 @dataclass(frozen=True)
 class ExplainResult:
     document: dict[str, Any]
@@ -290,25 +296,30 @@ exec env \
         --dbname="${{POSTGRES_DB:-$POSTGRES_USER}}" \
         --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
 """
-        completed = self.execute(
-            [
-                "docker",
-                "exec",
-                "--interactive",
-                self.container,
-                "bash",
-                "-Eeuo",
-                "pipefail",
-                "-c",
-                shell,
-            ],
-            input_text=(
-                f"EXPLAIN ({explain_options})\n"
-                + (hint + "\n" if hint else "")
-                + sql.strip()
-                + "\n"
-            ),
-        )
+        try:
+            completed = self.execute(
+                [
+                    "docker",
+                    "exec",
+                    "--interactive",
+                    self.container,
+                    "bash",
+                    "-Eeuo",
+                    "pipefail",
+                    "-c",
+                    shell,
+                ],
+                input_text=(
+                    f"EXPLAIN ({explain_options})\n"
+                    + (hint + "\n" if hint else "")
+                    + sql.strip()
+                    + "\n"
+                ),
+            )
+        except WorkerError as error:
+            if "canceling statement due to statement timeout" in str(error):
+                raise QueryTimeout(timeout_ms) from error
+            raise
         try:
             parsed = json.loads(completed.stdout)
             return ExplainResult(parsed[0], completed.stderr)

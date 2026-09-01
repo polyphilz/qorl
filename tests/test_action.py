@@ -19,6 +19,20 @@ TASK = {
 
 
 class ActionTest(unittest.TestCase):
+    def test_rejects_non_string_forbidden_methods_as_an_action_error(self) -> None:
+        with self.assertRaisesRegex(
+            ActionError, "scans\\[0\\]\\.forbid must contain only"
+        ):
+            compile_action(
+                {
+                    "version": 1,
+                    "scans": [
+                        {"relation": "a", "forbid": [{"method": "seq"}]}
+                    ],
+                },
+                self.catalog,
+            )
+
     def setUp(self) -> None:
         self.catalog = TaskCatalog.from_task(
             TASK,
