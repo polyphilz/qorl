@@ -16,6 +16,11 @@ SALT = "qorl-rl-run-v2"
 TASK_COUNT = 400
 TASKS_PER_UPDATE = 4
 ROLLOUTS_PER_TASK = 4
+EXCLUDED_TASKS = {
+    "ceb-7a-7a117": (
+        "default PostgreSQL plan exceeded the 120-second calibration cap"
+    ),
+}
 
 
 def sha256(path: Path) -> str:
@@ -37,7 +42,11 @@ def build(source: dict[str, Any], pilot: dict[str, Any]) -> dict[str, Any]:
     }
     by_template: dict[str, list[dict[str, Any]]] = {}
     for task in source["tasks"]:
-        if task["partition"] == "train" and task["task_id"] not in prior_ids:
+        if (
+            task["partition"] == "train"
+            and task["task_id"] not in prior_ids
+            and task["task_id"] not in EXCLUDED_TASKS
+        ):
             by_template.setdefault(task["template_id"], []).append(task)
 
     template_order = sorted(
@@ -91,6 +100,10 @@ def build(source: dict[str, Any], pilot: dict[str, Any]) -> dict[str, Any]:
             "template_order": template_order,
             "template_quotas": quotas,
             "training_allowed": ["train"],
+            "excluded_tasks": [
+                {"task_id": task_id, "reason": reason}
+                for task_id, reason in sorted(EXCLUDED_TASKS.items())
+            ],
             "prior_inventory": {
                 "path": "rl-pilot-v1.json",
                 "sha256": sha256(PILOT),

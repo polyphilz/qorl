@@ -13,6 +13,12 @@
   "schema_version": 1,
   "selection": {
     "algorithm": "lowest salted SHA-256 task IDs per template, emitted in salted template round-robin order",
+    "excluded_tasks": [
+      {
+        "reason": "default PostgreSQL plan exceeded the 120-second calibration cap",
+        "task_id": "ceb-7a-7a117"
+      }
+    ],
     "prior_inventory": {
       "excluded_distinct_task_count": 64,
       "excluded_training_task_count": 48,
@@ -817,7 +823,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a117",
+        "task_id": "ceb-7a-7a6",
         "template_id": "ceb-7a"
       },
       {
@@ -865,7 +871,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a6",
+        "task_id": "ceb-7a-7a64",
         "template_id": "ceb-7a"
       },
       {
@@ -913,7 +919,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a64",
+        "task_id": "ceb-7a-7a10",
         "template_id": "ceb-7a"
       },
       {
@@ -961,7 +967,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a10",
+        "task_id": "ceb-7a-7a118",
         "template_id": "ceb-7a"
       },
       {
@@ -1009,7 +1015,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a118",
+        "task_id": "ceb-7a-7a71",
         "template_id": "ceb-7a"
       },
       {
@@ -1057,7 +1063,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a71",
+        "task_id": "ceb-7a-7a60",
         "template_id": "ceb-7a"
       },
       {
@@ -1105,7 +1111,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a60",
+        "task_id": "ceb-7a-7a45",
         "template_id": "ceb-7a"
       },
       {
@@ -1153,7 +1159,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a45",
+        "task_id": "ceb-7a-7a164",
         "template_id": "ceb-7a"
       },
       {
@@ -1201,7 +1207,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a164",
+        "task_id": "ceb-7a-7a139",
         "template_id": "ceb-7a"
       },
       {
@@ -1249,7 +1255,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a139",
+        "task_id": "ceb-7a-7a77",
         "template_id": "ceb-7a"
       },
       {
@@ -1297,7 +1303,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a77",
+        "task_id": "ceb-7a-7a91",
         "template_id": "ceb-7a"
       },
       {
@@ -1345,7 +1351,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a91",
+        "task_id": "ceb-7a-7a36",
         "template_id": "ceb-7a"
       },
       {
@@ -1393,7 +1399,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a36",
+        "task_id": "ceb-7a-7a89",
         "template_id": "ceb-7a"
       },
       {
@@ -1441,7 +1447,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a89",
+        "task_id": "ceb-7a-7a99",
         "template_id": "ceb-7a"
       },
       {
@@ -1489,7 +1495,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a99",
+        "task_id": "ceb-7a-7a129",
         "template_id": "ceb-7a"
       },
       {
@@ -1537,7 +1543,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a129",
+        "task_id": "ceb-7a-7a167",
         "template_id": "ceb-7a"
       },
       {
@@ -1585,7 +1591,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a167",
+        "task_id": "ceb-7a-7a108",
         "template_id": "ceb-7a"
       },
       {
@@ -1633,7 +1639,7 @@
         "template_id": "ceb-3b"
       },
       {
-        "task_id": "ceb-7a-7a108",
+        "task_id": "ceb-7a-7a14",
         "template_id": "ceb-7a"
       },
       {

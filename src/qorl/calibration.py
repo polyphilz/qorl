@@ -295,7 +295,8 @@ def calibrate(
             "measurement_runs": MEASUREMENT_RUNS,
             "coefficient_of_variation": "sample standard deviation / arithmetic mean",
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
-            "concurrent_tasks": worker_count,
+            "worker_count": worker_count,
+            "concurrent_tasks": min(worker_count, len(tasks)),
             "one_query_per_worker": True,
         },
         "selection": (
