@@ -15,8 +15,8 @@ from qorl.action import (
 )
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
+from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tools import AgentEnvironment, agent_tools
-
 
 TASK = {
     "task_id": "job-test",
@@ -247,6 +247,17 @@ def config() -> QoAgentConfig:
 
 
 class QoAgentTest(unittest.TestCase):
+    def test_protocol_exposes_a_one_candidate_training_budget(self) -> None:
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator.max_candidates = 1
+
+        protocol = AgentProtocol.from_evaluator(evaluator, 64)
+
+        self.assertEqual(protocol.observation["candidate_attempts"], 1)
+        self.assertEqual(protocol.observation["turn_budget"]["reserved_final_turns"], 2)
+        self.assertEqual(protocol.available_tool_names(1, 1), {"finish"})
+
     def test_get_default_plan_returns_only_compact_fields(self) -> None:
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
@@ -255,9 +266,7 @@ class QoAgentTest(unittest.TestCase):
             "get_plan", {"candidate_id": "default"}
         )
 
-        self.assertEqual(
-            result, {"Plan": {"Node Type": "Result", "Plan Rows": 1}}
-        )
+        self.assertEqual(result, {"Plan": {"Node Type": "Result", "Plan Rows": 1}})
         self.assertFalse(finished)
 
     def test_exhausted_candidate_budget_is_tool_feedback(self) -> None:
@@ -271,9 +280,7 @@ class QoAgentTest(unittest.TestCase):
             "evaluate_candidate", {"action": {"version": 1}}
         )
 
-        self.assertEqual(
-            result, {"error": "rollout candidate budget is exhausted"}
-        )
+        self.assertEqual(result, {"error": "rollout candidate budget is exhausted"})
         self.assertFalse(finished)
         evaluator.temporary_directory.cleanup()
 
@@ -296,9 +303,7 @@ class QoAgentTest(unittest.TestCase):
         identity = policy.preflight()
 
         self.assertEqual(identity["model"]["id"], "qorl-protocol-adapter")
-        self.assertEqual(
-            identity["effective_context_model"]["id"], "qorl-base"
-        )
+        self.assertEqual(identity["effective_context_model"]["id"], "qorl-base")
 
     def test_runs_evaluate_then_finish_tool_loop(self) -> None:
         client = FakeClient()
@@ -315,9 +320,7 @@ class QoAgentTest(unittest.TestCase):
         self.assertEqual(evaluator.actions, [{"version": 1}])
         self.assertEqual(trace["stop_reason"], "model_finish")
         self.assertEqual(trace["usage"]["prompt_tokens"], 220)
-        self.assertEqual(
-            trace["initial_observation"]["planner_settings"]["geqo"], "on"
-        )
+        self.assertEqual(trace["initial_observation"]["planner_settings"]["geqo"], "on")
         self.assertEqual(
             trace["initial_observation"]["turn_budget"],
             {
@@ -338,9 +341,7 @@ class QoAgentTest(unittest.TestCase):
             ["system", "user", "assistant", "tool", "assistant", "tool"],
         )
         self.assertEqual(client.requests[0]["tool_choice"], "required")
-        first_tools = {
-            tool["function"]["name"] for tool in client.requests[0]["tools"]
-        }
+        first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
         second_tools = {
             tool["function"]["name"] for tool in client.requests[1]["tools"]
         }
@@ -348,9 +349,7 @@ class QoAgentTest(unittest.TestCase):
         self.assertIn("keep_default", first_tools)
         self.assertIn("finish", second_tools)
         self.assertNotIn("keep_default", second_tools)
-        self.assertFalse(
-            client.requests[0]["chat_template_kwargs"]["enable_thinking"]
-        )
+        self.assertFalse(client.requests[0]["chat_template_kwargs"]["enable_thinking"])
 
     def test_keep_default_ends_without_a_candidate(self) -> None:
         client = KeepDefaultClient()
@@ -381,24 +380,18 @@ class QoAgentTest(unittest.TestCase):
 
     def test_reserved_turns_only_offer_decision_tools(self) -> None:
         client = FakeClient()
-        policy = QoAgentPolicy(
-            replace(config(), maximum_model_turns=2), client
-        )
+        policy = QoAgentPolicy(replace(config(), maximum_model_turns=2), client)
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
         policy.search(evaluator)  # type: ignore[arg-type]
 
-        first_tools = {
-            tool["function"]["name"] for tool in client.requests[0]["tools"]
-        }
+        first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
         self.assertEqual(first_tools, {"evaluate_candidate", "keep_default"})
 
     def test_stops_before_the_next_turn_would_exceed_context(self) -> None:
         client = ContextLimitClient()
-        policy = QoAgentPolicy(
-            replace(config(), context_length=20_480), client
-        )
+        policy = QoAgentPolicy(replace(config(), context_length=20_480), client)
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
@@ -433,9 +426,7 @@ class QoAgentTest(unittest.TestCase):
         leaves = parameters["$defs"]["join_tree"]["oneOf"][0]
         self.assertEqual(leaves["enum"], ["a", "b"])
         scans = parameters["properties"]["action"]["properties"]["scans"]
-        self.assertEqual(
-            scans["items"]["properties"]["relation"]["enum"], ["a", "b"]
-        )
+        self.assertEqual(scans["items"]["properties"]["relation"]["enum"], ["a", "b"])
 
 
 if __name__ == "__main__":

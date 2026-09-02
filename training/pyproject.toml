@@ -4,7 +4,7 @@ version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
     "qorl",
-    "prime-rl[gpu,flash-attn] @ git+https://github.com/PrimeIntellect-ai/prime-rl.git@v0.9.0",
+    "prime-rl[gpu,flash-attn]",
     "wandb==0.27.0",
     "wandb-workspaces==0.4.3",
 ]
@@ -23,6 +23,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 qorl = { path = "..", editable = true }
+prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "188b7e1" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }

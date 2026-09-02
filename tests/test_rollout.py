@@ -3,7 +3,6 @@ from __future__ import annotations
 import random
 import unittest
 from copy import deepcopy
-from pathlib import Path
 from typing import Any
 
 from qorl.calibration import plan_sha256
@@ -19,7 +18,6 @@ from qorl.rollout import (
 )
 from qorl.timeouts import TaskTimeout
 from qorl.worker import ExplainResult, QueryTimeout
-
 
 TASK = {
     "task_id": "job-test",
@@ -153,32 +151,61 @@ class RolloutTest(unittest.TestCase):
 
     def test_invalid_action_consumes_attempt(self) -> None:
         evaluator = RolloutEvaluator(
-            Worker(), Fixture(), TASK  # type: ignore[arg-type]
+            Worker(),
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
         evaluator.start()
         result = evaluator.evaluate({"version": 2})
         self.assertFalse(result["action_valid"])
         self.assertEqual(result["attempts_remaining"], 4)
 
-    def test_default_plan_duplicate_reuses_measurements(self) -> None:
+    def test_candidate_budget_can_be_reduced_for_training(self) -> None:
         evaluator = RolloutEvaluator(
-            Worker(), Fixture(), TASK  # type: ignore[arg-type]
+            Worker(),  # type: ignore[arg-type]
+            Fixture(),  # type: ignore[arg-type]
+            TASK,
+            max_candidates=1,
         )
         evaluator.start()
-        result = evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
+
+        result = evaluator.evaluate({"version": 2})
+
+        self.assertEqual(result["attempts_remaining"], 0)
+        with self.assertRaisesRegex(RuntimeError, "budget is exhausted"):
+            evaluator.evaluate({"version": 2})
+        self.assertEqual(
+            evaluator.measurement_protocol.manifest(1)[
+                "max_explain_analyze_executions"
+            ],
+            18,
+        )
+
+    def test_default_plan_duplicate_reuses_measurements(self) -> None:
+        evaluator = RolloutEvaluator(
+            Worker(),
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
+        )
+        evaluator.start()
+        result = evaluator.evaluate(
+            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
+        )
         self.assertTrue(result["action_valid"])
         self.assertEqual(result["duplicate_of"], "default")
         self.assertEqual(result["provisional_speedup"], 1.0)
 
-    def test_default_fingerprint_winner_is_exactly_one_without_remeasurement(self) -> None:
+    def test_default_fingerprint_winner_is_exactly_one_without_remeasurement(
+        self,
+    ) -> None:
         worker = Worker()
         evaluator = RolloutEvaluator(
-            worker, Fixture(), TASK  # type: ignore[arg-type]
+            worker,
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
         evaluator.start()
-        evaluator.evaluate(
-            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
-        )
+        evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
         analyze_calls_before_finish = worker.analyze_calls
 
         final = evaluator.finish(random.Random(0))
@@ -195,7 +222,9 @@ class RolloutTest(unittest.TestCase):
     def test_keep_default_is_a_zero_reward_terminal_decision(self) -> None:
         worker = Worker()
         evaluator = RolloutEvaluator(
-            worker, Fixture(), TASK  # type: ignore[arg-type]
+            worker,
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
         baseline = evaluator.start()
         analyze_calls_before_decision = worker.analyze_calls
@@ -215,12 +244,12 @@ class RolloutTest(unittest.TestCase):
 
     def test_keep_default_is_rejected_after_a_candidate(self) -> None:
         evaluator = RolloutEvaluator(
-            Worker(), Fixture(), TASK  # type: ignore[arg-type]
+            Worker(),
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
         evaluator.start()
-        evaluator.evaluate(
-            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
-        )
+        evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
 
         with self.assertRaisesRegex(RuntimeError, "before submitting a candidate"):
             evaluator.keep_default()
@@ -228,7 +257,9 @@ class RolloutTest(unittest.TestCase):
     def test_rigorous_protocol_remains_26_executions(self) -> None:
         worker = CountingWorker()
         evaluator = RolloutEvaluator(
-            worker, Fixture(), TASK  # type: ignore[arg-type]
+            worker,
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
 
         default, candidates, final = self.run_full_rollout(evaluator)
@@ -238,9 +269,7 @@ class RolloutTest(unittest.TestCase):
         self.assertEqual(len(default["measurements"]), 3)
         self.assertIsNotNone(candidates[0]["warmup"])
         self.assertEqual(len(final["pair_orders"]), 5)
-        self.assertEqual(
-            final["measurement_protocol_id"], "rigorous-evaluation-v1"
-        )
+        self.assertEqual(final["measurement_protocol_id"], "rigorous-evaluation-v1")
         self.assertEqual(
             RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions,
             26,
@@ -249,7 +278,9 @@ class RolloutTest(unittest.TestCase):
     def test_training_protocol_uses_13_executions(self) -> None:
         worker = CountingWorker()
         evaluator = TrainingRolloutEvaluatorV1(
-            worker, Fixture(), TASK  # type: ignore[arg-type]
+            worker,
+            Fixture(),
+            TASK,  # type: ignore[arg-type]
         )
 
         default, candidates, final = self.run_full_rollout(evaluator)
@@ -260,9 +291,7 @@ class RolloutTest(unittest.TestCase):
         self.assertIsNone(candidates[0]["warmup"])
         self.assertEqual(len(final["pair_orders"]), 3)
         self.assertEqual(final["measurement_protocol_id"], "rl-training-v1")
-        self.assertEqual(
-            RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13
-        )
+        self.assertEqual(RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13)
 
     def test_calibrated_candidate_timeout_is_a_handled_failure(self) -> None:
         default_plan = deepcopy(DEFAULT_PLAN)
@@ -272,9 +301,7 @@ class RolloutTest(unittest.TestCase):
             TimeoutWorker(),  # type: ignore[arg-type]
             Fixture(),  # type: ignore[arg-type]
             TASK,
-            TaskTimeout(
-                "job-test", 1_500.0, 5_000, (default_plan_sha256,)
-            ),
+            TaskTimeout("job-test", 1_500.0, 5_000, (default_plan_sha256,)),
             "test-timeouts",
         )
         baseline = evaluator.start()
@@ -285,9 +312,7 @@ class RolloutTest(unittest.TestCase):
         final = evaluator.finish(random.Random(0))
 
         self.assertEqual(evaluator.timeout_ms, 5_000)
-        self.assertEqual(
-            baseline["candidate_timeout"]["source"], "calibrated"
-        )
+        self.assertEqual(baseline["candidate_timeout"]["source"], "calibrated")
         self.assertTrue(candidate["action_valid"])
         self.assertTrue(candidate["constraints_satisfied"])
         self.assertTrue(candidate["execution_timed_out"])
@@ -306,12 +331,8 @@ class RolloutTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "default plan differs"):
             evaluator.start()
-        self.assertEqual(
-            evaluator.measurement_protocol.protocol_id, "rl-training-v2"
-        )
-        self.assertEqual(
-            RL_TRAINING_PROTOCOL_V2.max_explain_analyze_executions, 13
-        )
+        self.assertEqual(evaluator.measurement_protocol.protocol_id, "rl-training-v2")
+        self.assertEqual(RL_TRAINING_PROTOCOL_V2.max_explain_analyze_executions, 13)
 
     @staticmethod
     def run_full_rollout(

@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import verifiers.v1 as vf
+from pydantic import Field
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
@@ -15,13 +16,14 @@ from qorl.rollout import (
     TrainingRolloutEvaluatorV1,
     TrainingRolloutEvaluatorV2,
 )
-import qorl_training.runtime as runtime
+from qorl_training import runtime
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
     id: str = "qorl-training"
     run_config: Path = Path("configs/evaluation/run-v1.json")
     context_length: int = 20_480
+    candidate_attempts: int = Field(5, ge=1)
 
 
 class QorlHarness(vf.Harness[QorlHarnessConfig]):
@@ -78,7 +80,10 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         with active.claim_worker() as slot:
             if active.calibrated_timeouts is None:
                 evaluator = TrainingRolloutEvaluatorV1(
-                    slot.worker, active.task_set, task
+                    slot.worker,
+                    active.task_set,
+                    task,
+                    max_candidates=self.config.candidate_attempts,
                 )
             else:
                 evaluator = TrainingRolloutEvaluatorV2(
@@ -87,6 +92,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                     task,
                     active.calibrated_timeouts.task(task["task_id"]),
                     active.calibrated_timeouts.manifest["manifest_id"],
+                    max_candidates=self.config.candidate_attempts,
                 )
             baseline = evaluator.start()
             policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
@@ -104,12 +110,12 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 if active.calibrated_timeouts is not None
                 else None
             ),
-            "measurement_protocol": evaluator.measurement_protocol.manifest(),
+            "measurement_protocol": evaluator.measurement_protocol.manifest(
+                evaluator.max_candidates
+            ),
             "default": {
                 "plan_sha256": baseline["plan_sha256"],
-                "median_execution_time_ms": baseline[
-                    "median_execution_time_ms"
-                ],
+                "median_execution_time_ms": baseline["median_execution_time_ms"],
                 "candidate_timeout": baseline["candidate_timeout"],
             },
             "candidates": [
@@ -121,8 +127,6 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 "stop_reason": policy_trace["stop_reason"],
                 "tools_sha256": policy_trace["tools_sha256"],
                 "usage": policy_trace["usage"],
-                "context_estimate_tokens": policy_trace[
-                    "context_estimate_tokens"
-                ],
+                "context_estimate_tokens": policy_trace["context_estimate_tokens"],
             },
         }

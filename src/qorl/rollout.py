@@ -18,7 +18,6 @@ from qorl.worker import (
     WorkerError,
 )
 
-
 DEFAULT_MEASUREMENTS = 3
 FINAL_PAIRS = 5
 MAX_CANDIDATES = 5
@@ -36,18 +35,24 @@ class MeasurementProtocol:
 
     @property
     def max_explain_analyze_executions(self) -> int:
+        return self.max_explain_analyze_executions_for(MAX_CANDIDATES)
+
+    def max_explain_analyze_executions_for(self, candidate_attempts: int) -> int:
         return (
             self.default_warmup_runs
             + self.default_measurement_runs
-            + MAX_CANDIDATES
+            + candidate_attempts
             * (self.candidate_warmup_runs + self.candidate_measurement_runs)
             + 2 * self.final_warmup_pairs
             + 2 * self.final_randomized_pairs
         )
 
-    def manifest(self) -> dict[str, int | str]:
+    def manifest(
+        self, candidate_attempts: int = MAX_CANDIDATES
+    ) -> dict[str, int | str]:
         return {
             "id": self.protocol_id,
+            "candidate_attempts": candidate_attempts,
             "default_warmup_runs": self.default_warmup_runs,
             "default_measurement_runs": self.default_measurement_runs,
             "novel_candidate_warmup_runs": self.candidate_warmup_runs,
@@ -55,7 +60,7 @@ class MeasurementProtocol:
             "final_warmup_runs_per_plan": self.final_warmup_pairs,
             "final_randomized_pair_count": self.final_randomized_pairs,
             "max_explain_analyze_executions": (
-                self.max_explain_analyze_executions
+                self.max_explain_analyze_executions_for(candidate_attempts)
             ),
         }
 
@@ -112,12 +117,13 @@ class RolloutEvaluator:
         task: dict[str, Any],
         *,
         global_timeout_ms: int = GLOBAL_TIMEOUT_MS,
-        measurement_protocol: MeasurementProtocol = (
-            RIGOROUS_EVALUATION_PROTOCOL_V1
-        ),
+        measurement_protocol: MeasurementProtocol = (RIGOROUS_EVALUATION_PROTOCOL_V1),
         calibrated_timeout: TaskTimeout | None = None,
         timeout_manifest_id: str | None = None,
+        max_candidates: int = MAX_CANDIDATES,
     ) -> None:
+        if max_candidates < 1:
+            raise ValueError("max_candidates must be at least 1")
         self.worker = worker
         self.task = task
         self.sql = task_set.load_sql(task)
@@ -130,6 +136,7 @@ class RolloutEvaluator:
         self.kept_default = False
         self.calibrated_timeout = calibrated_timeout
         self.timeout_manifest_id = timeout_manifest_id
+        self.max_candidates = max_candidates
         self.timeout_ms = (
             calibrated_timeout.timeout_ms
             if calibrated_timeout is not None
@@ -146,8 +153,7 @@ class RolloutEvaluator:
         default_plan_sha256 = plan_sha256(plain.document["Plan"])
         if (
             self.calibrated_timeout is not None
-            and default_plan_sha256
-            not in self.calibrated_timeout.plan_sha256s
+            and default_plan_sha256 not in self.calibrated_timeout.plan_sha256s
         ):
             raise RuntimeError(
                 "default plan differs from calibrated plan: "
@@ -155,20 +161,12 @@ class RolloutEvaluator:
                 f"actual={default_plan_sha256}"
             )
         warmups = [
-            self.worker.explain(
-                self.sql, baseline_timeout_ms, analyze=True
-            )
+            self.worker.explain(self.sql, baseline_timeout_ms, analyze=True)
             for _ in range(self.measurement_protocol.default_warmup_runs)
         ]
         measurements = [
-            measured(
-                self.worker.explain(
-                    self.sql, baseline_timeout_ms, analyze=True
-                )
-            )
-            for _ in range(
-                self.measurement_protocol.default_measurement_runs
-            )
+            measured(self.worker.explain(self.sql, baseline_timeout_ms, analyze=True))
+            for _ in range(self.measurement_protocol.default_measurement_runs)
         ]
         median_ms = statistics.median(
             item["execution_time_ms"] for item in measurements
@@ -232,7 +230,7 @@ class RolloutEvaluator:
             "timeout_ms": self.timeout_ms if execution_timed_out else None,
             "errors_or_diagnostics": [error],
             "pg_hint_plan": pg_hint_plan,
-            "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
+            "attempts_remaining": self.max_candidates - len(self.candidates) - 1,
         }
         self.candidates.append(result)
         return result
@@ -242,7 +240,7 @@ class RolloutEvaluator:
             raise RuntimeError("rollout baseline has not been started")
         if self.kept_default:
             raise RuntimeError("rollout already kept the default plan")
-        if len(self.candidates) >= MAX_CANDIDATES:
+        if len(self.candidates) >= self.max_candidates:
             raise RuntimeError("rollout candidate budget is exhausted")
         candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
         try:
@@ -251,9 +249,7 @@ class RolloutEvaluator:
             return self.invalid_candidate(candidate_id, raw_action, str(error))
 
         try:
-            plain = self.worker.explain(
-                self.sql, self.timeout_ms, hint=hint
-            )
+            plain = self.worker.explain(self.sql, self.timeout_ms, hint=hint)
         except QueryTimeout as error:
             return self.invalid_candidate(
                 candidate_id,
@@ -305,7 +301,7 @@ class RolloutEvaluator:
                 ),
                 "errors_or_diagnostics": [],
                 "pg_hint_plan": pg_hint_plan,
-                "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
+                "attempts_remaining": self.max_candidates - len(self.candidates) - 1,
             }
             self.candidates.append(result)
             return result
@@ -313,15 +309,11 @@ class RolloutEvaluator:
         try:
             warmups = [
                 self.checked_execution(action, hint)
-                for _ in range(
-                    self.measurement_protocol.candidate_warmup_runs
-                )
+                for _ in range(self.measurement_protocol.candidate_warmup_runs)
             ]
             executions = [
                 self.checked_execution(action, hint)
-                for _ in range(
-                    self.measurement_protocol.candidate_measurement_runs
-                )
+                for _ in range(self.measurement_protocol.candidate_measurement_runs)
             ]
         except QueryTimeout as error:
             result = {
@@ -340,7 +332,7 @@ class RolloutEvaluator:
                 "timeout_ms": error.timeout_ms,
                 "errors_or_diagnostics": [str(error)],
                 "pg_hint_plan": pg_hint_plan,
-                "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
+                "attempts_remaining": self.max_candidates - len(self.candidates) - 1,
             }
             self.candidates.append(result)
             return result
@@ -374,7 +366,7 @@ class RolloutEvaluator:
             "timeout_ms": self.timeout_ms,
             "errors_or_diagnostics": [],
             "pg_hint_plan": pg_hint_plan,
-            "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
+            "attempts_remaining": self.max_candidates - len(self.candidates) - 1,
         }
         self.candidates.append(result)
         self.by_fingerprint[fingerprint] = {
@@ -396,12 +388,8 @@ class RolloutEvaluator:
         self.kept_default = True
         return {"status": "kept_default"}
 
-    def checked_execution(
-        self, action: dict[str, Any], hint: str
-    ) -> ExplainResult:
-        result = self.worker.explain(
-            self.sql, self.timeout_ms, analyze=True, hint=hint
-        )
+    def checked_execution(self, action: dict[str, Any], hint: str) -> ExplainResult:
+        result = self.worker.explain(self.sql, self.timeout_ms, analyze=True, hint=hint)
         verification: Verification = verify_action(
             action, result.document["Plan"], result.hint_diagnostics
         )
@@ -440,17 +428,14 @@ class RolloutEvaluator:
         ]
         invalid_count = len(self.candidates) - len(valid)
         timeout_count = sum(
-            candidate.get("execution_timed_out", False)
-            for candidate in self.candidates
+            candidate.get("execution_timed_out", False) for candidate in self.candidates
         )
         duplicate_count = sum(
             candidate.get("duplicate_of") is not None for candidate in valid
         )
         if not valid:
             return {
-                "measurement_protocol_id": (
-                    self.measurement_protocol.protocol_id
-                ),
+                "measurement_protocol_id": (self.measurement_protocol.protocol_id),
                 "status": "no_valid_candidate",
                 "winning_candidate_id": None,
                 "score": 0.0,
@@ -462,9 +447,7 @@ class RolloutEvaluator:
 
         winner = min(
             valid,
-            key=lambda candidate: candidate[
-                "provisional_median_execution_time_ms"
-            ],
+            key=lambda candidate: candidate["provisional_median_execution_time_ms"],
         )
         if winner["plan_sha256"] == self.default["plan_sha256"]:
             median_ms = self.default["median_execution_time_ms"]
@@ -481,9 +464,7 @@ class RolloutEvaluator:
                 "candidate_median_execution_time_ms": median_ms,
                 "default_median_execution_time_ms": median_ms,
                 "score": 1.0,
-                "trajectory_reward": (
-                    -0.10 * invalid_count - 0.05 * duplicate_count
-                ),
+                "trajectory_reward": (-0.10 * invalid_count - 0.05 * duplicate_count),
                 "invalid_attempt_count": invalid_count,
                 "duplicate_attempt_count": duplicate_count,
                 "timeout_attempt_count": timeout_count,
@@ -526,9 +507,7 @@ class RolloutEvaluator:
                 else:
                     default_measurements.append(
                         measured(
-                            self.worker.explain(
-                                self.sql, self.timeout_ms, analyze=True
-                            )
+                            self.worker.explain(self.sql, self.timeout_ms, analyze=True)
                         )
                     )
 
@@ -553,9 +532,7 @@ class RolloutEvaluator:
             "default_median_execution_time_ms": default_median,
             "score": final_score,
             "trajectory_reward": (
-                math.log(final_score)
-                - 0.10 * invalid_count
-                - 0.05 * duplicate_count
+                math.log(final_score) - 0.10 * invalid_count - 0.05 * duplicate_count
             ),
             "invalid_attempt_count": invalid_count,
             "duplicate_attempt_count": duplicate_count,
@@ -584,9 +561,7 @@ class RolloutEvaluator:
             "timeout_ms": self.timeout_ms,
             "score": final_score,
             "trajectory_reward": (
-                math.log(final_score)
-                - 0.10 * invalid_count
-                - 0.05 * duplicate_count
+                math.log(final_score) - 0.10 * invalid_count - 0.05 * duplicate_count
             ),
             "invalid_attempt_count": invalid_count,
             "duplicate_attempt_count": duplicate_count,
@@ -604,6 +579,7 @@ class TrainingRolloutEvaluatorV1(RolloutEvaluator):
         task: dict[str, Any],
         *,
         global_timeout_ms: int = GLOBAL_TIMEOUT_MS,
+        max_candidates: int = MAX_CANDIDATES,
     ) -> None:
         super().__init__(
             worker,
@@ -611,6 +587,7 @@ class TrainingRolloutEvaluatorV1(RolloutEvaluator):
             task,
             global_timeout_ms=global_timeout_ms,
             measurement_protocol=RL_TRAINING_PROTOCOL_V1,
+            max_candidates=max_candidates,
         )
 
 
@@ -626,6 +603,7 @@ class TrainingRolloutEvaluatorV2(RolloutEvaluator):
         timeout_manifest_id: str,
         *,
         global_timeout_ms: int = GLOBAL_TIMEOUT_MS,
+        max_candidates: int = MAX_CANDIDATES,
     ) -> None:
         super().__init__(
             worker,
@@ -635,4 +613,5 @@ class TrainingRolloutEvaluatorV2(RolloutEvaluator):
             measurement_protocol=RL_TRAINING_PROTOCOL_V2,
             calibrated_timeout=calibrated_timeout,
             timeout_manifest_id=timeout_manifest_id,
+            max_candidates=max_candidates,
         )

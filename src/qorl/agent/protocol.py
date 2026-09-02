@@ -9,7 +9,6 @@ from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.tools import agent_tools
 from qorl.rollout import MAX_CANDIDATES, RolloutEvaluator
 
-
 RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
 
 
@@ -32,18 +31,18 @@ class AgentProtocol:
     ) -> AgentProtocol:
         aliases = sorted(evaluator.catalog.relations)
         tools = agent_tools(aliases)
+        candidate_attempts = getattr(evaluator, "max_candidates", MAX_CANDIDATES)
+        reserved_decision_turns = candidate_attempts + 1
         inspection_turn_limit = min(
             len(aliases) * 3,
-            max(0, maximum_model_turns - RESERVED_DECISION_TURNS),
+            max(0, maximum_model_turns - reserved_decision_turns),
         )
         expected_path = (
             evaluator.worker.fixture.repository
             / "docker/postgres/benchmark-v1.expected.json"
         )
         expected = json.loads(expected_path.read_text(encoding="utf-8"))
-        settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(
-            INTEGER_SETTINGS
-        )
+        settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
         observation = {
             "task_id": evaluator.task["task_id"],
             "objective": "minimize measured warm-cache execution time",
@@ -64,14 +63,14 @@ class AgentProtocol:
             "default_median_execution_time_ms": evaluator.default[
                 "median_execution_time_ms"
             ],
-            "candidate_attempts": MAX_CANDIDATES,
+            "candidate_attempts": candidate_attempts,
             "candidate_timeout_ms": evaluator.timeout_ms,
             "turn_budget": {
                 "total_model_turns": maximum_model_turns,
                 "maximum_inspection_turns": inspection_turn_limit,
-                "reserved_final_turns": RESERVED_DECISION_TURNS,
+                "reserved_final_turns": reserved_decision_turns,
                 "reserved_for": {
-                    "candidate_evaluations": MAX_CANDIDATES,
+                    "candidate_evaluations": candidate_attempts,
                     "finish_or_keep_default": 1,
                 },
             },
@@ -97,16 +96,12 @@ class AgentProtocol:
             },
         ]
 
-    def available_tools(
-        self, turn: int, candidate_count: int
-    ) -> list[dict[str, Any]]:
+    def available_tools(self, turn: int, candidate_count: int) -> list[dict[str, Any]]:
         names = self.available_tool_names(turn, candidate_count)
-        return [
-            tool for tool in self.tools if tool["function"]["name"] in names
-        ]
+        return [tool for tool in self.tools if tool["function"]["name"] in names]
 
     def available_tool_names(self, turn: int, candidate_count: int) -> set[str]:
-        if candidate_count >= MAX_CANDIDATES:
+        if candidate_count >= self.candidate_attempts:
             return {"finish"}
         if turn > self.inspection_turn_limit:
             return (
@@ -125,8 +120,16 @@ class AgentProtocol:
         return {
             "current_turn": turn,
             "turns_remaining": self.maximum_model_turns - turn,
-            "unrestricted_turns_remaining": max(
-                0, self.inspection_turn_limit - turn
-            ),
-            "reserved_final_turns": RESERVED_DECISION_TURNS,
+            "unrestricted_turns_remaining": max(0, self.inspection_turn_limit - turn),
+            "reserved_final_turns": self.reserved_decision_turns,
         }
+
+    @property
+    def candidate_attempts(self) -> int:
+        return int(
+            self.observation["turn_budget"]["reserved_for"]["candidate_evaluations"]
+        )
+
+    @property
+    def reserved_decision_turns(self) -> int:
+        return int(self.observation["turn_budget"]["reserved_final_turns"])
