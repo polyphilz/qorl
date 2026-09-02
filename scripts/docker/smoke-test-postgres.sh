@@ -83,7 +83,7 @@ CREATE TEMP TABLE leading_smoke_10 (id integer PRIMARY KEY);
 CREATE TEMP TABLE leading_smoke_11 (id integer PRIMARY KEY);
 CREATE TEMP TABLE leading_smoke_12 (id integer PRIMARY KEY);
 EXPLAIN (COSTS OFF)
-/*+ Leading(((((((((((s01 s02) s03) s04) s05) s06) s07) s08) s09) s10) s11) s12)) */
+/*+ Leading((((((((((((s01 s02) s03) s04) s05) s06) s07) s08) s09) s10) s11) s12)) */
 SELECT count(*)
 FROM leading_smoke_01 AS s01,
      leading_smoke_02 AS s02,
