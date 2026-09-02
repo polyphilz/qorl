@@ -67,7 +67,11 @@ class QorlTask(vf.Task[QorlTaskData]):
                     for candidate in candidates
                 )
             ),
-            "has_valid_candidate": float(final["status"] == "completed"),
+            "has_valid_candidate": float(
+                final["status"] == "completed"
+                and final.get("decision") != "keep_default"
+            ),
+            "kept_default": float(final.get("decision") == "keep_default"),
             "final_candidate_timeout": float(
                 final["status"] == "candidate_timeout"
             ),

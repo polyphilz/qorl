@@ -158,6 +158,7 @@ class QoAgentPolicy:
                 continue
 
             should_finish = False
+            terminal_tool: str | None = None
             pending_tool_tokens = 0
             for index, call in enumerate(calls):
                 call_id = call.get("id", f"turn-{turn}-call-{index + 1}")
@@ -213,8 +214,10 @@ class QoAgentPolicy:
                     }
                 )
                 should_finish = should_finish or finished
+                if finished:
+                    terminal_tool = name
             if should_finish:
-                stop_reason = "model_finish"
+                stop_reason = f"model_{terminal_tool}"
                 break
             response_usage = response.get("usage", {})
             total_tokens = response_usage.get("total_tokens")

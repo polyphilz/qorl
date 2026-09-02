@@ -127,6 +127,7 @@ class RolloutEvaluator:
         self.default: dict[str, Any] = {}
         self.candidates: list[dict[str, Any]] = []
         self.by_fingerprint: dict[str, dict[str, Any]] = {}
+        self.kept_default = False
         self.calibrated_timeout = calibrated_timeout
         self.timeout_manifest_id = timeout_manifest_id
         self.timeout_ms = (
@@ -239,6 +240,8 @@ class RolloutEvaluator:
     def evaluate(self, raw_action: Any) -> dict[str, Any]:
         if not self.default:
             raise RuntimeError("rollout baseline has not been started")
+        if self.kept_default:
+            raise RuntimeError("rollout already kept the default plan")
         if len(self.candidates) >= MAX_CANDIDATES:
             raise RuntimeError("rollout candidate budget is exhausted")
         candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
@@ -381,6 +384,18 @@ class RolloutEvaluator:
         }
         return result
 
+    def keep_default(self) -> dict[str, str]:
+        if not self.default:
+            raise RuntimeError("rollout baseline has not been started")
+        if self.candidates:
+            raise RuntimeError(
+                "keep_default must be selected before submitting a candidate"
+            )
+        if self.kept_default:
+            raise RuntimeError("rollout already kept the default plan")
+        self.kept_default = True
+        return {"status": "kept_default"}
+
     def checked_execution(
         self, action: dict[str, Any], hint: str
     ) -> ExplainResult:
@@ -395,6 +410,27 @@ class RolloutEvaluator:
         return result
 
     def finish(self, rng: random.Random) -> dict[str, Any]:
+        if self.kept_default:
+            median_ms = self.default["median_execution_time_ms"]
+            return {
+                "measurement_protocol_id": self.measurement_protocol.protocol_id,
+                "status": "completed",
+                "decision": "keep_default",
+                "winning_candidate_id": "default",
+                "winning_plan_sha256": self.default["plan_sha256"],
+                "score_source": "explicit_keep_default",
+                "pair_orders": [],
+                "candidate_measurements": self.default["measurements"],
+                "default_measurements": self.default["measurements"],
+                "candidate_median_execution_time_ms": median_ms,
+                "default_median_execution_time_ms": median_ms,
+                "score": 1.0,
+                "trajectory_reward": 0.0,
+                "invalid_attempt_count": 0,
+                "duplicate_attempt_count": 0,
+                "timeout_attempt_count": 0,
+            }
+
         valid = [
             candidate
             for candidate in self.candidates
@@ -435,6 +471,7 @@ class RolloutEvaluator:
             return {
                 "measurement_protocol_id": self.measurement_protocol.protocol_id,
                 "status": "completed",
+                "decision": "candidate",
                 "winning_candidate_id": winner["candidate_id"],
                 "winning_plan_sha256": winner["plan_sha256"],
                 "score_source": "default_fingerprint",
@@ -505,6 +542,7 @@ class RolloutEvaluator:
         return {
             "measurement_protocol_id": self.measurement_protocol.protocol_id,
             "status": "completed",
+            "decision": "candidate",
             "winning_candidate_id": winner["candidate_id"],
             "winning_plan_sha256": winner["plan_sha256"],
             "score_source": "interleaved_measurement",

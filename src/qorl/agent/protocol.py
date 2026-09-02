@@ -72,7 +72,7 @@ class AgentProtocol:
                 "reserved_final_turns": RESERVED_DECISION_TURNS,
                 "reserved_for": {
                     "candidate_evaluations": MAX_CANDIDATES,
-                    "finish": 1,
+                    "finish_or_keep_default": 1,
                 },
             },
         }
@@ -112,11 +112,13 @@ class AgentProtocol:
             return (
                 {"evaluate_candidate", "finish"}
                 if candidate_count
-                else {"evaluate_candidate"}
+                else {"evaluate_candidate", "keep_default"}
             )
         names = {tool["function"]["name"] for tool in self.tools}
         if not candidate_count:
             names.remove("finish")
+        else:
+            names.remove("keep_default")
         return names
 
     def budget(self, turn: int) -> dict[str, int]:

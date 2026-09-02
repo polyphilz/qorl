@@ -79,6 +79,14 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
         ),
         evaluate,
         function(
+            "keep_default",
+            (
+                "End the rollout immediately and keep PostgreSQL's default "
+                "plan. Available only before submitting a candidate."
+            ),
+            {},
+        ),
+        function(
             "finish",
             "End the search and benchmark the best valid candidate.",
             {},
@@ -236,7 +244,14 @@ class AgentEnvironment:
                 return candidate_feedback(
                     self.evaluator.evaluate(arguments.get("action"))
                 ), False
+            if name == "keep_default":
+                return self.evaluator.keep_default(), True
             if name == "finish":
+                if not self.evaluator.candidates:
+                    raise RuntimeError(
+                        "finish requires a candidate; use keep_default to "
+                        "keep PostgreSQL's plan"
+                    )
                 return {"status": "finished"}, True
             methods = {
                 "describe_table": self.describe_table,

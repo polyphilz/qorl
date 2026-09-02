@@ -110,7 +110,7 @@ def repeated_inspections(trace: dict[str, Any]) -> int:
         for call in message.get("tool_calls") or []:
             function = call.get("function", {})
             name = function.get("name", "")
-            if name in {"evaluate_candidate", "finish"}:
+            if name in {"evaluate_candidate", "finish", "keep_default"}:
                 continue
             arguments = function.get("arguments", "{}")
             if not isinstance(arguments, str):
@@ -137,6 +137,7 @@ def trace_metrics(
     fake_candidate_ids = 0
     no_tool_calls = 0
     finish_calls = 0
+    keep_default_calls = 0
     first_candidate_turn: int | None = None
 
     for turn, events in sorted(events_by_turn.items()):
@@ -157,6 +158,8 @@ def trace_metrics(
             valid_tool_calls += call_available and top_level_error is None
             if name == "finish":
                 finish_calls += 1
+            elif name == "keep_default":
+                keep_default_calls += 1
             elif name == "evaluate_candidate":
                 if first_candidate_turn is None:
                     first_candidate_turn = turn
@@ -196,6 +199,7 @@ def trace_metrics(
         "fake_candidate_id_calls": fake_candidate_ids,
         "repeated_inspection_calls": repeated_inspections(trace),
         "finish_calls": finish_calls,
+        "keep_default_calls": keep_default_calls,
         "first_candidate_turn": first_candidate_turn,
         "candidate_attempts": len(candidates),
         "action_valid_candidates": sum(item["action_valid"] for item in candidates),
@@ -239,6 +243,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "fake_candidate_id_calls",
         "repeated_inspection_calls",
         "finish_calls",
+        "keep_default_calls",
         "candidate_attempts",
         "action_valid_candidates",
         "constraint_satisfied_candidates",
@@ -282,6 +287,10 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "finish_call_rate": ratio(
             sum(item["finish_calls"] > 0 for item in metrics), len(results)
+        ),
+        "keep_default_call_rate": ratio(
+            sum(item["keep_default_calls"] > 0 for item in metrics),
+            len(results),
         ),
         "fake_candidate_id_call_count": totals["fake_candidate_id_calls"],
         "repeated_inspection_call_count": totals["repeated_inspection_calls"],
@@ -347,12 +356,17 @@ def evaluate_policy(
                     "policy_trace": trace,
                     "metrics": metrics,
                 }
+                terminal = (
+                    "keep_default"
+                    if metrics["keep_default_calls"]
+                    else "finish" if metrics["finish_calls"] else "none"
+                )
                 print(
                     "  "
                     f"valid={metrics['constraint_satisfied_candidates']}/"
                     f"{metrics['candidate_attempts']} "
                     f"novel={metrics['novel_candidates']} "
-                    f"finish={bool(metrics['finish_calls'])}",
+                    f"terminal={terminal}",
                     flush=True,
                 )
             except (ModelError, WorkerError) as error:

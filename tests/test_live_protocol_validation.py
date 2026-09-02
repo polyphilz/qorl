@@ -24,6 +24,7 @@ def metrics(**overrides: object) -> dict[str, object]:
         "fake_candidate_id_calls": 0,
         "repeated_inspection_calls": 0,
         "finish_calls": 1,
+        "keep_default_calls": 0,
         "candidate_attempts": 1,
         "action_valid_candidates": 1,
         "constraint_satisfied_candidates": 1,
@@ -53,6 +54,7 @@ class LiveProtocolValidationTest(unittest.TestCase):
         self.assertEqual(summary["valid_tool_call_rate"], 1.0)
         self.assertEqual(summary["rollout_valid_candidate_rate"], 0.5)
         self.assertEqual(summary["finish_call_rate"], 0.5)
+        self.assertEqual(summary["keep_default_call_rate"], 0.0)
 
     def test_adapter_path_comes_from_passed_training_report(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -117,7 +117,7 @@ def validate_protocol_demo(
             "reserved_final_turns": RESERVED_DECISION_TURNS,
             "reserved_for": {
                 "candidate_evaluations": MAX_CANDIDATES,
-                "finish": 1,
+                "finish_or_keep_default": 1,
             },
         },
         "turn budget differs from the live agent protocol",
@@ -136,6 +136,7 @@ def validate_protocol_demo(
     inspections: set[tuple[str, str]] = set()
     call_sequence: list[str] = []
     finished = False
+    kept_default = False
 
     for turn, offset in enumerate(range(0, len(tail), 2), start=1):
         assistant = tail[offset]
@@ -234,16 +235,36 @@ def validate_protocol_demo(
             require(result.get("status") == "finished", f"turn {turn}: finish failed")
             require(offset == len(tail) - 2, "finish must be the final call")
             finished = True
+        elif name == "keep_default":
+            require(
+                not arguments, f"turn {turn}: keep_default takes no arguments"
+            )
+            require(
+                result.get("status") == "kept_default",
+                f"turn {turn}: keep_default failed",
+            )
+            require(
+                offset == len(tail) - 2,
+                "keep_default must be the final call",
+            )
+            kept_default = True
         else:
             key = (name, json.dumps(arguments, sort_keys=True))
             require(key not in inspections, f"turn {turn}: repeated inspection")
             inspections.add(key)
 
-    require(finished, "demo never called finish")
-    require(
-        1 <= len(issued_candidates) <= MAX_CANDIDATES,
-        f"demo must submit between 1 and {MAX_CANDIDATES} candidates",
-    )
+    require(finished or kept_default, "demo has no terminal decision")
+    require(not (finished and kept_default), "demo has two terminal decisions")
+    if kept_default:
+        require(
+            not issued_candidates,
+            "keep_default demo must not submit a candidate",
+        )
+    else:
+        require(
+            1 <= len(issued_candidates) <= MAX_CANDIDATES,
+            f"demo must submit between 1 and {MAX_CANDIDATES} candidates",
+        )
     if "candidate_count" in metadata:
         require(
             metadata["candidate_count"] == len(issued_candidates),
@@ -258,6 +279,7 @@ def validate_protocol_demo(
         "task_id": task["task_id"],
         "turn_count": len(call_sequence),
         "candidate_ids": issued_candidates,
+        "terminal_decision": "keep_default" if kept_default else "finish",
         "call_sequence": call_sequence,
         "canonical_sha256": hashlib.sha256(encoded).hexdigest(),
     }

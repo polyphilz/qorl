@@ -192,6 +192,39 @@ class RolloutTest(unittest.TestCase):
             final["default_median_execution_time_ms"],
         )
 
+    def test_keep_default_is_a_zero_reward_terminal_decision(self) -> None:
+        worker = Worker()
+        evaluator = RolloutEvaluator(
+            worker, Fixture(), TASK  # type: ignore[arg-type]
+        )
+        baseline = evaluator.start()
+        analyze_calls_before_decision = worker.analyze_calls
+
+        self.assertEqual(evaluator.keep_default(), {"status": "kept_default"})
+        final = evaluator.finish(random.Random(0))
+
+        self.assertEqual(worker.analyze_calls, analyze_calls_before_decision)
+        self.assertEqual(evaluator.candidates, [])
+        self.assertEqual(final["status"], "completed")
+        self.assertEqual(final["decision"], "keep_default")
+        self.assertEqual(final["winning_candidate_id"], "default")
+        self.assertEqual(final["winning_plan_sha256"], baseline["plan_sha256"])
+        self.assertEqual(final["score"], 1.0)
+        self.assertEqual(final["trajectory_reward"], 0.0)
+        self.assertEqual(final["pair_orders"], [])
+
+    def test_keep_default_is_rejected_after_a_candidate(self) -> None:
+        evaluator = RolloutEvaluator(
+            Worker(), Fixture(), TASK  # type: ignore[arg-type]
+        )
+        evaluator.start()
+        evaluator.evaluate(
+            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "before submitting a candidate"):
+            evaluator.keep_default()
+
     def test_rigorous_protocol_remains_26_executions(self) -> None:
         worker = CountingWorker()
         evaluator = RolloutEvaluator(

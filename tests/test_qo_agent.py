@@ -94,6 +94,34 @@ class FakeClient:
         return self.responses.pop(0)
 
 
+class KeepDefaultClient(FakeClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.responses = [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "keep_default",
+                                        "arguments": "{}",
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 5},
+            }
+        ]
+
+
 class FakeLoraClient(FakeClient):
     def models(self) -> dict:
         return {
@@ -166,6 +194,7 @@ class FakeEvaluator:
         self.timeout_ms = 5_000
         self.candidates = []
         self.actions = []
+        self.kept_default = False
 
     def evaluate(self, action: object) -> dict:
         self.actions.append(action)
@@ -186,6 +215,14 @@ class FakeEvaluator:
         }
         self.candidates.append(candidate)
         return candidate
+
+    def keep_default(self) -> dict[str, str]:
+        if self.candidates:
+            raise RuntimeError(
+                "keep_default must be selected before submitting a candidate"
+            )
+        self.kept_default = True
+        return {"status": "kept_default"}
 
 
 def config() -> QoAgentConfig:
@@ -287,7 +324,10 @@ class QoAgentTest(unittest.TestCase):
                 "total_model_turns": 64,
                 "maximum_inspection_turns": 6,
                 "reserved_final_turns": 6,
-                "reserved_for": {"candidate_evaluations": 5, "finish": 1},
+                "reserved_for": {
+                    "candidate_evaluations": 5,
+                    "finish_or_keep_default": 1,
+                },
             },
         )
         first_tool_result = json.loads(trace["transcript"][3]["content"])
@@ -305,10 +345,39 @@ class QoAgentTest(unittest.TestCase):
             tool["function"]["name"] for tool in client.requests[1]["tools"]
         }
         self.assertNotIn("finish", first_tools)
+        self.assertIn("keep_default", first_tools)
         self.assertIn("finish", second_tools)
+        self.assertNotIn("keep_default", second_tools)
         self.assertFalse(
             client.requests[0]["chat_template_kwargs"]["enable_thinking"]
         )
+
+    def test_keep_default_ends_without_a_candidate(self) -> None:
+        client = KeepDefaultClient()
+        policy = QoAgentPolicy(config(), client)
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+
+        trace = policy.search(evaluator)  # type: ignore[arg-type]
+
+        self.assertEqual(trace["stop_reason"], "model_keep_default")
+        self.assertTrue(evaluator.kept_default)
+        self.assertEqual(evaluator.candidates, [])
+        self.assertEqual(trace["tool_events"][0]["result"]["status"], "kept_default")
+
+    def test_terminal_tools_enforce_the_decision_order(self) -> None:
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+        environment = AgentEnvironment(evaluator)
+
+        result, finished = environment.execute("finish", {})
+        self.assertIn("use keep_default", result["error"])
+        self.assertFalse(finished)
+
+        evaluator.evaluate({"version": 1})
+        result, finished = environment.execute("keep_default", {})
+        self.assertIn("before submitting a candidate", result["error"])
+        self.assertFalse(finished)
 
     def test_reserved_turns_only_offer_decision_tools(self) -> None:
         client = FakeClient()
@@ -323,7 +392,7 @@ class QoAgentTest(unittest.TestCase):
         first_tools = {
             tool["function"]["name"] for tool in client.requests[0]["tools"]
         }
-        self.assertEqual(first_tools, {"evaluate_candidate"})
+        self.assertEqual(first_tools, {"evaluate_candidate", "keep_default"})
 
     def test_stops_before_the_next_turn_would_exceed_context(self) -> None:
         client = ContextLimitClient()

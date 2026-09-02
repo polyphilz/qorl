@@ -61,7 +61,7 @@ def synthetic_demo() -> dict[str, Any]:
             "reserved_final_turns": RESERVED_DECISION_TURNS,
             "reserved_for": {
                 "candidate_evaluations": MAX_CANDIDATES,
-                "finish": 1,
+                "finish_or_keep_default": 1,
             },
         },
     }
@@ -149,7 +149,57 @@ class ProtocolDemoTest(unittest.TestCase):
     def test_validates_exact_live_protocol_shape(self) -> None:
         summary = validate_protocol_demo(synthetic_demo(), ROOT)
         self.assertEqual(summary["candidate_ids"], ["candidate-01"])
+        self.assertEqual(summary["terminal_decision"], "finish")
         self.assertEqual(summary["call_sequence"], CALL_SEQUENCE)
+
+    def test_validates_keep_default_as_a_terminal_decision(self) -> None:
+        demo = synthetic_demo()
+        observation = json.loads(demo["messages"][1]["content"])
+        protocol = AgentProtocol(
+            maximum_model_turns=demo["metadata"]["maximum_model_turns"],
+            inspection_turn_limit=observation["turn_budget"][
+                "maximum_inspection_turns"
+            ],
+            observation=observation,
+            tools=demo["tools"],
+        )
+        demo["messages"] = demo["messages"][:4]
+        demo["messages"].extend(
+            [
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call-0002",
+                            "type": "function",
+                            "function": {
+                                "name": "keep_default",
+                                "arguments": "{}",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call-0002",
+                    "name": "keep_default",
+                    "content": json.dumps(
+                        {
+                            "status": "kept_default",
+                            "_turn_budget": protocol.budget(2),
+                        },
+                        sort_keys=True,
+                    ),
+                },
+            ]
+        )
+        demo["metadata"]["call_sequence"] = ["get_plan", "keep_default"]
+
+        summary = validate_protocol_demo(demo, ROOT)
+
+        self.assertEqual(summary["candidate_ids"], [])
+        self.assertEqual(summary["terminal_decision"], "keep_default")
 
     def test_rejects_unissued_candidate_id(self) -> None:
         demo = copy.deepcopy(synthetic_demo())
@@ -161,4 +211,3 @@ class ProtocolDemoTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

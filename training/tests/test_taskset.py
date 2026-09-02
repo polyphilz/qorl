@@ -56,6 +56,31 @@ class QorlTaskTest(unittest.TestCase):
         self.assertEqual(metrics["candidate_attempts"], 2.0)
         self.assertEqual(metrics["valid_candidate_attempts"], 1.0)
         self.assertEqual(metrics["duplicate_candidate_attempts"], 1.0)
+        self.assertEqual(metrics["has_valid_candidate"], 1.0)
+        self.assertEqual(metrics["kept_default"], 0.0)
+
+    def test_keep_default_is_not_counted_as_a_valid_candidate(self) -> None:
+        trace = SimpleNamespace(
+            calls=[object()],
+            num_total_tokens=10,
+            num_output_tokens=2,
+            info={
+                "qorl": {
+                    "candidates": [],
+                    "final": {
+                        "status": "completed",
+                        "decision": "keep_default",
+                        "score": 1.0,
+                        "trajectory_reward": 0.0,
+                    },
+                }
+            },
+        )
+
+        metrics = asyncio.run(QorlTask.rollout_metrics(None, trace))
+
+        self.assertEqual(metrics["has_valid_candidate"], 0.0)
+        self.assertEqual(metrics["kept_default"], 1.0)
 
 
 if __name__ == "__main__":
