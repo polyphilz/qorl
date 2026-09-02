@@ -430,6 +430,28 @@ class RolloutEvaluator:
                 "provisional_median_execution_time_ms"
             ],
         )
+        if winner["plan_sha256"] == self.default["plan_sha256"]:
+            median_ms = self.default["median_execution_time_ms"]
+            return {
+                "measurement_protocol_id": self.measurement_protocol.protocol_id,
+                "status": "completed",
+                "winning_candidate_id": winner["candidate_id"],
+                "winning_plan_sha256": winner["plan_sha256"],
+                "score_source": "default_fingerprint",
+                "pair_orders": [],
+                "candidate_measurements": self.default["measurements"],
+                "default_measurements": self.default["measurements"],
+                "candidate_median_execution_time_ms": median_ms,
+                "default_median_execution_time_ms": median_ms,
+                "score": 1.0,
+                "trajectory_reward": (
+                    -0.10 * invalid_count - 0.05 * duplicate_count
+                ),
+                "invalid_attempt_count": invalid_count,
+                "duplicate_attempt_count": duplicate_count,
+                "timeout_attempt_count": timeout_count,
+            }
+
         action = winner["action"]
         hint = winner["compiled_hint"]
         for _ in range(self.measurement_protocol.final_warmup_pairs):
@@ -485,6 +507,7 @@ class RolloutEvaluator:
             "status": "completed",
             "winning_candidate_id": winner["candidate_id"],
             "winning_plan_sha256": winner["plan_sha256"],
+            "score_source": "interleaved_measurement",
             "pair_orders": pair_orders,
             "candidate_measurements": candidate_measurements,
             "default_measurements": default_measurements,

@@ -265,7 +265,6 @@ def default_derived_actions(
         {"geqo": True},
         {"random_page_cost": 4.0},
         {"join_collapse_limit": 8},
-        {"max_parallel_workers_per_gather": 2},
     ]
     rng.shuffle(settings)
     for values in settings:

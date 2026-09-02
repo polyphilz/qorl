@@ -31,7 +31,6 @@ BOOLEAN_SETTINGS = {
     "enable_nestloop",
     "enable_parallel_append",
     "enable_parallel_hash",
-    "enable_partition_pruning",
     "enable_partitionwise_aggregate",
     "enable_partitionwise_join",
     "enable_presorted_aggregate",
@@ -56,14 +55,12 @@ NUMERIC_SETTINGS = {
 
 INTEGER_SETTINGS = {
     "effective_cache_size": (1, 4_194_304),
-    "effective_io_concurrency": (0, 1_000),
     "from_collapse_limit": (1, 32),
     "join_collapse_limit": (1, 32),
     "geqo_threshold": (2, 32),
     "geqo_effort": (1, 10),
     "geqo_pool_size": (0, 10_000),
     "geqo_generations": (0, 10_000),
-    "max_parallel_workers_per_gather": (0, 8),
 }
 
 
@@ -220,7 +217,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                     "required": ["relation", "workers", "mode"],
                     "properties": {
                         "relation": relation,
-                        "workers": {"type": "integer", "minimum": 0, "maximum": 8},
+                        "workers": {"type": "integer", "minimum": 0, "maximum": 2},
                         "mode": {"type": "string", "enum": ["soft", "hard"]},
                     },
                 },
@@ -540,8 +537,8 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another parallel target")
         parallel_relations.add(relation)
         workers = item.get("workers")
-        if isinstance(workers, bool) or not isinstance(workers, int) or not 0 <= workers <= 8:
-            raise ActionError(f"{label}.workers must be an integer from 0 through 8")
+        if isinstance(workers, bool) or not isinstance(workers, int) or not 0 <= workers <= 2:
+            raise ActionError(f"{label}.workers must be an integer from 0 through 2")
         mode = require_enum(item.get("mode", "soft"), {"soft", "hard"}, f"{label}.mode")
         parallel.append({"relation": relation, "workers": workers, "mode": mode})
     if parallel:
@@ -588,10 +585,6 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(
                 f"action disables every index for forced scan on {item['relation']}"
             )
-    if any(item["workers"] > 0 for item in parallel) and settings.get(
-        "max_parallel_workers_per_gather"
-    ) == 0:
-        raise ActionError("action both requests parallelism and disables parallel workers")
     if settings:
         normalized["settings"] = settings
     return normalized

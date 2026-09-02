@@ -22,27 +22,37 @@ MIN_WARMUP_RUNS = 2
 MAX_WARMUP_RUNS = 5
 BUFFER_STABILITY_TOLERANCE = 0.02
 STATEMENT_TIMEOUT_MS = 120_000
-PLAN_FINGERPRINT_VERSION = 2
+PLAN_FINGERPRINT_VERSION = 3
 
 RUNTIME_PLAN_KEYS = {
     "Cache Evictions",
     "Cache Hits",
     "Cache Misses",
     "Cache Overflows",
+    "Conflicting Tuples",
+    "Disk Usage",
+    "Full-sort Groups",
     "Hash Batches",
+    "HashAgg Batches",
     "Hash Buckets",
     "Heap Fetches",
     "I/O Read Time",
     "I/O Write Time",
     "Index Searches",
     "Maximum Storage",
+    "Memory Usage",
     "Original Hash Batches",
     "Original Hash Buckets",
     "Peak Memory Usage",
+    "Pre-sorted Groups",
     "Sort Method",
     "Sort Space Type",
     "Sort Space Used",
     "Storage",
+    "Subplans Removed",
+    "Tuples Deleted",
+    "Tuples Inserted",
+    "Tuples Updated",
     "Workers",
     "Workers Launched",
 }

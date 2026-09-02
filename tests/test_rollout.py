@@ -58,6 +58,7 @@ class Fixture:
 class Worker:
     def __init__(self) -> None:
         self.times = iter([11.0, 10.0, 12.0, 30.0, 29.0])
+        self.analyze_calls = 0
 
     def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
         return {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
@@ -72,6 +73,7 @@ class Worker:
     ) -> ExplainResult:
         document: dict[str, Any] = {"Plan": DEFAULT_PLAN}
         if analyze:
+            self.analyze_calls += 1
             document |= {
                 "Planning Time": 1.0,
                 "Execution Time": next(self.times),
@@ -167,6 +169,28 @@ class RolloutTest(unittest.TestCase):
         self.assertTrue(result["action_valid"])
         self.assertEqual(result["duplicate_of"], "default")
         self.assertEqual(result["provisional_speedup"], 1.0)
+
+    def test_default_fingerprint_winner_is_exactly_one_without_remeasurement(self) -> None:
+        worker = Worker()
+        evaluator = RolloutEvaluator(
+            worker, Fixture(), TASK  # type: ignore[arg-type]
+        )
+        evaluator.start()
+        evaluator.evaluate(
+            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
+        )
+        analyze_calls_before_finish = worker.analyze_calls
+
+        final = evaluator.finish(random.Random(0))
+
+        self.assertEqual(worker.analyze_calls, analyze_calls_before_finish)
+        self.assertEqual(final["score"], 1.0)
+        self.assertEqual(final["score_source"], "default_fingerprint")
+        self.assertEqual(final["pair_orders"], [])
+        self.assertEqual(
+            final["candidate_median_execution_time_ms"],
+            final["default_median_execution_time_ms"],
+        )
 
     def test_rigorous_protocol_remains_26_executions(self) -> None:
         worker = CountingWorker()

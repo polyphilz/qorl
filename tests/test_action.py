@@ -184,6 +184,41 @@ class ActionTest(unittest.TestCase):
         self.assertIn("enable_hashjoin", settings)
         self.assertNotIn("work_mem", settings)
 
+    def test_removed_settings_are_not_exposed_or_accepted(self) -> None:
+        settings = plan_action_schema()["properties"]["settings"]["properties"]
+        for name in (
+            "effective_io_concurrency",
+            "max_parallel_workers_per_gather",
+            "enable_partition_pruning",
+        ):
+            with self.subTest(name=name):
+                self.assertNotIn(name, settings)
+                with self.assertRaisesRegex(ActionError, "unknown fields"):
+                    compile_action(
+                        {"version": 1, "settings": {name: 1}}, self.catalog
+                    )
+
+    def test_parallel_workers_are_capped_at_two(self) -> None:
+        parallel = plan_action_schema()["properties"]["parallel"]["items"]
+        self.assertEqual(parallel["properties"]["workers"]["maximum"], 2)
+        compile_action(
+            {
+                "version": 1,
+                "parallel": [{"relation": "a", "workers": 2, "mode": "hard"}],
+            },
+            self.catalog,
+        )
+        with self.assertRaisesRegex(ActionError, "from 0 through 2"):
+            compile_action(
+                {
+                    "version": 1,
+                    "parallel": [
+                        {"relation": "a", "workers": 3, "mode": "hard"}
+                    ],
+                },
+                self.catalog,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

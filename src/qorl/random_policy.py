@@ -31,7 +31,6 @@ SETTING_VALUES: dict[str, list[bool | int | float]] = {
     "cpu_tuple_cost": [0.005, 0.02],
     "join_collapse_limit": [1, 16],
     "geqo_threshold": [8, 16],
-    "max_parallel_workers_per_gather": [0, 1, 4, 8],
 }
 
 
@@ -153,7 +152,7 @@ def add_parallel(
     action["parallel"] = [
         {
             "relation": rng.choice(sorted(catalog.relations)),
-            "workers": rng.choice([0, 1, 2, 4, 8]),
+            "workers": rng.choice([0, 1, 2]),
             "mode": rng.choice(["soft", "hard"]),
         }
     ]
