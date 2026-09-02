@@ -14,3 +14,7 @@ bind stable run prefixes to the shared policy definitions in `configs/policy/`.
 This experiment used `benchmark-v1`, with GEQO enabled. Its results for the 20
 JOB tasks containing at least 12 relations are not directly comparable with
 results collected under `benchmark-v2`.
+
+The frozen runs also predate the current protocol: the random sampler is now
+version 2, and GEQO controls are no longer present in the observation or tool
+schema.

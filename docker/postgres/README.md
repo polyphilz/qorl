@@ -28,31 +28,6 @@ scripts/docker/smoke-test-postgres.sh
 docker compose down --volumes
 ```
 
-## Benchmark-v2 rebuild checklist
-
-Before rebuilding, confirm the existing snapshot records the runtime contract
-it was created under:
-
-```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-
-snapshot = json.loads(
-    Path("artifacts/job-v1/job-v1.snapshot.json").read_text()
-)
-assert snapshot["image"].get("benchmark_config_id")
-print(snapshot["image"]["benchmark_config_id"])
-PY
-```
-
-Then build the image and run the smoke-test sequence above. The smoke test is
-host-only: it checks the live prompt settings and proves a `Leading` hint is
-used on a 12-relation query. Run the training tests in the pinned Linux
-environment, clean-room restore the frozen snapshot to the persistent evidence
-directory described in `scripts/job/README.md`, and only then recalibrate JOB
-and CEB. Do not reuse benchmark-v1 calibrations or timeout manifests.
-
 Building an image and freezing workload data are deliberately separate. See
 [`docker/README.md`](../README.md) for the full image-to-fixture-to-worker chain
 and [`scripts/job/README.md`](../../scripts/job/README.md) for fixture creation.
