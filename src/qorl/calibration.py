@@ -266,7 +266,7 @@ def calibrate(
             task_set, selection_path, split
         )
         calibration_name = selection["inventory_id"]
-    worker_count = 1 if workload == "job" else 4
+    worker_count = 4
 
     started_at = datetime.now(timezone.utc)
     calibration_id = started_at.strftime(
@@ -321,7 +321,6 @@ def calibrate(
             else None
         ),
         "worker_pool": None,
-        "worker_profile": None,
         "task_count": len(tasks),
         "completed_task_count": 0,
         "failed_task_count": 0,
@@ -332,21 +331,31 @@ def calibrate(
     project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
     try:
-        if workload == "job":
-            worker = PostgresWorker(fixture, project_name)
-            worker.start()
-            pool = None
-            manifest["worker_profile"] = worker.runtime_manifest()
-            write_json(manifest_path, manifest)
-            worker.capture_environment(output_dir, "pre")
-            for index, task in enumerate(tasks, start=1):
+        pool = start_pool(fixture, project_name)
+        manifest["worker_pool"] = pool.manifest()
+        write_json(manifest_path, manifest)
+        for slot in pool.workers:
+            slot.worker.capture_environment(
+                output_dir / f"worker-{slot.resources.index}", "pre"
+            )
+
+        with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
+            futures: dict[
+                Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
+            ] = {
+                executor.submit(calibrate_on_worker, pool, task_set, task): task
+                for task in tasks
+            }
+            for index, future in enumerate(as_completed(futures), start=1):
+                task = futures[future]
                 task_id = task["task_id"]
                 print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
                 try:
-                    result = calibrate_task(worker, task_set, task)
+                    slot, result = future.result()
                     summary = result["summary"]
                     print(
-                        f"  median={summary['median_execution_time_ms']:.3f} ms "
+                        f"  worker={slot.resources.index} "
+                        f"median={summary['median_execution_time_ms']:.3f} ms "
                         f"cv={summary['coefficient_of_variation']:.4f}"
                     )
                     manifest["completed_task_count"] += 1
@@ -357,58 +366,14 @@ def calibrate(
                     print(f"  failed: {error}")
                 write_json(task_dir / f"{task_id}.json", result)
                 write_json(manifest_path, manifest)
-            worker.capture_environment(output_dir, "post")
-            worker.close()
-        else:
-            pool = start_pool(fixture, project_name)
-            manifest["worker_pool"] = pool.manifest()
-            write_json(manifest_path, manifest)
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / f"worker-{slot.resources.index}", "pre"
-                )
 
-            with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
-                futures: dict[
-                    Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
-                ] = {
-                    executor.submit(
-                        calibrate_on_worker, pool, task_set, task
-                    ): task
-                    for task in tasks
-                }
-                for index, future in enumerate(as_completed(futures), start=1):
-                    task = futures[future]
-                    task_id = task["task_id"]
-                    print(
-                        f"[{index}/{manifest['task_count']}] {task_id}", flush=True
-                    )
-                    try:
-                        slot, result = future.result()
-                        summary = result["summary"]
-                        print(
-                            f"  worker={slot.resources.index} "
-                            f"median={summary['median_execution_time_ms']:.3f} ms "
-                            f"cv={summary['coefficient_of_variation']:.4f}"
-                        )
-                        manifest["completed_task_count"] += 1
-                    except WorkerError as error:
-                        failures += 1
-                        result = failed_task(task, error)
-                        manifest["failed_task_count"] += 1
-                        print(f"  failed: {error}")
-                    write_json(task_dir / f"{task_id}.json", result)
-                    write_json(manifest_path, manifest)
-
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / f"worker-{slot.resources.index}", "post"
-                )
-            pool.close()
+        for slot in pool.workers:
+            slot.worker.capture_environment(
+                output_dir / f"worker-{slot.resources.index}", "post"
+            )
+        pool.close()
     except BaseException:
-        if workload == "job" and "worker" in locals():
-            worker.close()
-        if workload == "ceb" and "pool" in locals() and pool is not None:
+        if "pool" in locals():
             pool.close()
         manifest["status"] = "interrupted"
         manifest["completed_at_utc"] = utc_now()

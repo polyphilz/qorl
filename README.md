@@ -16,11 +16,10 @@ uv run qorl calibrate ceb
 uv run qorl run
 ```
 
-`calibrate` measures all 113 JOB queries on one isolated PostgreSQL worker.
-`calibrate ceb` measures the complete CEB workload concurrently on the same
-persistent four-worker pool used by training. Both record results and
-environment identity under `outputs/calibration/` and remove their workers
-afterward.
+`calibrate` measures all 113 JOB queries; `calibrate ceb` measures the complete
+CEB workload. Both use the same persistent four-worker PostgreSQL pool as
+training, record results and environment identity under `outputs/calibration/`,
+and remove their workers afterward.
 
 Pass a versioned selection manifest to calibrate only a workload slice. If the
 manifest contains multiple splits, select one explicitly:
