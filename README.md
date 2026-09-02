@@ -32,9 +32,10 @@ uv run qorl calibrate ceb \
 ```
 
 `run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
-shared policy in `configs/policy/run-v1.json`. It runs that five-candidate
-policy over JOB and records trusted results plus the complete policy trace
-under `outputs/runs/`. The default policy is the untrained
+shared policy in `configs/policy/run-v1.json`. It runs up to four JOB tasks
+concurrently on the same four-worker pool used for calibration and training,
+then records trusted results plus the complete policy trace under
+`outputs/runs/`. The default policy is the untrained
 `empero-ai/Qwen3.8-4B-Distill` `qo-agent` served through a local
 OpenAI-compatible vLLM endpoint.
 

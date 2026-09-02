@@ -11,8 +11,10 @@ extension before the image is accepted.
 
 Runtime resources are explicit profiles, not Compose defaults:
 
-- `configs/postgres/evaluation-worker-v1.json` defines one evaluation worker.
-- `configs/postgres/training-pool-v1.json` defines the four-worker training pool.
+- `configs/postgres/evaluation-worker-v1.json` defines one worker for fixture
+  construction, restore verification, and manual image checks.
+- `configs/postgres/training-pool-v1.json` defines the four-worker pool used by
+  calibration, training, and benchmark runs.
 
 The Python worker loads the applicable profile and supplies every required
 Compose variable. For a manual development check, load the evaluation profile,

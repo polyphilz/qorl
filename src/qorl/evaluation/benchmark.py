@@ -5,13 +5,16 @@ import math
 import os
 import platform
 import random
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from qorl import __version__
 from qorl.agent import QoAgentConfig, QoAgentPolicy
+from qorl.agent.client import ModelError
 from qorl.db.fixture import DatabaseFixture, TaskSet, sha256_file
+from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
 from qorl.measure.calibration import PLAN_FINGERPRINT_VERSION, utc_now, write_json
@@ -120,6 +123,19 @@ def run_task(
         "candidates": evaluator.candidates,
         "final": final,
     }
+
+
+def run_task_on_worker(
+    pool: WorkerPool,
+    task_set: TaskSet,
+    task: dict[str, Any],
+    policy: dict[str, Any],
+    agent: QoAgentPolicy | None,
+) -> tuple[WorkerSlot, dict[str, Any]]:
+    with pool.claim_worker() as slot:
+        result = run_task(slot.worker, task_set, task, policy, agent)
+        result["worker"] = slot.resources.manifest()
+        return slot, result
 
 
 def load_run_config(
@@ -234,7 +250,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             ),
             "score": "clip(default_median / candidate_median, 0.1, 10)",
         },
-        "worker_profile": None,
+        "worker_pool": None,
         "task_count": task_set.inventory["task_count"],
         "completed_task_count": 0,
         "failed_task_count": 0,
@@ -246,28 +262,50 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     project_name = (
         f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     )
-    results: list[dict[str, Any]] = []
+    tasks = task_set.inventory["tasks"]
+    results_by_task: dict[str, dict[str, Any]] = {}
+    pool: WorkerPool | None = None
     try:
-        with PostgresWorker(fixture, project_name) as worker:
-            manifest["worker_profile"] = worker.runtime_manifest()
-            write_json(manifest_path, manifest)
-            worker.capture_environment(output_dir, "pre")
-            for index, task in enumerate(
-                task_set.inventory["tasks"], start=1
-            ):
-                print(
-                    f"[{index}/{manifest['task_count']}] {task['task_id']}",
-                    flush=True,
-                )
+        pool = start_pool(fixture, project_name)
+        manifest["worker_pool"] = pool.manifest()
+        manifest["protocol"].update(
+            {
+                "worker_count": len(pool.workers),
+                "concurrent_tasks": min(len(pool.workers), len(tasks)),
+                "one_query_per_worker": True,
+            }
+        )
+        write_json(manifest_path, manifest)
+        for slot in pool.workers:
+            slot.worker.capture_environment(
+                output_dir / f"worker-{slot.resources.index}", "pre"
+            )
+
+        with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
+            futures: dict[
+                Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
+            ] = {
+                executor.submit(
+                    run_task_on_worker, pool, task_set, task, policy, agent
+                ): task
+                for task in tasks
+            }
+            for index, future in enumerate(as_completed(futures), start=1):
+                task = futures[future]
+                task_id = task["task_id"]
+                print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
                 try:
-                    result = run_task(worker, task_set, task, policy, agent)
+                    slot, result = future.result()
                     if result["status"] == "completed":
                         manifest["completed_task_count"] += 1
-                        print(f"  final={result['final']['score']:.3f}x")
+                        print(
+                            f"  worker={slot.resources.index} "
+                            f"final={result['final']['score']:.3f}x"
+                        )
                     else:
                         manifest["failed_task_count"] += 1
                         print("  no valid candidate")
-                except WorkerError as error:
+                except (ModelError, WorkerError) as error:
                     result = {
                         "schema_version": 1,
                         "task_id": task["task_id"],
@@ -278,14 +316,28 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                     }
                     manifest["failed_task_count"] += 1
                     print(f"  failed: {error}")
-                results.append(result)
-                write_json(task_dir / f"{task['task_id']}.json", result)
+                results_by_task[task_id] = result
+                write_json(task_dir / f"{task_id}.json", result)
                 write_json(manifest_path, manifest)
-            worker.capture_environment(output_dir, "post")
+
+        for slot in pool.workers:
+            slot.worker.capture_environment(
+                output_dir / f"worker-{slot.resources.index}", "post"
+            )
+        pool.close()
+        pool = None
     except BaseException:
+        if pool is not None:
+            pool.close()
         manifest["status"] = "interrupted"
         manifest["completed_at_utc"] = utc_now()
-        manifest["summary"] = summarize(results)
+        manifest["summary"] = summarize(
+            [
+                results_by_task[task["task_id"]]
+                for task in tasks
+                if task["task_id"] in results_by_task
+            ]
+        )
         write_json(manifest_path, manifest)
         raise
 
@@ -295,7 +347,9 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         else "completed_with_failures"
     )
     manifest["completed_at_utc"] = utc_now()
-    manifest["summary"] = summarize(results)
+    manifest["summary"] = summarize(
+        [results_by_task[task["task_id"]] for task in tasks]
+    )
     write_json(manifest_path, manifest)
     return output_dir
 

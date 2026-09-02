@@ -3,12 +3,44 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
-from qorl.evaluation.benchmark import load_run_config, summarize
+from qorl.evaluation.benchmark import (
+    load_run_config,
+    run_task_on_worker,
+    summarize,
+)
 
 
 class BenchmarkTest(unittest.TestCase):
+    def test_task_keeps_one_claimed_worker_for_its_rollout(self) -> None:
+        resources = Mock()
+        resources.manifest.return_value = {"slot": 2}
+        slot = SimpleNamespace(resources=resources, worker=object())
+        pool = Mock()
+        pool.claim_worker.return_value = nullcontext(slot)
+        task_set = object()
+        task = {"task_id": "job-01a"}
+        policy = {"type": "qo_agent"}
+        agent = object()
+
+        with patch(
+            "qorl.evaluation.benchmark.run_task",
+            return_value={"status": "completed"},
+        ) as run_task:
+            claimed, result = run_task_on_worker(
+                pool, task_set, task, policy, agent
+            )
+
+        self.assertIs(claimed, slot)
+        self.assertEqual(result["worker"], {"slot": 2})
+        run_task.assert_called_once_with(
+            slot.worker, task_set, task, policy, agent
+        )
+
     def test_run_config_loads_its_shared_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)

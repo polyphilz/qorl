@@ -13,7 +13,7 @@ exec vllm serve empero-ai/Qwen3.8-4B-Distill \
   --port 8000 \
   --tensor-parallel-size 1 \
   --max-model-len 262144 \
-  --max-num-seqs 1 \
+  --max-num-seqs 4 \
   --enable-prefix-caching \
   --language-model-only \
   --generation-config vllm \
