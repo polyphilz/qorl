@@ -1,0 +1,133 @@
+max_steps = 3
+seq_len = 20480
+output_dir = "outputs/rl"
+clean = true
+dashboard = false
+
+[run]
+name = "rl-concurrency-spike-v1"
+
+[model]
+name = "outputs/rl/rl-pilot-v1-merged"
+
+[deployment]
+gpus_per_node = 2
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[env_vars]
+VLLM_USE_FLASHINFER_SAMPLER = "0"
+QORL_RL_WORKER_POOL_CONFIG = "configs/postgres-pool-v1.json"
+
+[trainer.model]
+impl = "custom"
+attn = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+compile = "None"
+ep = 1
+
+[trainer.model.lora]
+rank = 16
+alpha = 32
+dropout = 0.0
+target_modules = [
+  "q_proj",
+  "k_proj",
+  "v_proj",
+  "o_proj",
+  "gate_proj",
+  "up_proj",
+  "down_proj",
+]
+
+[trainer.optim]
+lr = 1e-6
+weight_decay = 0.0
+
+[orchestrator]
+batch_size = 16
+group_size = 4
+max_off_policy_steps = 1
+
+[orchestrator.concurrency]
+initial_inflight = 4
+min_inflight = 4
+max_inflight = 4
+
+[orchestrator.model.lora]
+rank = 16
+alpha = 32
+
+[orchestrator.renderer]
+name = "qwen3.5"
+enable_thinking = false
+
+[orchestrator.train]
+filter_zero_advantages = false
+
+[orchestrator.train.sampling]
+temperature = 1.0
+max_completion_tokens = 2048
+
+[orchestrator.train.sampling.extra_body]
+top_k = 20
+min_p = 0.0
+
+[[orchestrator.train.source]]
+name = "qorl-ceb-concurrency-spike"
+
+[orchestrator.train.source.serve]
+max_concurrent = 4
+
+[orchestrator.train.source.serve.pool]
+type = "static"
+num_workers = 1
+
+[orchestrator.train.source.env]
+id = "qorl-training"
+timeout.episode = 14400
+
+[orchestrator.train.source.env.taskset]
+id = "qorl-training"
+repository = "."
+selection = "experiments/004-rl-run-v2/selection.json"
+split = "train"
+
+[orchestrator.train.source.env.agent]
+max_turns = 64
+
+[orchestrator.train.source.env.agent.timeout]
+setup = 600
+rollout = 14400
+finalize = 600
+scoring = 600
+
+[orchestrator.train.source.env.agent.harness]
+id = "qorl-training"
+run_config = "configs/policy/run-v1.json"
+
+[orchestrator.train.source.env.agent.runtime]
+type = "subprocess"
+
+[inference.vllm]
+dtype = "bfloat16"
+max_model_len = 20480
+max_num_seqs = 4
+gpu_memory_utilization = 0.90
+enable_prefix_caching = true
+language_model_only = true
+generation_config = "vllm"
+tool_call_parser = "qwen3_coder"
+
+[inference]
+router = "None"
+
+[monitors.file]
+
+[ckpt]
+interval = 3
+keep_last = 1
+
+[weight_broadcast]
+type = "filesystem"

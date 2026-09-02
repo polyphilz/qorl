@@ -20,7 +20,7 @@ DEFAULT_CPUSETS = (
 )
 DEFAULT_MEMORY_LIMIT = "8g"
 DEFAULT_PORT_BASE = 56_000
-DEFAULT_POOL_CONFIG = Path("configs/training/postgres-pool-v1.json")
+DEFAULT_POOL_CONFIG = Path("configs/postgres-pool-v1.json")
 
 
 @dataclass(frozen=True)

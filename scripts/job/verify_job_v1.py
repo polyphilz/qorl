@@ -16,7 +16,7 @@ from typing import Any
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/manifests/job-v1.json"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/job-v1"
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 

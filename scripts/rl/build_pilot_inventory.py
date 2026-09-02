@@ -9,8 +9,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "data/ceb/ceb-v1/tasks.json"
-OUTPUT = ROOT / "data/ceb/ceb-v1/rl-pilot-v1.json"
+SOURCE = ROOT / "data/ceb/tasks.json"
+OUTPUT = ROOT / "experiments/003-rl-pilot-v1/selection.json"
 SALT = "qorl-rl-pilot-v1"
 
 

@@ -19,7 +19,7 @@ from scripts.utils.query_structure import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/job-v1/tasks.json"
+DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
 TEMPLATE_NAME = re.compile(r"^(?P<template>[0-9]+[a-z])", re.IGNORECASE)
 
 

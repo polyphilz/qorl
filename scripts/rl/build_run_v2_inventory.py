@@ -9,9 +9,9 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "data/ceb/ceb-v1/tasks.json"
-PILOT = ROOT / "data/ceb/ceb-v1/rl-pilot-v1.json"
-OUTPUT = ROOT / "data/ceb/ceb-v1/rl-run-v2.json"
+SOURCE = ROOT / "data/ceb/tasks.json"
+PILOT = ROOT / "experiments/003-rl-pilot-v1/selection.json"
+OUTPUT = ROOT / "experiments/004-rl-run-v2/selection.json"
 SALT = "qorl-rl-run-v2"
 TASK_COUNT = 400
 TASKS_PER_UPDATE = 4
@@ -105,7 +105,7 @@ def build(source: dict[str, Any], pilot: dict[str, Any]) -> dict[str, Any]:
                 for task_id, reason in sorted(EXCLUDED_TASKS.items())
             ],
             "prior_inventory": {
-                "path": "rl-pilot-v1.json",
+                "path": "experiments/003-rl-pilot-v1/selection.json",
                 "sha256": sha256(PILOT),
                 "excluded_distinct_task_count": len(prior_ids),
                 "excluded_training_task_count": len(prior_train_ids),

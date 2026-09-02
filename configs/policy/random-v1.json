@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "type": "random_structured_action",
+    "seed": 20260827
+  }
+}

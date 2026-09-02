@@ -21,7 +21,7 @@ from qorl.rollout import (
 from qorl.worker import ExplainResult, PostgresWorker
 
 
-DEFAULT_CONFIG = Path("configs/training/reward-protocol-audit-v1.json")
+DEFAULT_CONFIG = Path("experiments/004-rl-run-v2/reward-protocol-audit/config.json")
 
 
 def fingerprint(value: Any) -> str:

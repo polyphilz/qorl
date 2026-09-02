@@ -19,9 +19,9 @@ from scripts.utils.query_structure import sha256_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/manifests/job-v1.json"
+DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
 DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "data/raw/job-v1/source"
-DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "data/job/job-v1"
+DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "data/job"
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
 def sha256_file(path: Path) -> str:

@@ -430,7 +430,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     run_policy = json.loads(
-        (repository / "configs/evaluation/run-v1.json").read_text()
+        (repository / "configs/policy/run-v1.json").read_text()
     )["policy"]
     snapshot = model_snapshot(repository, run_policy)
     adapter = adapter_path(repository) if arguments.policies != "base" else None

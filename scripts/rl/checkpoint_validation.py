@@ -26,7 +26,7 @@ from scripts.rl.paired_validation import load_tasks, summarize
 from scripts.sft.live_protocol_validation import trace_metrics, wait_for_server
 
 
-CONFIG = Path("configs/training/rl-run-v2-checkpoint-evaluation-v1.json")
+CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
 START_POLICY = "start"
 PRINT_LOCK = Lock()
 

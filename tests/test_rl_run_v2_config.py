@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 
-CONFIG = Path("configs/training/rl-run-v2.toml")
+CONFIG = Path("experiments/004-rl-run-v2/train.toml")
 
 
 class RlRunV2ConfigTest(unittest.TestCase):
@@ -24,7 +24,7 @@ class RlRunV2ConfigTest(unittest.TestCase):
         )
         self.assertEqual(
             config["env_vars"]["QORL_RL_TIMEOUT_MANIFEST"],
-            "data/ceb/ceb-v1/rl-run-v2-timeouts.json",
+            "experiments/004-rl-run-v2/timeouts.json",
         )
         self.assertEqual(config["orchestrator"]["group_size"], 4)
         self.assertEqual(config["orchestrator"]["batch_size"], 16)
@@ -41,7 +41,7 @@ class RlRunV2ConfigTest(unittest.TestCase):
         self.assertEqual(source["serve"]["pool"]["num_workers"], 1)
         self.assertEqual(
             source["env"]["taskset"]["selection"],
-            "data/ceb/ceb-v1/rl-run-v2.json",
+            "experiments/004-rl-run-v2/selection.json",
         )
         self.assertEqual(source["env"]["agent"]["max_total_tokens"], 18_432)
         self.assertEqual(config["inference"]["vllm"]["max_model_len"], 20_480)

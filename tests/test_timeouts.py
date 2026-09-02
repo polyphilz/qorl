@@ -8,7 +8,7 @@ from qorl.timeouts import CalibratedTimeouts
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = Path("data/ceb/ceb-v1/rl-run-v2-timeouts.json")
+MANIFEST = Path("experiments/004-rl-run-v2/timeouts.json")
 
 
 class CalibratedTimeoutTest(unittest.TestCase):

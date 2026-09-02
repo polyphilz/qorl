@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 
-CONFIG = Path("configs/training/rl-concurrency-spike-v1.toml")
+CONFIG = Path("experiments/004-rl-run-v2/concurrency-spike.toml")
 
 
 class RlConcurrencyConfigTest(unittest.TestCase):
@@ -31,7 +31,7 @@ class RlConcurrencyConfigTest(unittest.TestCase):
         self.assertEqual(config["inference"]["vllm"]["max_num_seqs"], 4)
         self.assertEqual(
             source["env"]["taskset"]["selection"],
-            "data/ceb/ceb-v1/rl-run-v2.json",
+            "experiments/004-rl-run-v2/selection.json",
         )
 
 

@@ -16,12 +16,12 @@ from scripts.utils.ceb import extract_sql_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/manifests/ceb-v1.json"
+DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb"
 DEFAULT_UNIQUE_SOURCE = (
     REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb-unique-plans"
 )
-DEFAULT_OUTPUT = REPOSITORY_ROOT / "data/ceb/ceb-v1"
+DEFAULT_OUTPUT = REPOSITORY_ROOT / "data/ceb"
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -162,8 +162,13 @@ def build(
     unique_source: Path,
     output_dir: Path,
 ) -> None:
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise RuntimeError(f"refusing to overwrite non-empty output: {output_dir}")
+    generated_paths = [
+        output_dir / "queries",
+        output_dir / "provenance" / "sources.json",
+        output_dir / "provenance" / "unique-plans.json",
+    ]
+    if any(path.exists() for path in generated_paths):
+        raise RuntimeError(f"refusing to overwrite existing output: {output_dir}")
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
@@ -226,11 +231,19 @@ def build(
             ),
             "members": members,
         }
-        write_json(temporary / "sources.json", sources)
-        write_json(temporary / "unique-plans.json", unique)
-        if output_dir.exists():
-            output_dir.rmdir()
-        temporary.replace(output_dir)
+        provenance = temporary / "provenance"
+        provenance.mkdir()
+        write_json(provenance / "sources.json", sources)
+        write_json(provenance / "unique-plans.json", unique)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (temporary / "queries").replace(output_dir / "queries")
+        (output_dir / "provenance").mkdir(exist_ok=True)
+        for name in ("sources.json", "unique-plans.json"):
+            (temporary / "provenance" / name).replace(
+                output_dir / "provenance" / name
+            )
+        (temporary / "provenance").rmdir()
+        temporary.rmdir()
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -238,8 +251,11 @@ def build(
 
 def check(source_manifest_path: Path, output_dir: Path) -> None:
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
-    sources = json.loads((output_dir / "sources.json").read_text(encoding="utf-8"))
-    unique = json.loads((output_dir / "unique-plans.json").read_text(encoding="utf-8"))
+    provenance = output_dir / "provenance"
+    sources = json.loads((provenance / "sources.json").read_text(encoding="utf-8"))
+    unique = json.loads(
+        (provenance / "unique-plans.json").read_text(encoding="utf-8")
+    )
     if sources["source_manifest"]["sha256"] != sha256_file(source_manifest_path):
         raise RuntimeError("checked-in sources reference a different source manifest")
     if sources["query_count"] != source_manifest["trees"]["full"]["count"]:

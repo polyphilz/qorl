@@ -26,7 +26,7 @@ from qorl.worker import PostgresWorker, WorkerError
 
 
 RUN_SEED = 20260827
-DEFAULT_RUN_CONFIG = "configs/evaluation/run-v1.json"
+DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -135,13 +135,34 @@ def load_run_config(
         raise RuntimeError(f"cannot load run configuration {path}: {error}") from error
     if value.get("schema_version") != 1:
         raise RuntimeError("run configuration schema_version must equal 1")
-    policy = value.get("policy")
+    policy_configured = value.get("policy_config")
+    if not isinstance(policy_configured, str) or not policy_configured:
+        raise RuntimeError("run configuration must name a policy_config")
+    policy_path = Path(policy_configured)
+    if not policy_path.is_absolute():
+        policy_path = repository / policy_path
+    try:
+        policy_value = json.loads(policy_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f"cannot load policy configuration {policy_path}: {error}"
+        ) from error
+    if policy_value.get("schema_version") != 1:
+        raise RuntimeError("policy configuration schema_version must equal 1")
+    policy = policy_value.get("policy")
     if not isinstance(policy, dict) or policy.get("type") not in {
         "random_structured_action",
         "qo_agent",
     }:
-        raise RuntimeError("run configuration has an unknown policy type")
-    return path, value
+        raise RuntimeError("policy configuration has an unknown policy type")
+    run_id_prefix = value.get("run_id_prefix")
+    if not isinstance(run_id_prefix, str) or not run_id_prefix:
+        raise RuntimeError("run configuration must define run_id_prefix")
+    return path, {
+        **value,
+        "policy": policy,
+        "_policy_config_path": policy_path,
+    }
 
 
 def run_benchmark(repository: Path, configured: str | None = None) -> Path:
@@ -175,6 +196,10 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         "run_config": {
             "path": str(config_path.relative_to(repository)),
             "sha256": sha256_file(config_path),
+        },
+        "policy_config": {
+            "path": str(config["_policy_config_path"].relative_to(repository)),
+            "sha256": sha256_file(config["_policy_config_path"]),
         },
         "orchestrator": {
             "qorl_version": __version__,
@@ -273,4 +298,6 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
 
 def run_random_benchmark(repository: Path) -> Path:
     """Compatibility entry point for the original frozen random baseline."""
-    return run_benchmark(repository, "configs/evaluation/random-v1.json")
+    return run_benchmark(
+        repository, "experiments/000-vanilla-baseline/random.json"
+    )

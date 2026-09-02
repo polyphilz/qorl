@@ -27,7 +27,7 @@ def selected_items(selection: dict, split: str) -> list[dict[str, str]]:
 
 class QorlTasksetConfig(vf.TasksetConfig):
     repository: Path = Path(".")
-    selection: Path = Path("data/ceb/ceb-v1/rl-pilot-v1.json")
+    selection: Path = Path("experiments/003-rl-pilot-v1/selection.json")
     split: Literal["spike", "train", "validation"] = "spike"
 
 

@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "run_id_prefix": "qwen38-4b-distill-untrained-v1",
+  "policy_config": "configs/policy/run-v1.json"
+}

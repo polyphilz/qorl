@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "run_id_prefix": "random-v1",
+  "policy_config": "configs/policy/random-v1.json"
+}

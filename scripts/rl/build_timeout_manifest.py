@@ -18,8 +18,8 @@ from qorl.timeouts import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SELECTION = ROOT / "data/ceb/ceb-v1/rl-run-v2.json"
-OUTPUT = ROOT / "data/ceb/ceb-v1/rl-run-v2-timeouts.json"
+SELECTION = ROOT / "experiments/004-rl-run-v2/selection.json"
+OUTPUT = ROOT / "experiments/004-rl-run-v2/timeouts.json"
 
 
 def build(calibration: Path) -> dict[str, Any]:

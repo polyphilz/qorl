@@ -82,7 +82,7 @@ class QueryStructureTest(unittest.TestCase):
 
     def test_shared_code_preserves_checked_in_job_hash(self) -> None:
         inventory = json.loads(
-            (ROOT / "data/job/job-v1/tasks.json").read_text(encoding="utf-8")
+            (ROOT / "data/job/tasks.json").read_text(encoding="utf-8")
         )
         task = inventory["tasks"][0]
         graph_hash, _topology_hash = task_join_fingerprints(task)

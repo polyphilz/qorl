@@ -30,7 +30,7 @@ from scripts.sft.live_protocol_validation import (
     wait_for_server,
 )
 
-CONFIG = Path("configs/training/rl-pilot-validation-v1.json")
+CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
 
 

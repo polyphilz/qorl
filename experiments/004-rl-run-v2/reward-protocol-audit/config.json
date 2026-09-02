@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "audit_id": "qorl-reward-protocol-audit-v1",
+  "task_set": "ceb-v1",
+  "training_selection": "experiments/004-rl-run-v2/selection.json",
+  "case_manifest": "experiments/004-rl-run-v2/reward-protocol-audit/selection.json",
+  "source_traces": "outputs/rl/rl-pilot-v1/rollouts",
+  "case_count": 12,
+  "case_selection_salt": "qorl-reward-protocol-audit-v1",
+  "material_speedup_ratio": 1.02,
+  "pair_order_seed": 20260831,
+  "protocols": [
+    "rl-training-v1",
+    "rigorous-evaluation-v1"
+  ]
+}

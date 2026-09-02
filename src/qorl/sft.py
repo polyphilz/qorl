@@ -15,7 +15,7 @@ from typing import Any
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"
 DATASET = Path("outputs/sft/protocol-sft-v1")
-CONFIG = Path("configs/training/protocol-sft-v1.toml")
+CONFIG = Path("experiments/001-protocol-sft-v1/train.toml")
 
 
 def run(command: list[str], repository: Path) -> None:
@@ -29,7 +29,7 @@ def run(command: list[str], repository: Path) -> None:
 
 def model_snapshot(repository: Path) -> tuple[Path, dict[str, Any]]:
     config = json.loads(
-        (repository / "configs/evaluation/run-v1.json").read_text()
+        (repository / "configs/policy/run-v1.json").read_text()
     )["policy"]
     model = config["model"]
     revision = config["revision"]

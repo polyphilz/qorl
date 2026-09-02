@@ -66,7 +66,7 @@ if [[ -e "$source_manifest_copy" ]]; then
     echo "refusing to overwrite source manifest copy: $source_manifest_copy" >&2
     exit 1
 fi
-cp "$repository_root/data/manifests/job-v1.json" "$source_manifest_copy"
+cp "$repository_root/data/job/manifest.json" "$source_manifest_copy"
 
 "$script_dir/load-job-v1.sh" \
     --raw-dir "$raw_dir" \

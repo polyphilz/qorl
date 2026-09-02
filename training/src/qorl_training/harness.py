@@ -21,7 +21,7 @@ from qorl_training import runtime
 
 class QorlHarnessConfig(vf.HarnessConfig):
     id: str = "qorl-training"
-    run_config: Path = Path("configs/evaluation/run-v1.json")
+    run_config: Path = Path("configs/policy/run-v1.json")
     context_length: int = 20_480
     candidate_attempts: int = Field(5, ge=1)
 

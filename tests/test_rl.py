@@ -27,9 +27,9 @@ class RlTest(unittest.TestCase):
             repository = Path(temporary)
             inputs = {
                 "config_sha256": repository
-                / "configs/training/rl-pilot-validation-v1.json",
-                "selection_sha256": repository / "data/ceb/ceb-v1/rl-pilot-v1.json",
-                "run_config_sha256": repository / "configs/evaluation/run-v1.json",
+                / "experiments/003-rl-pilot-v1/validation.json",
+                "selection_sha256": repository / "experiments/003-rl-pilot-v1/selection.json",
+                "run_config_sha256": repository / "configs/policy/run-v1.json",
             }
             for path in inputs.values():
                 path.parent.mkdir(parents=True, exist_ok=True)

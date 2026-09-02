@@ -40,7 +40,7 @@ class CalibrationTest(unittest.TestCase):
         task_set = TaskSet.load(ROOT, "ceb-v1")
         selection, split, tasks = selected_tasks(
             task_set,
-            ROOT / "data/ceb/ceb-v1/rl-run-v2.json",
+            ROOT / "experiments/004-rl-run-v2/selection.json",
         )
 
         self.assertEqual(selection["inventory_id"], "qorl-rl-run-v2")

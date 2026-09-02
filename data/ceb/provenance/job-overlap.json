@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "comparison": {
+    "rule": "exclude a complete CEB template when any of its alias-independent table-colored join topologies matches a JOB template",
+    "exact_graph_definition": "source tables plus column-level cross-relation equality predicates",
+    "topology_definition": "source tables plus relation adjacency, ignoring aliases, columns, and filter literals"
+  },
+  "ceb_source": {
+    "kind": "sql",
+    "repository_url": "https://github.com/ycy-YYYY/CEB",
+    "commit": "e3862c9ab6a8210f52927ada424b2e21bad1dab1"
+  },
+  "job_inventory": {
+    "inventory_id": "job-v1-tasks-v1",
+    "task_count": 113,
+    "template_count": 33
+  },
+  "summary": {
+    "ceb_query_count": 13646,
+    "ceb_template_count": 16,
+    "eligible_template_count": 16,
+    "excluded_template_count": 0
+  },
+  "templates": [
+    {
+      "template_id": "ceb-10a",
+      "query_count": 1019,
+      "relation_counts": [
+        7
+      ],
+      "join_graph_sha256": [
+        "da07b91e1929a6d8bf81179d5009d84e2580b2f1820263878fd65f6c1dcd04db"
+      ],
+      "join_topology_sha256": [
+        "71931c391c9c463f58e0cd4eb6244fded7380cef0c973bd7b179bdd395f1ae97"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-11a",
+      "query_count": 491,
+      "relation_counts": [
+        10
+      ],
+      "join_graph_sha256": [
+        "2bccd4599ee3666cda84e6b811193a475d2d2e9894123f0f29cc2e6b1b12e62c"
+      ],
+      "join_topology_sha256": [
+        "acf219cb38858a8a7f910143b3291688fad3ec988d06aaf5cf7c3a8fc9737e85"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-11b",
+      "query_count": 350,
+      "relation_counts": [
+        12
+      ],
+      "join_graph_sha256": [
+        "2c5f210c8333c7e2517ecc738fc8049fbe9989ab436fe518d4bcfd0c74b28e7c"
+      ],
+      "join_topology_sha256": [
+        "64b7e3fa12b25949aa200d45ababd7c5c5484e06578cba85315535eb446cd18a"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-1a",
+      "query_count": 3000,
+      "relation_counts": [
+        9
+      ],
+      "join_graph_sha256": [
+        "cbff523f0aa194cc552c278331b04b5b987dfb059da57875fbc032689cb05b26"
+      ],
+      "join_topology_sha256": [
+        "3db635de249f7f8f097d62b9321be8a63c7c3a029b81fca080a486d0dd43dd3c"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-2a",
+      "query_count": 888,
+      "relation_counts": [
+        11
+      ],
+      "join_graph_sha256": [
+        "b8fd69dda177397eedd859255416361b0b7bfd361a5b43a17412bbf1208f8296"
+      ],
+      "join_topology_sha256": [
+        "148fbffd1788725ea0f1141b525d47acfbd89bdd010f00d72dea868a24e0aa86"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-2b",
+      "query_count": 500,
+      "relation_counts": [
+        11
+      ],
+      "join_graph_sha256": [
+        "b8fd69dda177397eedd859255416361b0b7bfd361a5b43a17412bbf1208f8296"
+      ],
+      "join_topology_sha256": [
+        "148fbffd1788725ea0f1141b525d47acfbd89bdd010f00d72dea868a24e0aa86"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-2c",
+      "query_count": 298,
+      "relation_counts": [
+        9
+      ],
+      "join_graph_sha256": [
+        "cbff523f0aa194cc552c278331b04b5b987dfb059da57875fbc032689cb05b26"
+      ],
+      "join_topology_sha256": [
+        "3db635de249f7f8f097d62b9321be8a63c7c3a029b81fca080a486d0dd43dd3c"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-3a",
+      "query_count": 1383,
+      "relation_counts": [
+        10
+      ],
+      "join_graph_sha256": [
+        "4a112b107500190846eb7606ee008fe70950633124b080b955c0e11120960a47"
+      ],
+      "join_topology_sha256": [
+        "74f0c591a6ab6de1f1835e1f8f2b9934d3cc08fa7676de5c4c14d9fd782d6cd8"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-3b",
+      "query_count": 256,
+      "relation_counts": [
+        10
+      ],
+      "join_graph_sha256": [
+        "4a112b107500190846eb7606ee008fe70950633124b080b955c0e11120960a47"
+      ],
+      "join_topology_sha256": [
+        "74f0c591a6ab6de1f1835e1f8f2b9934d3cc08fa7676de5c4c14d9fd782d6cd8"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-4a",
+      "query_count": 516,
+      "relation_counts": [
+        6
+      ],
+      "join_graph_sha256": [
+        "c5a2d1c109ce7eb33e180164a9fc94f22af51725de699212e76d2bb50d07cacc"
+      ],
+      "join_topology_sha256": [
+        "71ef7451acb45933507b3c431862eb797e9a1037c7c6e4de6aea5416a92774c1"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-5a",
+      "query_count": 1014,
+      "relation_counts": [
+        10
+      ],
+      "join_graph_sha256": [
+        "8e2428ad115e44e0ddd9711176b8f9e3c4a746e063e2252dc575de8b2abcc1ca"
+      ],
+      "join_topology_sha256": [
+        "fa5625fdb6ad3558998dbf13d8a8b4c0a4bfd58d99bb7ccf3036b7960220c91f"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-6a",
+      "query_count": 465,
+      "relation_counts": [
+        14
+      ],
+      "join_graph_sha256": [
+        "6e3b07ec4a1eda27a83109496a04cb693ea295eb9eedb2aa8770a5baeea2ca5b"
+      ],
+      "join_topology_sha256": [
+        "48e8d0edc46ae96ff32f369b5663664d03f09149f30a70c520fecc48279a7685"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-7a",
+      "query_count": 167,
+      "relation_counts": [
+        16
+      ],
+      "join_graph_sha256": [
+        "ffd4b69774dbc5e385b785e2196bb7fff2041bf9beb4fa7827e6dc1458bda9d7"
+      ],
+      "join_topology_sha256": [
+        "d98ba2809ce0d0622cfac0a48ad10b3479d1662da5e9a2df835f4b29171c5f36"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-8a",
+      "query_count": 515,
+      "relation_counts": [
+        12
+      ],
+      "join_graph_sha256": [
+        "cfeb43a79c9b1e9274d06232934a4453a85c9de50dfffe8790fb23d3bebbffc0"
+      ],
+      "join_topology_sha256": [
+        "6cc4b9b51954dfa025fd79773969b672ee206f1822224f9b72122998309c9ecb"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-9a",
+      "query_count": 2247,
+      "relation_counts": [
+        9
+      ],
+      "join_graph_sha256": [
+        "3c5fdbc5a0c9774dd678359101471ef640ef86906a0af2af7dd5b293d200b1d5"
+      ],
+      "join_topology_sha256": [
+        "53aef0b4bc959c67ae0a06d0d19dc44cdd967b9307f67c6757a76be6a62d0a63"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    },
+    {
+      "template_id": "ceb-9b",
+      "query_count": 537,
+      "relation_counts": [
+        9
+      ],
+      "join_graph_sha256": [
+        "3c5fdbc5a0c9774dd678359101471ef640ef86906a0af2af7dd5b293d200b1d5"
+      ],
+      "join_topology_sha256": [
+        "53aef0b4bc959c67ae0a06d0d19dc44cdd967b9307f67c6757a76be6a62d0a63"
+      ],
+      "exact_job_template_matches": [],
+      "topology_job_template_matches": [],
+      "disposition": "eligible"
+    }
+  ]
+}

@@ -17,7 +17,7 @@ from typing import Any, BinaryIO
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/manifests/ceb-v1.json"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/ceb-v1"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
 

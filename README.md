@@ -4,6 +4,10 @@ QORL (Query Optimization with Reinforcement Learning) is a focused research
 harness for training and evaluating an agent that steers PostgreSQL's query
 optimizer toward faster physical plans.
 
+`data/` holds stable workloads, `experiments/NNN-name/` collocates each run's
+inputs, and `configs/` holds settings reused unchanged across experiments. See
+`AGENTS.md` for the repository contract.
+
 ```bash
 uv sync
 uv run qorl calibrate
@@ -22,13 +26,14 @@ manifest contains multiple splits, select one explicitly:
 
 ```bash
 uv run qorl calibrate ceb \
-  --selection data/ceb/ceb-v1/rl-run-v2.json
+  --selection experiments/004-rl-run-v2/selection.json
 uv run qorl calibrate ceb \
   --selection path/to/selection.json --split validation
 ```
 
-`run` loads `configs/evaluation/run-v1.json`, runs the configured five-candidate
-policy over JOB, and records trusted results plus the complete policy trace
+`run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
+shared policy in `configs/policy/run-v1.json`. It runs that five-candidate
+policy over JOB and records trusted results plus the complete policy trace
 under `outputs/runs/`. The default policy is the untrained
 `empero-ai/Qwen3.8-4B-Distill` `qo-agent` served through a local
 OpenAI-compatible vLLM endpoint.
@@ -45,5 +50,5 @@ uv pip install --python .venv-vllm/bin/python 'vllm==0.27.1'
 To reproduce the frozen random baseline instead:
 
 ```bash
-QORL_RUN_CONFIG=configs/evaluation/random-v1.json uv run qorl run
+QORL_RUN_CONFIG=experiments/000-vanilla-baseline/random.json uv run qorl run
 ```

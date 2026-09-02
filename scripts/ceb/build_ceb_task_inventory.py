@@ -18,8 +18,8 @@ from scripts.utils.query_structure import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CEB_DIR = REPOSITORY_ROOT / "data/ceb/ceb-v1"
-DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/job-v1/tasks.json"
+DEFAULT_CEB_DIR = REPOSITORY_ROOT / "data/ceb"
+DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -35,9 +35,10 @@ def sha256_file(path: Path) -> str:
 
 
 def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
-    sources_path = ceb_dir / "sources.json"
-    unique_path = ceb_dir / "unique-plans.json"
-    overlap_path = ceb_dir / "job-overlap.json"
+    provenance_dir = ceb_dir / "provenance"
+    sources_path = provenance_dir / "sources.json"
+    unique_path = provenance_dir / "unique-plans.json"
+    overlap_path = provenance_dir / "job-overlap.json"
     sources = json.loads(sources_path.read_text(encoding="utf-8"))
     unique = json.loads(unique_path.read_text(encoding="utf-8"))
     overlap = json.loads(overlap_path.read_text(encoding="utf-8"))
@@ -156,7 +157,7 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
             ),
         },
         "job_leakage_audit": {
-            "report_path": "job-overlap.json",
+            "report_path": "provenance/job-overlap.json",
             "report_sha256": sha256_file(overlap_path),
             "rule": overlap["comparison"]["rule"],
             "source_template_count": len(source_templates),

@@ -12,8 +12,8 @@ class FixtureError(RuntimeError):
 
 
 TASK_SET_PATHS = {
-    "job-v1": Path("data/job/job-v1/tasks.json"),
-    "ceb-v1": Path("data/ceb/ceb-v1/tasks.json"),
+    "job-v1": Path("data/job/tasks.json"),
+    "ceb-v1": Path("data/ceb/tasks.json"),
 }
 
 

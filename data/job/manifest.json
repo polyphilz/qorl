@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "fixture_id": "job-v1",
+  "description": "Join Order Benchmark using the May 2013 IMDb export referenced by the canonical JOB query repository",
+  "dataset": {
+    "source_url": "https://event.cwi.nl/da/job/imdb.tgz",
+    "archive": {
+      "filename": "imdb.tgz",
+      "bytes": 1263193115,
+      "sha256": "25f9d893c54f903366e0c263f88db0d429dbc2b159d4987ebc1e203242a7e988"
+    },
+    "copy_format": {
+      "format": "csv",
+      "header": false,
+      "delimiter": ",",
+      "quote": "\"",
+      "escape": "\\",
+      "null": ""
+    },
+    "members": {
+      "aka_name.csv": {
+        "bytes": 73004383,
+        "sha256": "80005a6815cbcd1f1790d2207648932ea790440e9e06ae5473b32c66519ebf0e",
+        "table": "aka_name",
+        "rows": 901343
+      },
+      "aka_title.csv": {
+        "bytes": 38858446,
+        "sha256": "5d11232563dd8ee0d06eec08e405dbb28d43e5b7194fb1704bf7d8235f21ad85",
+        "table": "aka_title",
+        "rows": 361472
+      },
+      "cast_info.csv": {
+        "bytes": 1418137141,
+        "sha256": "bfd359eeca7dc571272cd52d560d0178beaf722130feec128ad4681ee493a7c7",
+        "table": "cast_info",
+        "rows": 36244344
+      },
+      "char_name.csv": {
+        "bytes": 215711567,
+        "sha256": "2deb082b4891c91b638b588707ac2b342918bb5b435b2998af6ad45d2459c10b",
+        "table": "char_name",
+        "rows": 3140339
+      },
+      "comp_cast_type.csv": {
+        "bytes": 45,
+        "sha256": "40728bcd55d173ea63a589b863fc1e873a854998f0422b571c14d3a24a05c823",
+        "table": "comp_cast_type",
+        "rows": 4
+      },
+      "company_name.csv": {
+        "bytes": 17802021,
+        "sha256": "1915eae9e39b595f73166a76aa7a0cc158f902931db627182231ca31ad6a6b7c",
+        "table": "company_name",
+        "rows": 234997
+      },
+      "company_type.csv": {
+        "bytes": 92,
+        "sha256": "27f13bddd29d5f8921bbc9710d95c4454cc5e072bc4c1288d8a312a2260e5a26",
+        "table": "company_type",
+        "rows": 4
+      },
+      "complete_cast.csv": {
+        "bytes": 2414495,
+        "sha256": "01153e5f8cbac79c9e08016e7c5501f3404c84086839c0257e63f61995c8ca72",
+        "table": "complete_cast",
+        "rows": 135086
+      },
+      "info_type.csv": {
+        "bytes": 1928,
+        "sha256": "f3179f676bd54ab5b5d99b7204f762afce7e56adee277b9cdb12e6b778f71660",
+        "table": "info_type",
+        "rows": 113
+      },
+      "keyword.csv": {
+        "bytes": 3791536,
+        "sha256": "7a1160e983ef8e97216309deac2be33d91519ab4e716edd6131f66372d969108",
+        "table": "keyword",
+        "rows": 134170
+      },
+      "kind_type.csv": {
+        "bytes": 85,
+        "sha256": "423b4c5a6c22eb51945fed746610520b07dc6c84219cf2c6b1b8a676e1ce439e",
+        "table": "kind_type",
+        "rows": 7
+      },
+      "link_type.csv": {
+        "bytes": 261,
+        "sha256": "12d359eb45298ac80ab7d914c8b5e23480b7e4f34cf29ec51e072446156da968",
+        "table": "link_type",
+        "rows": 18
+      },
+      "movie_companies.csv": {
+        "bytes": 93112104,
+        "sha256": "38755ab1706a8e384810dd1cce0d1032839386c9c37cc7834f36a45d177cd683",
+        "table": "movie_companies",
+        "rows": 2609129
+      },
+      "movie_info.csv": {
+        "bytes": 963782656,
+        "sha256": "7451bd8d6b1fa939a90f5f20bf3dc420340e49016044b6d0e7226c01431ee9c0",
+        "table": "movie_info",
+        "rows": 14835720
+      },
+      "movie_info_idx.csv": {
+        "bytes": 35335875,
+        "sha256": "194b245145d8035e60df6daad0cd4fabc6f58c9594c8f95cf76748753f6c0a2f",
+        "table": "movie_info_idx",
+        "rows": 1380035
+      },
+      "movie_keyword.csv": {
+        "bytes": 93799307,
+        "sha256": "50a698bdfd207489e1cb02e301e3de45ee9171f1ddc9fe9c3f7308cacc2d7240",
+        "table": "movie_keyword",
+        "rows": 4523930
+      },
+      "movie_link.csv": {
+        "bytes": 656584,
+        "sha256": "b964ab6ee45d958c207382ac15d2fcb7881caa3f16b9a16e24b3b45eb2a893bc",
+        "table": "movie_link",
+        "rows": 29997
+      },
+      "name.csv": {
+        "bytes": 321191609,
+        "sha256": "99a69afb079afad800ed3ac4913110ce8f3b95ef9b488bfda641e308cfb836e6",
+        "table": "name",
+        "rows": 4167491
+      },
+      "person_info.csv": {
+        "bytes": 399133124,
+        "sha256": "004a4fb9dcc12109e028fd1440a1270ca8dbeb4a67147b686a67770275ad52a1",
+        "table": "person_info",
+        "rows": 2963664
+      },
+      "role_type.csv": {
+        "bytes": 160,
+        "sha256": "2afc2b0dc30042bb5920be6feabd13de79423a144c18efba07c5d9a5ac224100",
+        "table": "role_type",
+        "rows": 12
+      },
+      "schematext.sql": {
+        "bytes": 4282,
+        "sha256": "da8c4c81d42afd94cfce594a424ca2f66e6074bb808ad5622561aeff7d6e2c45"
+      },
+      "title.csv": {
+        "bytes": 203877939,
+        "sha256": "663c5bc45f08440cd2e09d97f22768a82ea4f1f7a049e6b9dfc17fb7b34da0f4",
+        "table": "title",
+        "rows": 2528312
+      }
+    }
+  },
+  "workload": {
+    "repository_url": "https://github.com/gregrahn/join-order-benchmark",
+    "commit": "a39603662e023e449cb2121997a5034df9e02ebf",
+    "archive": {
+      "url": "https://codeload.github.com/gregrahn/join-order-benchmark/tar.gz/a39603662e023e449cb2121997a5034df9e02ebf",
+      "filename": "join-order-benchmark-a39603662e023e449cb2121997a5034df9e02ebf.tar.gz",
+      "bytes": 12313,
+      "sha256": "6a57357a67950dbd507f8a7cebdbed1d0a3806b3de445b8dd20f82f0d4aa7593"
+    },
+    "schema": {
+      "path": "schema.sql",
+      "sha256": "1d10ba0c9a881e890aeb951c0960cc4e3472c9c9695ce1edb6493e9e4466d3d2"
+    },
+    "indexes": {
+      "path": "fkindexes.sql",
+      "sha256": "727909bbbb9b0ae2b7d5739cfcd066992fc4bf1e984b29d87bcc700c4e2583cc",
+      "secondary_index_count": 23
+    },
+    "queries": {
+      "glob": "[0-9]*.sql",
+      "count": 113,
+      "sha256_manifest": "71175e8e0a4390cc5d62a2be6fbf7788c614edccd3591539b06922ffc4e6d210",
+      "manifest_algorithm": "SHA-256 of sorted '<file-sha256><two spaces><filename><newline>' records",
+      "representative": [
+        "1a.sql",
+        "17b.sql",
+        "33c.sql"
+      ]
+    }
+  },
+  "database": {
+    "image_reference": "qorl-postgres:18.6-pg_hint_plan-1.8.0",
+    "server_version_num": "180006",
+    "encoding": "UTF8",
+    "collation": "C",
+    "ctype": "C",
+    "expected_table_count": 21,
+    "expected_primary_key_count": 21,
+    "expected_secondary_index_count": 23,
+    "expected_total_index_count": 44
+  },
+  "load": {
+    "table_order": [
+      "aka_name",
+      "aka_title",
+      "cast_info",
+      "char_name",
+      "comp_cast_type",
+      "company_name",
+      "company_type",
+      "complete_cast",
+      "info_type",
+      "keyword",
+      "kind_type",
+      "link_type",
+      "movie_companies",
+      "movie_info",
+      "movie_info_idx",
+      "movie_keyword",
+      "movie_link",
+      "name",
+      "person_info",
+      "role_type",
+      "title"
+    ],
+    "finalization": {
+      "vacuum": "VACUUM (FREEZE, ANALYZE)",
+      "statistics_target": 100,
+      "checkpoint_after_vacuum": true
+    }
+  }
+}

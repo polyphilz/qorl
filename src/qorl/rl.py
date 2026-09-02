@@ -10,7 +10,7 @@ from pathlib import Path
 from qorl.fixture import sha256_file
 from qorl.sft import model_snapshot, run
 
-CONFIG = Path("configs/training/rl-pilot-v1.toml")
+CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
 INVENTORY_CHECK = Path("scripts/rl/build_pilot_inventory.py")
 MERGE_SCRIPT = Path("scripts/rl/merge_sft_adapter.py")
 SFT_RUN = Path("outputs/sft/protocol-sft-train-v1")
@@ -44,12 +44,12 @@ def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None
     summary = report.get("summary", {})
     expected_hashes = {
         "config_sha256": sha256_file(
-            repository / "configs/training/rl-pilot-validation-v1.json"
+            repository / "experiments/003-rl-pilot-v1/validation.json"
         ),
         "selection_sha256": sha256_file(
-            repository / "data/ceb/ceb-v1/rl-pilot-v1.json"
+            repository / "experiments/003-rl-pilot-v1/selection.json"
         ),
-        "run_config_sha256": sha256_file(repository / "configs/evaluation/run-v1.json"),
+        "run_config_sha256": sha256_file(repository / "configs/policy/run-v1.json"),
     }
     if any(report.get(key) != value for key, value in expected_hashes.items()):
         raise RuntimeError("frozen pre-RL validation inputs have changed")

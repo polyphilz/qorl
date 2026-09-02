@@ -8,7 +8,7 @@ database matches the original build.
 
 ## Inputs and trust boundary
 
-`data/manifests/job-v1.json` pins:
+`data/job/manifest.json` pins:
 
 - The May 2013 IMDb archive URL, byte length, SHA-256, and every extracted
   member's byte length and SHA-256.
@@ -59,8 +59,8 @@ it was built; neither plaintext password is written to the manifests.
 
 ## Checked-in JOB task inventory
 
-`data/job/job-v1/queries/` contains the 113 exact, human-readable JOB SQL
-files. `data/job/job-v1/tasks.json` is the single machine-readable inventory:
+`data/job/queries/` contains the 113 exact, human-readable JOB SQL
+files. `data/job/tasks.json` is the single machine-readable inventory:
 it declares the entire collection held-out test data and records each query's
 template, SQL checksum, relation instances, table set, join predicates, and
 alias-independent join-graph fingerprint.

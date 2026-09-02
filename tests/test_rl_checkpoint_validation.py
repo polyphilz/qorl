@@ -16,7 +16,7 @@ class RlCheckpointValidationTest(unittest.TestCase):
     def test_configuration_pins_the_frozen_cohort_and_checkpoint_cadence(self) -> None:
         config, _ = load_config(Path.cwd())
 
-        self.assertEqual(config["selection"], "data/ceb/ceb-v1/rl-pilot-v1.json")
+        self.assertEqual(config["selection"], "experiments/003-rl-pilot-v1/selection.json")
         self.assertEqual(config["split"], "validation")
         self.assertEqual(
             config["rollout_seeds"],
