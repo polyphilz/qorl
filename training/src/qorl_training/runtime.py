@@ -4,13 +4,13 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from qorl.fixture import DatabaseFixture, TaskSet
-from qorl.pool import (
+from qorl.db.fixture import DatabaseFixture, TaskSet
+from qorl.db.pool import (
     WorkerPool,
     WorkerSlot,
     start_pool,
 )
-from qorl.timeouts import CalibratedTimeouts
+from qorl.workload.timeouts import CalibratedTimeouts
 
 
 TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"

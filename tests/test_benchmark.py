@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qorl.benchmark import load_run_config, summarize
+from qorl.evaluation.benchmark import load_run_config, summarize
 
 
 class BenchmarkTest(unittest.TestCase):

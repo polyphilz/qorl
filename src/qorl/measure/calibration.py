@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
-from qorl.fixture import DatabaseFixture, TaskSet, sha256_file
-from qorl.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.worker import PostgresWorker, WorkerError
+from qorl.db.fixture import DatabaseFixture, TaskSet, sha256_file
+from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
+from qorl.db.worker import PostgresWorker, WorkerError
 
 
 MEASUREMENT_RUNS = 20

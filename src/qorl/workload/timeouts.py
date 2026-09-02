@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qorl.fixture import TaskSet, data_identity, sha256_file
+from qorl.db.fixture import TaskSet, data_identity, sha256_file
 
 
 TIMEOUT_FLOOR_MS = 5_000

@@ -9,7 +9,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Iterable
 
-from qorl.calibration import write_json
+from qorl.measure.calibration import write_json
 
 
 def trace_records(run_dir: Path, kind: str) -> Iterable[dict[str, Any]]:

@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from qorl.fixture import TaskSet, sha256_file
+from qorl.db.fixture import TaskSet, sha256_file
 from scripts.utils.protocol_demo import validate_protocol_demo
 
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 import random
 import unittest
 
-from qorl.action import TaskCatalog, normalize_action
-from qorl.random_policy import FAMILY_WEIGHTS, sample_action
+from qorl.evaluation.baselines.random import FAMILY_WEIGHTS, sample_action
+from qorl.plans.action import TaskCatalog, normalize_action
 
 
 TASK = {

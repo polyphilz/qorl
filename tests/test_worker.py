@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.worker import PostgresWorker, QueryTimeout, WorkerError
+from qorl.db.worker import PostgresWorker, QueryTimeout, WorkerError
 
 
 class TimeoutWorker(PostgresWorker):

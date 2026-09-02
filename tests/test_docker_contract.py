@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from qorl.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
+from qorl.plans.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
 
 ROOT = Path(__file__).resolve().parents[1]

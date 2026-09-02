@@ -10,7 +10,7 @@ from qorl.agent.config import QoAgentConfig
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.tools import AgentEnvironment
-from qorl.rollout import RolloutEvaluator
+from qorl.measure.rollout import RolloutEvaluator
 
 
 def sha256_json(value: Any) -> str:

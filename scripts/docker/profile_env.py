@@ -9,7 +9,10 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPOSITORY_ROOT / "src"))
 
-from qorl.resources import load_runtime_profile, validate_host_topology  # noqa: E402
+from qorl.db.resources import (  # noqa: E402
+    load_runtime_profile,
+    validate_host_topology,
+)
 
 
 def main() -> None:

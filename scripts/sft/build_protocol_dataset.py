@@ -7,12 +7,15 @@ import random
 from pathlib import Path
 from typing import Any
 
-from qorl.action import ActionError, TaskCatalog, compile_action
+from qorl.plans.action import ActionError, TaskCatalog, compile_action
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tools import AgentEnvironment, candidate_feedback
-from qorl.calibration import plan_sha256
-from qorl.fixture import DatabaseFixture, TaskSet
-from qorl.plan import (
+from qorl.db.fixture import DatabaseFixture, TaskSet
+from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.evaluation.baselines.random import random_join_tree
+from qorl.measure.calibration import plan_sha256
+from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
+from qorl.plans.verify import (
     JOIN_METHODS,
     SCAN_METHODS,
     compact_plan,
@@ -24,9 +27,6 @@ from qorl.plan import (
     relation_set,
     verify_action,
 )
-from qorl.random_policy import random_join_tree
-from qorl.rollout import MAX_CANDIDATES, RolloutEvaluator
-from qorl.worker import PostgresWorker, WorkerError
 from scripts.utils.protocol_dataset import (
     DATASET_ID,
     DATASET_SEED,

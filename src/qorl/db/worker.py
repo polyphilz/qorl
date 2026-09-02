@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from qorl.fixture import DatabaseFixture
-from qorl.resources import (
+from qorl.db.fixture import DatabaseFixture
+from qorl.db.resources import (
     DEFAULT_EVALUATION_PROFILE,
     RuntimeProfile,
     WorkerResources,

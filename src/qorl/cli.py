@@ -4,8 +4,8 @@ import argparse
 from pathlib import Path
 
 from qorl import __version__
-from qorl.benchmark import run_benchmark
-from qorl.calibration import calibrate
+from qorl.evaluation.benchmark import run_benchmark
+from qorl.measure.calibration import calibrate
 from qorl.rl import rl
 from qorl.sft import sft
 

@@ -7,15 +7,15 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from qorl.fixture import DatabaseFixture
-from qorl.resources import (
+from qorl.db.fixture import DatabaseFixture
+from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
     RuntimeProfile,
     WorkerResources,
     load_runtime_profile,
     validate_host_topology,
 )
-from qorl.worker import PostgresWorker
+from qorl.db.worker import PostgresWorker
 
 
 DEFAULT_POOL_CONFIG = DEFAULT_TRAINING_PROFILE

@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from qorl.fixture import TaskSet
-from qorl.timeouts import CalibratedTimeouts
+from qorl.db.fixture import TaskSet
+from qorl.workload.timeouts import CalibratedTimeouts
 
 
 ROOT = Path(__file__).resolve().parents[1]

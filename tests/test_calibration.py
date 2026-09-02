@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from qorl.calibration import (
+from qorl.measure.calibration import (
     PLAN_FINGERPRINT_VERSION,
     buffers_stable,
     canonical_plan,
@@ -13,7 +13,7 @@ from qorl.calibration import (
     plan_sha256,
     selected_tasks,
 )
-from qorl.fixture import TaskSet
+from qorl.db.fixture import TaskSet
 
 
 ROOT = Path(__file__).resolve().parents[1]

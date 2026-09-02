@@ -12,7 +12,7 @@ from pydantic import Field
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.agent.tools import candidate_feedback
-from qorl.rollout import (
+from qorl.measure.rollout import (
     TrainingRolloutEvaluatorV1,
     TrainingRolloutEvaluatorV2,
 )

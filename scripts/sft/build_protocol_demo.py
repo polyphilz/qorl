@@ -7,10 +7,10 @@ from typing import Any
 
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tools import AgentEnvironment
-from qorl.fixture import DatabaseFixture, TaskSet
-from qorl.plan import plan_join_tree
-from qorl.rollout import RolloutEvaluator
-from qorl.worker import PostgresWorker
+from qorl.db.fixture import DatabaseFixture, TaskSet
+from qorl.db.worker import PostgresWorker
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.plans.verify import plan_join_tree
 from scripts.utils.protocol_demo import validate_protocol_demo
 
 

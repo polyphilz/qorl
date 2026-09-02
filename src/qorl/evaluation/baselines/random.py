@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from qorl.action import ActionError, TaskCatalog, normalize_action
+from qorl.plans.action import ActionError, TaskCatalog, normalize_action
 
 
 SAMPLER_VERSION = 2

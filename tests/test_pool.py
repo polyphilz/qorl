@@ -6,8 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from qorl.pool import WorkerPool, WorkerSlot
-from qorl.resources import (
+from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
     load_runtime_profile,
     validate_host_topology,

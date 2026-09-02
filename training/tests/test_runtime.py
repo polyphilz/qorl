@@ -6,8 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
-from qorl.pool import WorkerSlot
-from qorl.resources import (
+from qorl.db.pool import WorkerSlot
+from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
     load_runtime_profile,
     validate_host_topology,

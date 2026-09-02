@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.action import ActionError, TaskCatalog, compile_action, plan_action_schema
+from qorl.plans.action import ActionError, TaskCatalog, compile_action, plan_action_schema
 
 
 TASK = {

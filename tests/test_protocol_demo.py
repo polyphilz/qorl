@@ -6,13 +6,13 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from qorl.action import TaskCatalog, compile_action
+from qorl.plans.action import TaskCatalog, compile_action
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import AgentProtocol, RESERVED_DECISION_TURNS
 from qorl.agent.tools import agent_tools
-from qorl.calibration import plan_sha256
-from qorl.fixture import TaskSet
-from qorl.rollout import MAX_CANDIDATES
+from qorl.db.fixture import TaskSet
+from qorl.measure.calibration import plan_sha256
+from qorl.measure.rollout import MAX_CANDIDATES
 from scripts.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from scripts.utils.protocol_demo import DemoValidationError, validate_protocol_demo
 

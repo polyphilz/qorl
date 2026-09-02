@@ -8,7 +8,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
-from qorl.action import (
+from qorl.plans.action import (
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
     NUMERIC_SETTINGS,

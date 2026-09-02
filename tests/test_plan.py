@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.plan import parse_hint_diagnostics, verify_action
+from qorl.plans.verify import parse_hint_diagnostics, verify_action
 
 
 DIAGNOSTICS = (

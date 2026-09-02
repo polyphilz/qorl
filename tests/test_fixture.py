@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from qorl.fixture import DatabaseFixture, FixtureError, TaskSet
+from qorl.db.fixture import DatabaseFixture, FixtureError, TaskSet
 
 
 ROOT = Path(__file__).resolve().parents[1]
