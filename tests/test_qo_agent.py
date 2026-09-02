@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
@@ -244,6 +245,25 @@ def config() -> QoAgentConfig:
 
 
 class QoAgentTest(unittest.TestCase):
+    def test_model_visible_request_bytes_are_stable(self) -> None:
+        client = FakeClient()
+        evaluator = FakeEvaluator()
+        self.addCleanup(evaluator.temporary_directory.cleanup)
+
+        QoAgentPolicy(config(), client).search(evaluator)  # type: ignore[arg-type]
+
+        digests = [
+            hashlib.sha256(json.dumps(request).encode("utf-8")).hexdigest()
+            for request in client.requests
+        ]
+        self.assertEqual(
+            digests,
+            [
+                "7bb5e0267eb6ad3f602c2e5c6d163f72ef4cc612e1d0ea99c5a97831a3d6b961",
+                "e3a41ca9fb08dd61d09a101a29e4e5846b6fc673aedb3d8cc3a18a4730370b4e",
+            ],
+        )
+
     def test_protocol_exposes_a_one_candidate_training_budget(self) -> None:
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
