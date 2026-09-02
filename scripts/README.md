@@ -1,6 +1,10 @@
 # Maintenance scripts
 
-These modules prepare and verify versioned benchmark data; they are not part of
-the `qorl` runtime or CLI. Run commands from the repository root with
-`uv run python -m scripts.<area>.<command>`; shared implementation lives in
-`scripts/utils/`.
+This directory contains the CEB and JOB data-preparation pipelines, Docker
+checks, experiment-specific inventory builders, and the model-server launcher.
+Reusable runtime, evaluation, and SFT code
+lives under `src/qorl/`; GPU-dependent adapter and rendering tools live under
+`training/src/qorl_training/`.
+
+Run Python data commands from the repository root with
+`uv run python -m scripts.<area>.<command>`.

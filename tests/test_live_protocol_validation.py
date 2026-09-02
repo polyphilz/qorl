@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.sft.live_protocol_validation import (
+from qorl.evaluation.live_validation import (
     TRAINING_RUN,
     adapter_path,
     selected_policies,

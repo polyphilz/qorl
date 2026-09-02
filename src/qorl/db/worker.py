@@ -419,10 +419,8 @@ exec env \
         self.command(
             [
                 sys.executable,
-                str(
-                    self.fixture.repository
-                    / "scripts/capture-benchmark-environment.py"
-                ),
+                "-m",
+                "qorl.db.capture",
                 "--container",
                 self.container,
                 "--output-dir",

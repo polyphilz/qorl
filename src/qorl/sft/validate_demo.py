@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from scripts.utils.protocol_demo import validate_protocol_demo
+from qorl.sft.validate import validate_protocol_demo
 
 
 def main() -> None:
@@ -29,4 +29,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

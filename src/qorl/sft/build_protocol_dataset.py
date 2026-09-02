@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import random
@@ -12,9 +13,10 @@ from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import candidate_feedback
 from qorl.db.fixture import DatabaseFixture
+from qorl.db.pool import start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
-from qorl.evaluation.baselines.random import random_join_tree
 from qorl.plans.fingerprint import plan_sha256
+from qorl.plans.random_tree import random_join_tree
 from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
 from qorl.plans.verify import (
@@ -29,7 +31,7 @@ from qorl.plans.verify import (
     relation_set,
     verify_action,
 )
-from scripts.utils.protocol_dataset import (
+from qorl.sft.assemble import (
     DATASET_ID,
     DATASET_SEED,
     SPLIT_COUNTS,
@@ -38,7 +40,7 @@ from scripts.utils.protocol_dataset import (
     ranked_tasks,
     select_tasks,
 )
-from scripts.utils.protocol_demo import validate_protocol_demo
+from qorl.sft.validate import validate_protocol_demo
 
 
 MAXIMUM_MODEL_TURNS = 64
@@ -626,7 +628,10 @@ def main() -> None:
     missing = [ordinal for ordinal in range(len(planned)) if ordinal not in existing]
 
     if missing:
-        with PostgresWorker(fixture, "qorl-protocol-sft-data") as worker:
+        with contextlib.closing(
+            start_pool(fixture, "qorl-protocol-sft-data")
+        ) as pool, pool.claim_worker() as slot:
+            worker = slot.worker
             for ordinal in missing:
                 requested = planned[ordinal]
                 partition = requested["partition"]

@@ -4,6 +4,7 @@ import random
 from typing import Any
 
 from qorl.plans.action import ActionError, TaskCatalog, normalize_action
+from qorl.plans.random_tree import random_join_tree
 
 
 SAMPLER_VERSION = 2
@@ -41,37 +42,6 @@ def weighted_families(rng: random.Random, count: int) -> list[str]:
         available.remove(name)
         selected.append(name)
     return selected
-
-
-def random_join_tree(
-    catalog: TaskCatalog, rng: random.Random
-) -> str | dict[str, Any]:
-    components: list[tuple[set[str], str | dict[str, Any]]] = [
-        ({relation}, relation) for relation in sorted(catalog.relations)
-    ]
-    while len(components) > 1:
-        pairs = [
-            (left, right)
-            for left in range(len(components))
-            for right in range(left + 1, len(components))
-            if any(
-                catalog.adjacency[relation] & components[right][0]
-                for relation in components[left][0]
-            )
-        ]
-        left_index, right_index = rng.choice(pairs)
-        left_relations, left_tree = components[left_index]
-        right_relations, right_tree = components[right_index]
-        if rng.random() < 0.5:
-            left_tree, right_tree = right_tree, left_tree
-        merged = (
-            left_relations | right_relations,
-            {"left": left_tree, "right": right_tree},
-        )
-        components.pop(right_index)
-        components.pop(left_index)
-        components.append(merged)
-    return components[0][1]
 
 
 def join_targets(tree: str | dict[str, Any]) -> list[list[str]]:

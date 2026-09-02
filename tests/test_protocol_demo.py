@@ -13,8 +13,8 @@ from qorl.agent.tools import agent_tools
 from qorl.plans.fingerprint import plan_sha256
 from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import MAX_CANDIDATES
-from scripts.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
-from scripts.utils.protocol_demo import DemoValidationError, validate_protocol_demo
+from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
+from qorl.sft.validate import DemoValidationError, validate_protocol_demo
 
 
 ROOT = Path(__file__).resolve().parents[1]

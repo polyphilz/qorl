@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.utils.ceb import choose_validation_templates, extract_sql_bytes
+from qorl.workload.ceb import choose_validation_templates, extract_sql_bytes
 
 
 def short_unicode(value: str) -> bytes:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.rl.paired_validation import summarize
+from qorl.evaluation.paired_validation import summarize
 
 
 def result(task_id: str, reward: float, speedup: float | None) -> dict:

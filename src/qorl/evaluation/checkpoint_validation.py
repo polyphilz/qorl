@@ -24,8 +24,8 @@ from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import RolloutEvaluator
-from scripts.rl.paired_validation import load_tasks, summarize
-from scripts.sft.live_protocol_validation import trace_metrics, wait_for_server
+from qorl.evaluation.live_validation import trace_metrics, wait_for_server
+from qorl.evaluation.paired_validation import load_tasks, summarize
 
 
 CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
@@ -103,7 +103,8 @@ def prepare_adapters(
                     "--frozen",
                     "--no-sync",
                     "python",
-                    str(repository / "training/export_adapter.py"),
+                    "-m",
+                    "qorl_training.adapters.export",
                     "--checkpoint",
                     str(checkpoint),
                     "--model",

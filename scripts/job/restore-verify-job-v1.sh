@@ -169,7 +169,7 @@ python3 -m scripts.job.verify_job_v1 \
     --compare-to "$build_verification" \
     --output "$output_dir/job-v1.database.restore.json"
 
-python3 "$repository_root/scripts/capture-benchmark-environment.py" \
+python3 -m qorl.db.capture \
     --container "$container" \
     --runtime-profile "$runtime_profile" \
     --output-dir "$output_dir" \

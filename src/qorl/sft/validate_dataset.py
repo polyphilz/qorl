@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from scripts.utils.protocol_dataset import validate_dataset
+from qorl.sft.assemble import validate_dataset
 
 
 def main() -> None:

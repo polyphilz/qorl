@@ -7,33 +7,18 @@ import shutil
 import sys
 from pathlib import Path
 
+from qorl.adapters.verify import verify_merged_model
 from qorl.util.hashing import sha256_file
-from qorl.sft import model_snapshot, run
+from qorl.sft import pinned_policy, run
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
 INVENTORY_CHECK = Path("scripts/rl/build_pilot_inventory.py")
-MERGE_SCRIPT = Path("scripts/rl/merge_sft_adapter.py")
+MERGE_MODULE = "qorl_training.adapters.merge"
 SFT_RUN = Path("outputs/sft/protocol-sft-train-v1")
 MERGED_MODEL = Path("outputs/rl/protocol-sft-v1-merged")
 PRE_RL_REPORT = Path("outputs/rl/qorl-rl-pilot-validation-v1/pre/report.json")
 RUN = Path("outputs/rl/rl-pilot-v1")
 FINAL_STEP = 12
-
-
-def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
-    manifest_path = merged / "qorl-merge.json"
-    model_path = merged / "model.safetensors"
-    if not manifest_path.is_file() or not model_path.is_file():
-        raise RuntimeError(f"merged SFT model is incomplete: {merged}")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {
-        "base_model_sha256": sha256_file(base / "model.safetensors"),
-        "adapter_model_sha256": sha256_file(adapter / "adapter_model.safetensors"),
-        "adapter_config_sha256": sha256_file(adapter / "adapter_config.json"),
-        "merged_model_sha256": sha256_file(model_path),
-    }
-    if any(manifest.get(key) != value for key, value in expected.items()):
-        raise RuntimeError("merged SFT model checksum mismatch")
 
 
 def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None:
@@ -96,7 +81,7 @@ def rl(repository: Path) -> Path:
         repository,
     )
 
-    base, _ = model_snapshot(repository)
+    base, _ = pinned_policy(repository)
     report_path = repository / SFT_RUN / "training-report.json"
     if not report_path.is_file():
         raise RuntimeError("protocol-SFT training report is missing")
@@ -120,7 +105,8 @@ def rl(repository: Path) -> Path:
             [
                 *prime,
                 "python",
-                str(repository / MERGE_SCRIPT),
+                "-m",
+                MERGE_MODULE,
                 "--base",
                 str(base),
                 "--adapter",

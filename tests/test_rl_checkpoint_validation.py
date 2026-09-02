@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from scripts.rl.checkpoint_validation import (
+from qorl.evaluation.checkpoint_validation import (
     checkpoint_summary,
     load_config,
     model_command,

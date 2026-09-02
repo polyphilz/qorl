@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.util.hashing import sha256_bytes, sha256_file
-from scripts.utils.query_structure import (
+from qorl.workload.query_structure import (
     extract_join_structure as extract_structure,
 )
 

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.util.hashing import sha256_bytes, sha256_file
-from scripts.utils.ceb import extract_sql_bytes
+from qorl.workload.ceb import extract_sql_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]

@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from qorl.adapters.model import model_snapshot
+
 
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"
@@ -27,27 +29,11 @@ def run(command: list[str], repository: Path) -> None:
         ) from error
 
 
-def model_snapshot(repository: Path) -> tuple[Path, dict[str, Any]]:
+def pinned_policy(repository: Path) -> tuple[Path, dict[str, Any]]:
     config = json.loads(
         (repository / "configs/policy/run-v1.json").read_text()
     )["policy"]
-    model = config["model"]
-    revision = config["revision"]
-    cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
-    if cache is None:
-        home = Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface"))
-        cache = str(home / "hub")
-    snapshot = (
-        Path(cache)
-        / f"models--{model.replace('/', '--')}"
-        / "snapshots"
-        / revision
-    )
-    if not snapshot.is_dir():
-        raise RuntimeError(
-            f"pinned model snapshot is not downloaded: {model}@{revision}"
-        )
-    return snapshot.resolve(), config
+    return model_snapshot(config), config
 
 
 def sha256(path: Path) -> str:
@@ -107,7 +93,7 @@ def sft(repository: Path) -> Path:
     if uv is None:
         raise RuntimeError("uv is not installed")
 
-    snapshot, model = model_snapshot(repository)
+    snapshot, model = pinned_policy(repository)
     training = repository / "training"
     dataset = repository / DATASET
     audit = dataset / "render-audit.json"
@@ -115,7 +101,7 @@ def sft(repository: Path) -> Path:
     output = repository / "outputs/sft"
 
     run(
-        [sys.executable, "-m", "scripts.sft.validate_protocol_dataset"],
+        [sys.executable, "-m", "qorl.sft.validate_dataset"],
         repository,
     )
     replay = json.loads((dataset / "replay-audit.json").read_text())
@@ -129,7 +115,8 @@ def sft(repository: Path) -> Path:
         [
             *prime,
             "python",
-            str(repository / "scripts/sft/audit_prime_dataset.py"),
+            "-m",
+            "qorl_training.audit.dataset",
             "--model",
             str(snapshot),
             "--dataset",
@@ -181,7 +168,8 @@ def sft(repository: Path) -> Path:
         [
             *prime,
             "python",
-            str(training / "export_adapter.py"),
+            "-m",
+            "qorl_training.adapters.export",
             "--checkpoint",
             str(checkpoint / "trainer"),
             "--model",
@@ -195,7 +183,8 @@ def sft(repository: Path) -> Path:
         [
             *prime,
             "python",
-            str(repository / "scripts/sft/verify_adapter.py"),
+            "-m",
+            "qorl.adapters.verify",
             "--model",
             str(snapshot),
             "--adapter",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
@@ -8,11 +9,11 @@ from typing import Any
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.db.fixture import DatabaseFixture
+from qorl.db.pool import start_pool
 from qorl.workload.taskset import TaskSet
-from qorl.db.worker import PostgresWorker
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.plans.verify import plan_join_tree
-from scripts.utils.protocol_demo import validate_protocol_demo
+from qorl.sft.validate import validate_protocol_demo
 
 
 DEMONSTRATION_ID = "protocol-demo-v1"
@@ -89,7 +90,10 @@ def build_demo(repository: Path) -> dict[str, Any]:
     if task is None:
         raise RuntimeError(f"missing pinned CEB task: {TASK_ID}")
 
-    with PostgresWorker(fixture, "qorl-protocol-demo") as worker:
+    with contextlib.closing(
+        start_pool(fixture, "qorl-protocol-demo")
+    ) as pool, pool.claim_worker() as slot:
+        worker = slot.worker
         evaluator = RolloutEvaluator(worker, task_set, task)
         evaluator.start()
         protocol = AgentProtocol.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)

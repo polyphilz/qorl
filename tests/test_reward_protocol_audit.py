@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.rl.compare_reward_protocols import direction, summarize
+from qorl.evaluation.reward_protocols import direction, summarize
 
 
 def result(cheap: float, full: float) -> dict:

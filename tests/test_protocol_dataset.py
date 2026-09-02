@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 
 from qorl.workload.taskset import TaskSet
-from scripts.utils.protocol_dataset import (
+from qorl.sft.assemble import (
     DATASET_SEED,
     action_families,
     select_tasks,

@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,8 +19,10 @@ from typing import Any, Callable
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.protocol import AgentProtocol
+from qorl.adapters.model import model_snapshot
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
+from qorl.db.worker import WorkerError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -30,6 +33,7 @@ BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
 DATASET = Path("outputs/sft/protocol-sft-v1")
 TRAINING_RUN = Path("outputs/sft/protocol-sft-train-v1")
+CONCURRENCY = 4
 
 
 def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
@@ -43,22 +47,6 @@ def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> N
         except (OSError, urllib.error.URLError):
             time.sleep(2)
     raise RuntimeError(f"vLLM did not become ready within {timeout} seconds")
-
-
-def model_snapshot(repository: Path, policy: dict[str, Any]) -> Path:
-    cache = os.environ.get("HUGGINGFACE_HUB_CACHE")
-    if cache is None:
-        home = Path(os.environ.get("HF_HOME", Path.home() / ".cache/huggingface"))
-        cache = str(home / "hub")
-    snapshot = (
-        Path(cache)
-        / f"models--{policy['model'].replace('/', '--')}"
-        / "snapshots"
-        / policy["revision"]
-    )
-    if not snapshot.is_dir():
-        raise RuntimeError(f"pinned model snapshot is missing: {snapshot}")
-    return snapshot.resolve()
 
 
 def adapter_path(repository: Path) -> Path:
@@ -318,9 +306,48 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def evaluate_live_task(
+    pool: WorkerPool,
+    task_set: TaskSet,
+    task: dict[str, Any],
+    agent: QoAgentPolicy,
+    maximum_model_turns: int,
+) -> tuple[WorkerSlot, dict[str, Any]]:
+    with pool.claim_worker() as slot:
+        evaluator = RolloutEvaluator(slot.worker, task_set, task)
+        try:
+            baseline = evaluator.start()
+            trace = agent.search(evaluator)
+            metrics = trace_metrics(evaluator, trace, maximum_model_turns)
+            result = {
+                "schema_version": 1,
+                "status": "completed",
+                "completed_at_utc": utc_now(),
+                "task_id": task["task_id"],
+                "template_id": task["template_id"],
+                "worker_slot": slot.resources.index,
+                "default": baseline,
+                "candidates": evaluator.candidates,
+                "policy_trace": trace,
+                "metrics": metrics,
+            }
+        except (ModelError, WorkerError) as error:
+            result = {
+                "schema_version": 1,
+                "status": "failed",
+                "completed_at_utc": utc_now(),
+                "task_id": task["task_id"],
+                "template_id": task["template_id"],
+                "worker_slot": slot.resources.index,
+                "error": str(error),
+                "candidates": evaluator.candidates,
+            }
+        return slot, result
+
+
 def evaluate_policy(
     repository: Path,
-    fixture: DatabaseFixture,
+    pool: WorkerPool,
     task_set: TaskSet,
     tasks: list[dict[str, Any]],
     base_config: QoAgentConfig,
@@ -334,30 +361,36 @@ def evaluate_policy(
     agent = QoAgentPolicy(replace(base_config, model=model_name))
     identity = agent.preflight()
     results: list[dict[str, Any]] = []
-    project = f"qorl-ceb-{policy_name}-{os.getpid()}"
+    for slot in pool.workers:
+        slot.worker.capture_environment(
+            policy_dir / "environment" / f"worker-{slot.resources.index}",
+            "pre",
+        )
 
-    with PostgresWorker(fixture, project) as worker:
-        worker.capture_environment(policy_dir, "pre")
-        for index, task in enumerate(tasks, start=1):
-            print(f"[{policy_name} {index}/{len(tasks)}] {task['task_id']}", flush=True)
-            evaluator = RolloutEvaluator(worker, task_set, task)
-            try:
-                baseline = evaluator.start()
-                trace = agent.search(evaluator)
-                metrics = trace_metrics(
-                    evaluator, trace, base_config.maximum_model_turns
-                )
-                result = {
-                    "schema_version": 1,
-                    "status": "completed",
-                    "completed_at_utc": utc_now(),
-                    "task_id": task["task_id"],
-                    "template_id": task["template_id"],
-                    "default": baseline,
-                    "candidates": evaluator.candidates,
-                    "policy_trace": trace,
-                    "metrics": metrics,
-                }
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
+        futures: dict[
+            Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
+        ] = {
+            executor.submit(
+                evaluate_live_task,
+                pool,
+                task_set,
+                task,
+                agent,
+                base_config.maximum_model_turns,
+            ): task
+            for task in tasks
+        }
+        for index, future in enumerate(as_completed(futures), start=1):
+            task = futures[future]
+            slot, result = future.result()
+            print(
+                f"[{policy_name} {index}/{len(tasks)}] {task['task_id']} "
+                f"worker={slot.resources.index}",
+                flush=True,
+            )
+            if result["status"] == "completed":
+                metrics = result["metrics"]
                 terminal = (
                     "keep_default"
                     if metrics["keep_default_calls"]
@@ -371,24 +404,20 @@ def evaluate_policy(
                     f"terminal={terminal}",
                     flush=True,
                 )
-            except (ModelError, WorkerError) as error:
-                result = {
-                    "schema_version": 1,
-                    "status": "failed",
-                    "completed_at_utc": utc_now(),
-                    "task_id": task["task_id"],
-                    "template_id": task["template_id"],
-                    "error": str(error),
-                    "candidates": evaluator.candidates,
-                }
-                print(f"  failed: {error}", flush=True)
+            else:
+                print(f"  failed: {result['error']}", flush=True)
             results.append(result)
             write_json(task_dir / f"{task['task_id']}.json", result)
             summary = summarize(results)
             write_json(policy_dir / "summary.json", summary)
             if progress is not None:
                 progress(summary)
-        worker.capture_environment(policy_dir, "post")
+
+    for slot in pool.workers:
+        slot.worker.capture_environment(
+            policy_dir / "environment" / f"worker-{slot.resources.index}",
+            "post",
+        )
 
     return {
         "status": "completed",
@@ -434,7 +463,7 @@ def main() -> None:
     run_policy = json.loads(
         (repository / "configs/policy/run-v1.json").read_text()
     )["policy"]
-    snapshot = model_snapshot(repository, run_policy)
+    snapshot = model_snapshot(run_policy)
     adapter = adapter_path(repository) if arguments.policies != "base" else None
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():
@@ -462,7 +491,7 @@ def main() -> None:
         "--max-model-len",
         str(run_policy["context_length"]),
         "--max-num-seqs",
-        "1",
+        str(CONCURRENCY),
         "--gpu-memory-utilization",
         "0.9",
         "--generation-config",
@@ -498,6 +527,7 @@ def main() -> None:
         "task_set_id": "ceb-v1",
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
+        "database_pool": None,
         "task_count": len(tasks),
         "task_ids": [task["task_id"] for task in tasks],
         "dataset_manifest_sha256": sha256_file(
@@ -514,6 +544,7 @@ def main() -> None:
     write_json(report_path, report)
 
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
+    pool: WorkerPool | None = None
     with log_path.open("w") as log:
         process = subprocess.Popen(
             command,
@@ -531,6 +562,8 @@ def main() -> None:
             config = QoAgentConfig.from_dict(
                 {**run_policy, "base_url": base_url, "model": BASE_MODEL}
             )
+            pool = start_pool(fixture, f"qorl-ceb-live-{os.getpid()}")
+            report["database_pool"] = pool.manifest()
             report["status"] = "running"
             write_json(report_path, report)
             for policy_name, model_name in order:
@@ -550,7 +583,7 @@ def main() -> None:
 
                 report["policies"][policy_name] = evaluate_policy(
                     repository,
-                    fixture,
+                    pool,
                     task_set,
                     tasks,
                     config,
@@ -585,6 +618,8 @@ def main() -> None:
             write_json(report_path, report)
             raise
         finally:
+            if pool is not None:
+                pool.close()
             process.terminate()
             try:
                 process.wait(timeout=30)

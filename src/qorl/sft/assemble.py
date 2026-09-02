@@ -10,7 +10,7 @@ from typing import Any
 
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
-from scripts.utils.protocol_demo import validate_protocol_demo
+from qorl.sft.validate import validate_protocol_demo
 
 
 DATASET_ID = "protocol-sft-v1"

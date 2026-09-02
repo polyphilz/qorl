@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.db.fixture import DatabaseFixture
+from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
@@ -348,44 +350,49 @@ def run_audit(
     write_json(report_path, report)
 
     project_name = f"qorl-reward-audit-{os.getpid()}"
-    with PostgresWorker(fixture, project_name) as worker:
-        worker.capture_environment(output_dir, "pre")
-        for index, case in enumerate(case_manifest["cases"]):
-            task = tasks[case["task_id"]]
-            order = list(config["protocols"])
-            if index % 2:
-                order.reverse()
-            print(
-                f"[{index + 1}/{case_manifest['case_count']}] "
-                f"{task['task_id']} ({task['template_id']})",
-                flush=True,
-            )
-            result: dict[str, Any] = {
-                "task_id": task["task_id"],
-                "template_id": task["template_id"],
-                "trace_id": case["trace_id"],
-                "actions_sha256": case["actions_sha256"],
-                "protocol_order": order,
-            }
-            for protocol in order:
-                result[protocol] = replay(
-                    worker,
-                    task_set,
-                    task,
-                    case["actions"],
-                    protocol,
-                    f"{config['pair_order_seed']}:{task['task_id']}:pairs",
-                )
-                final = result[protocol]["final"]
-                label = (
-                    f"{final['score']:.3f}x"
-                    if final["status"] == "completed"
-                    else final["status"]
-                )
-                print(f"  {protocol}: {label}", flush=True)
-            report["results"].append(result)
+    with contextlib.closing(start_pool(fixture, project_name)) as pool:
+        report["database_pool"] = pool.manifest()
+        with pool.claim_worker() as slot:
+            report["worker"] = slot.resources.manifest()
             write_json(report_path, report)
-        worker.capture_environment(output_dir, "post")
+            worker = slot.worker
+            worker.capture_environment(output_dir, "pre")
+            for index, case in enumerate(case_manifest["cases"]):
+                task = tasks[case["task_id"]]
+                order = list(config["protocols"])
+                if index % 2:
+                    order.reverse()
+                print(
+                    f"[{index + 1}/{case_manifest['case_count']}] "
+                    f"{task['task_id']} ({task['template_id']})",
+                    flush=True,
+                )
+                result: dict[str, Any] = {
+                    "task_id": task["task_id"],
+                    "template_id": task["template_id"],
+                    "trace_id": case["trace_id"],
+                    "actions_sha256": case["actions_sha256"],
+                    "protocol_order": order,
+                }
+                for protocol in order:
+                    result[protocol] = replay(
+                        worker,
+                        task_set,
+                        task,
+                        case["actions"],
+                        protocol,
+                        f"{config['pair_order_seed']}:{task['task_id']}:pairs",
+                    )
+                    final = result[protocol]["final"]
+                    label = (
+                        f"{final['score']:.3f}x"
+                        if final["status"] == "completed"
+                        else final["status"]
+                    )
+                    print(f"  {protocol}: {label}", flush=True)
+                report["results"].append(result)
+                write_json(report_path, report)
+            worker.capture_environment(output_dir, "post")
 
     report["status"] = "completed"
     report["completed_at_utc"] = datetime.now(UTC).isoformat()

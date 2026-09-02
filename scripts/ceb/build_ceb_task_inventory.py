@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from qorl.util.hashing import sha256_bytes, sha256_file
-from scripts.utils.ceb import SPLIT_SALT, choose_validation_templates
-from scripts.utils.query_structure import (
+from qorl.workload.ceb import SPLIT_SALT, choose_validation_templates
+from qorl.workload.query_structure import (
     extract_join_structure,
     task_join_fingerprints,
 )

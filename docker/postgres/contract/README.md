@@ -17,7 +17,7 @@ enforces zero swap for every worker.
 
 The host-side `scripts/docker/smoke-test-postgres.sh` checks this assertion plus
 real hint behavior, prompt-visible settings, and restricted-role permissions.
-`scripts/capture-benchmark-environment.py` records the asserted state and full
+`python -m qorl.db.capture` records the asserted state and full
 runtime identity; it does not define either one.
 
 ## Why GEQO is off

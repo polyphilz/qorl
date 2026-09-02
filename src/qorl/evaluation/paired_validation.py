@@ -10,23 +10,25 @@ import random
 import statistics
 import subprocess
 from collections import Counter
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from qorl import __version__
+from qorl.adapters.model import model_snapshot
+from qorl.adapters.verify import verify_merged_model
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
+from qorl.db.worker import WorkerError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
-from qorl.rl import verify_merged_model
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.sft import model_snapshot
-from scripts.sft.live_protocol_validation import (
+from qorl.evaluation.live_validation import (
     adapter_path,
     trace_metrics,
     wait_for_server,
@@ -34,6 +36,7 @@ from scripts.sft.live_protocol_validation import (
 
 CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
+CONCURRENCY = 4
 
 
 def load_tasks(
@@ -174,7 +177,7 @@ def model_command(
         "--max-model-len",
         str(context_length),
         "--max-num-seqs",
-        "1",
+        str(CONCURRENCY),
         "--gpu-memory-utilization",
         "0.9",
         "--generation-config",
@@ -185,6 +188,62 @@ def model_command(
         policy["tool_call_parser"],
         "--enforce-eager",
     ]
+
+
+def evaluate_rollout(
+    pool: WorkerPool,
+    task_set: TaskSet,
+    task: dict[str, Any],
+    seed: int,
+    base_config: QoAgentConfig,
+    evaluation_id: str,
+) -> tuple[WorkerSlot, dict[str, Any]]:
+    with pool.claim_worker() as slot:
+        worker = slot.worker
+        before = worker.explain_calls, worker.explain_analyze_calls
+        evaluator = RolloutEvaluator(worker, task_set, task)
+        try:
+            baseline = evaluator.start()
+            agent = QoAgentPolicy(replace(base_config, seed=seed))
+            trace = agent.search(evaluator)
+            metrics = trace_metrics(
+                evaluator,
+                trace,
+                base_config.maximum_model_turns,
+            )
+            final = evaluator.finish(
+                random.Random(f"{evaluation_id}:{task['task_id']}:{seed}:pairs")
+            )
+            result = {
+                "schema_version": 1,
+                "status": "completed",
+                "completed_at_utc": utc_now(),
+                "task_id": task["task_id"],
+                "template_id": task["template_id"],
+                "rollout_seed": seed,
+                "worker_slot": slot.resources.index,
+                "default": baseline,
+                "candidates": evaluator.candidates,
+                "final": final,
+                "policy_trace": trace,
+                "protocol_metrics": metrics,
+            }
+        except (ModelError, WorkerError) as error:
+            result = {
+                "schema_version": 1,
+                "status": "failed",
+                "completed_at_utc": utc_now(),
+                "task_id": task["task_id"],
+                "template_id": task["template_id"],
+                "rollout_seed": seed,
+                "worker_slot": slot.resources.index,
+                "error": str(error),
+            }
+        result["database_calls"] = {
+            "explain": worker.explain_calls - before[0],
+            "explain_analyze": worker.explain_analyze_calls - before[1],
+        }
+        return slot, result
 
 
 def main() -> None:
@@ -212,9 +271,12 @@ def main() -> None:
     if not model.is_dir():
         raise RuntimeError(f"validation model is missing: {model}")
 
+    policy_path = repository / config["run_config"]
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))["policy"]
+
     model_sha256: str
     if arguments.phase == "pre":
-        base, _ = model_snapshot(repository)
+        base = model_snapshot(policy)
         verify_merged_model(base, adapter_path(repository), model)
         merge_manifest_path = model / "qorl-merge.json"
         merge_manifest = json.loads(merge_manifest_path.read_text(encoding="utf-8"))
@@ -223,8 +285,6 @@ def main() -> None:
         merge_manifest_path = None
         model_sha256 = sha256_file(model / "model.safetensors")
 
-    policy_path = repository / config["run_config"]
-    policy = json.loads(policy_path.read_text(encoding="utf-8"))["policy"]
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
@@ -279,6 +339,7 @@ def main() -> None:
     )
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
     results: list[dict[str, Any]] = []
+    pool: WorkerPool | None = None
     with (output_dir / "vllm.log").open("w") as log:
         process = subprocess.Popen(
             command,
@@ -303,81 +364,70 @@ def main() -> None:
             )
             identity = QoAgentPolicy(base_config).preflight()
             report["model_server"] = identity
+            pool = start_pool(
+                fixture,
+                f"qorl-rl-validation-{arguments.phase}-{os.getpid()}",
+            )
+            report["database_pool"] = pool.manifest()
+            report["orchestrator"]["concurrency"] = CONCURRENCY
+            for slot in pool.workers:
+                slot.worker.capture_environment(
+                    output_dir / "environment" / f"worker-{slot.resources.index}",
+                    "pre",
+                )
             report["status"] = "running"
             write_json(report_path, report)
 
-            project = f"qorl-rl-validation-{arguments.phase}-{os.getpid()}"
-            with PostgresWorker(fixture, project) as worker:
-                worker.capture_environment(output_dir, "pre")
-                total = len(tasks) * len(seeds)
-                for task_index, task in enumerate(tasks):
-                    for seed_index, seed in enumerate(seeds):
-                        ordinal = task_index * len(seeds) + seed_index + 1
-                        print(
-                            f"[{ordinal}/{total}] {task['task_id']} seed={seed}",
-                            flush=True,
+            jobs = [(task, seed) for task in tasks for seed in seeds]
+            with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
+                futures: dict[
+                    Future[tuple[WorkerSlot, dict[str, Any]]],
+                    tuple[dict[str, Any], int],
+                ] = {
+                    executor.submit(
+                        evaluate_rollout,
+                        pool,
+                        task_set,
+                        task,
+                        seed,
+                        base_config,
+                        config["evaluation_id"],
+                    ): (task, seed)
+                    for task, seed in jobs
+                }
+                for ordinal, future in enumerate(as_completed(futures), start=1):
+                    task, seed = futures[future]
+                    slot, result = future.result()
+                    print(
+                        f"[{ordinal}/{len(jobs)}] {task['task_id']} seed={seed} "
+                        f"worker={slot.resources.index}",
+                        flush=True,
+                    )
+                    if result["status"] == "completed":
+                        final = result["final"]
+                        label = (
+                            f"{final['score']:.3f}x "
+                            f"reward={final['trajectory_reward']:.3f}"
+                            if final["status"] == "completed"
+                            else "no valid candidate "
+                            f"reward={final['trajectory_reward']:.3f}"
                         )
-                        before = (
-                            worker.explain_calls,
-                            worker.explain_analyze_calls,
-                        )
-                        evaluator = RolloutEvaluator(worker, task_set, task)
-                        try:
-                            baseline = evaluator.start()
-                            agent = QoAgentPolicy(replace(base_config, seed=seed))
-                            trace = agent.search(evaluator)
-                            metrics = trace_metrics(
-                                evaluator,
-                                trace,
-                                base_config.maximum_model_turns,
-                            )
-                            final = evaluator.finish(
-                                random.Random(
-                                    f"{config['evaluation_id']}:{task['task_id']}:{seed}:pairs"
-                                )
-                            )
-                            result = {
-                                "schema_version": 1,
-                                "status": "completed",
-                                "completed_at_utc": utc_now(),
-                                "task_id": task["task_id"],
-                                "template_id": task["template_id"],
-                                "rollout_seed": seed,
-                                "default": baseline,
-                                "candidates": evaluator.candidates,
-                                "final": final,
-                                "policy_trace": trace,
-                                "protocol_metrics": metrics,
-                            }
-                            label = (
-                                f"{final['score']:.3f}x reward={final['trajectory_reward']:.3f}"
-                                if final["status"] == "completed"
-                                else f"no valid candidate reward={final['trajectory_reward']:.3f}"
-                            )
-                            print(f"  final={label}", flush=True)
-                        except (ModelError, WorkerError) as error:
-                            result = {
-                                "schema_version": 1,
-                                "status": "failed",
-                                "completed_at_utc": utc_now(),
-                                "task_id": task["task_id"],
-                                "template_id": task["template_id"],
-                                "rollout_seed": seed,
-                                "error": str(error),
-                            }
-                            print(f"  failed: {error}", flush=True)
-                        result["database_calls"] = {
-                            "explain": worker.explain_calls - before[0],
-                            "explain_analyze": (
-                                worker.explain_analyze_calls - before[1]
-                            ),
-                        }
-                        results.append(result)
-                        filename = f"{task['task_id']}--{seed}.json"
-                        write_json(rollout_dir / filename, result)
-                        report["summary"] = summarize(results)
-                        write_json(report_path, report)
-                worker.capture_environment(output_dir, "post")
+                    else:
+                        label = f"failed: {result['error']}"
+                    print(f"  final={label}", flush=True)
+                    results.append(result)
+                    filename = f"{task['task_id']}--{seed}.json"
+                    write_json(rollout_dir / filename, result)
+                    report["summary"] = summarize(results)
+                    write_json(report_path, report)
+
+            for slot in pool.workers:
+                slot.worker.capture_environment(
+                    output_dir / "environment" / f"worker-{slot.resources.index}",
+                    "post",
+                )
+            pool.close()
+            pool = None
 
             report["status"] = (
                 "completed"
@@ -402,6 +452,8 @@ def main() -> None:
             write_json(report_path, report)
             raise
         finally:
+            if pool is not None:
+                pool.close()
             process.terminate()
             try:
                 process.wait(timeout=30)
