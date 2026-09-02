@@ -16,6 +16,20 @@ TASK_SET_PATHS = {
     "ceb-v1": Path("data/ceb/tasks.json"),
 }
 
+DATA_IDENTITY_FIELDS = (
+    "fixture_id",
+    "snapshot_id",
+    "snapshot_archive_sha256",
+    "postgres_system_identifier",
+)
+
+
+def data_identity(value: dict[str, Any]) -> dict[str, str]:
+    try:
+        return {name: str(value[name]) for name in DATA_IDENTITY_FIELDS}
+    except KeyError as error:
+        raise FixtureError(f"database identity is missing {error.args[0]}") from error
+
 
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
@@ -58,14 +72,22 @@ class DatabaseFixture:
         )
 
     @property
-    def identity(self) -> dict[str, str]:
+    def data_identity(self) -> dict[str, str]:
         return {
             "fixture_id": self.snapshot["fixture_id"],
             "snapshot_id": self.snapshot["snapshot_id"],
             "snapshot_archive_sha256": self.snapshot["archive"]["sha256"],
-            "postgres_image_id": self.snapshot["image"]["id"],
             "postgres_system_identifier": self.snapshot["postgresql"][
                 "system_identifier"
+            ],
+        }
+
+    @property
+    def runtime_identity(self) -> dict[str, str]:
+        return {
+            "postgres_image_id": self.snapshot["image"]["id"],
+            "benchmark_config_id": self.snapshot["image"][
+                "benchmark_config_id"
             ],
         }
 
@@ -79,19 +101,23 @@ class DatabaseFixture:
 
 @dataclass(frozen=True)
 class TaskSet:
-    """A versioned collection of SQL tasks bound to a database identity."""
+    """A versioned collection of SQL tasks bound to a data identity."""
 
     repository: Path
     task_set_id: str
     inventory_path: Path
     inventory: dict[str, Any]
 
+    @property
+    def data_identity(self) -> dict[str, str]:
+        return data_identity(self.inventory["database"])
+
     @classmethod
     def load(
         cls,
         repository: Path,
         task_set_id: str,
-        expected_database: dict[str, str] | None = None,
+        expected_data_identity: dict[str, str] | None = None,
     ) -> TaskSet:
         repository = repository.resolve()
         try:
@@ -111,7 +137,11 @@ class TaskSet:
             raise FixtureError("task inventory contains an invalid task ID")
         if len(task_ids) != len(set(task_ids)):
             raise FixtureError("task inventory contains duplicate task IDs")
-        if expected_database is not None and inventory.get("database") != expected_database:
+        inventory_data_identity = data_identity(inventory.get("database", {}))
+        if (
+            expected_data_identity is not None
+            and inventory_data_identity != data_identity(expected_data_identity)
+        ):
             raise FixtureError(
                 f"{task_set_id} requires a different database snapshot"
             )

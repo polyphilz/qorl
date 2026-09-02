@@ -80,7 +80,7 @@ def call_tool(
 
 def build_demo(repository: Path) -> dict[str, Any]:
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.identity)
+    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
     task = next(
         (item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID),
         None,
@@ -137,7 +137,8 @@ def build_demo(repository: Path) -> dict[str, Any]:
                 "template_id": task["template_id"],
                 "partition": task["partition"],
                 "sql_sha256": task["sql_sha256"],
-                "database": task_set.inventory["database"],
+                "data_identity": fixture.data_identity,
+                "runtime_identity": fixture.runtime_identity,
                 "maximum_model_turns": MAXIMUM_MODEL_TURNS,
                 "call_sequence": CALL_SEQUENCE,
             },
@@ -179,4 +180,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

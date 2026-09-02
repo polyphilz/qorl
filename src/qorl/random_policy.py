@@ -6,7 +6,7 @@ from typing import Any
 from qorl.action import ActionError, TaskCatalog, normalize_action
 
 
-SAMPLER_VERSION = 1
+SAMPLER_VERSION = 2
 FAMILY_WEIGHTS = {
     "leading": 30,
     "join": 25,
@@ -25,12 +25,10 @@ SETTING_VALUES: dict[str, list[bool | int | float]] = {
     "enable_indexscan": [False],
     "enable_bitmapscan": [False],
     "enable_memoize": [False],
-    "geqo": [False],
     "random_page_cost": [1.0, 2.0, 8.0],
     "seq_page_cost": [0.5, 2.0],
     "cpu_tuple_cost": [0.005, 0.02],
     "join_collapse_limit": [1, 16],
-    "geqo_threshold": [8, 16],
 }
 
 

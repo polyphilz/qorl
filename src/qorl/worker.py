@@ -10,6 +10,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from qorl.fixture import DatabaseFixture
+from qorl.resources import (
+    DEFAULT_EVALUATION_PROFILE,
+    RuntimeProfile,
+    WorkerResources,
+    load_runtime_profile,
+    validate_host_topology,
+)
 
 
 class WorkerError(RuntimeError):
@@ -77,7 +84,8 @@ class PostgresWorker:
         fixture: DatabaseFixture,
         project_name: str,
         *,
-        environment: Mapping[str, str] | None = None,
+        runtime_profile: RuntimeProfile | None = None,
+        resources: WorkerResources | None = None,
     ) -> None:
         self.fixture = fixture
         self.project_name = project_name
@@ -85,9 +93,21 @@ class PostgresWorker:
         self.created = False
         self.explain_calls = 0
         self.explain_analyze_calls = 0
-        self.environment = (
-            {**os.environ, **environment} if environment is not None else None
+        self._settings_cache: dict[str, str] = {}
+        profile = runtime_profile or load_runtime_profile(
+            fixture.repository, DEFAULT_EVALUATION_PROFILE
         )
+        if resources is None:
+            if len(profile.workers) != 1:
+                raise ValueError(
+                    "a multi-worker runtime profile requires an explicit slot"
+                )
+            resources = profile.workers[0]
+        elif resources not in profile.workers:
+            raise ValueError("worker resources do not belong to runtime profile")
+        self.runtime_profile = profile
+        self.resources = resources
+        self.environment = {**os.environ, **resources.compose_environment}
         self.compose = [
             "docker",
             "compose",
@@ -142,6 +162,7 @@ class PostgresWorker:
         return self.command([*self.compose, *arguments], check=check)
 
     def start(self) -> None:
+        validate_host_topology((self.resources,))
         fixture_id = self.fixture.snapshot["fixture_id"]
         print(f"Verifying {fixture_id} database snapshot...")
         self.fixture.verify_archive()
@@ -264,6 +285,53 @@ exec psql \
             input_text=sql,
         )
 
+    def runner_sql(self, sql: str) -> str:
+        shell = r"""
+exec env \
+    PGPASSWORD="$QORL_RUNNER_PASSWORD" \
+    PGAPPNAME=qorl-worker \
+    psql \
+        --host=127.0.0.1 \
+        --username=qorl_runner \
+        --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
+        --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
+"""
+        return self.command(
+            [
+                "docker",
+                "exec",
+                "--interactive",
+                self.container,
+                "bash",
+                "-Eeuo",
+                "pipefail",
+                "-c",
+                shell,
+            ],
+            input_text=sql,
+        )
+
+    def settings(self, names: set[str]) -> dict[str, str]:
+        missing = names - self._settings_cache.keys()
+        if not missing:
+            return {name: self._settings_cache[name] for name in sorted(names)}
+        ordered = sorted(missing)
+        literals = ", ".join(
+            "'" + name.replace("'", "''") + "'" for name in ordered
+        )
+        output = self.runner_sql(
+            "SELECT json_object_agg(name, setting ORDER BY name) "
+            "FROM pg_settings "
+            f"WHERE name IN ({literals});"
+        ).strip()
+        values = json.loads(output)
+        if not isinstance(values, dict) or set(values) != missing:
+            raise WorkerError("PostgreSQL planner-setting response is incomplete")
+        self._settings_cache.update(
+            {name: str(values[name]) for name in ordered}
+        )
+        return {name: self._settings_cache[name] for name in sorted(names)}
+
     def explain(
         self,
         sql: str,
@@ -361,5 +429,19 @@ exec env \
                 str(output_dir),
                 "--phase",
                 phase,
+                "--runtime-profile",
+                str(
+                    self.fixture.repository / self.runtime_profile.path
+                ),
             ]
         )
+
+    def runtime_manifest(self) -> dict[str, object]:
+        return {
+            "profile": {
+                "id": self.runtime_profile.profile_id,
+                "path": str(self.runtime_profile.path),
+                "sha256": self.runtime_profile.sha256,
+            },
+            "worker": self.resources.manifest(),
+        }

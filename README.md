@@ -5,8 +5,9 @@ harness for training and evaluating an agent that steers PostgreSQL's query
 optimizer toward faster physical plans.
 
 `data/` holds stable workloads, `experiments/NNN-name/` collocates each run's
-inputs, and `configs/` holds settings reused unchanged across experiments. See
-`AGENTS.md` for the repository contract.
+inputs, and `configs/` holds settings reused unchanged across experiments. The
+[architecture guide](docs/architecture.md) describes the database image,
+fixture, worker, and runtime-profile boundary.
 
 ```bash
 uv sync

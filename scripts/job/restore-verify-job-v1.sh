@@ -3,14 +3,16 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 project_name="qorl-job-v1-restore"
 snapshot_manifest=""
 build_verification=""
 output_dir=""
+refresh_runtime_identity=0
 
 usage() {
-    echo "usage: $0 --snapshot-manifest PATH --build-verification PATH --output-dir PATH [--raw-dir PATH] [--project-name NAME]" >&2
+    echo "usage: $0 --snapshot-manifest PATH --build-verification PATH --output-dir PATH [--raw-dir PATH] [--project-name NAME] [--refresh-runtime-identity]" >&2
 }
 
 while (($#)); do
@@ -35,6 +37,10 @@ while (($#)); do
             project_name="$2"
             shift 2
             ;;
+        --refresh-runtime-identity)
+            refresh_runtime_identity=1
+            shift
+            ;;
         *)
             usage
             exit 2
@@ -50,6 +56,8 @@ if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
     echo "invalid Compose project name: $project_name" >&2
     exit 2
 fi
+source "$repository_root/scripts/docker/runtime-profile.sh"
+qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
 
 snapshot_manifest="$(cd -- "$(dirname -- "$snapshot_manifest")" && pwd)/$(basename -- "$snapshot_manifest")"
 build_verification="$(cd -- "$(dirname -- "$build_verification")" && pwd)/$(basename -- "$build_verification")"
@@ -92,9 +100,13 @@ if [[ "$actual_archive_sha256" != "$expected_archive_sha256" ]]; then
 fi
 
 actual_image_id="$(docker image inspect "$snapshot_image_reference" --format '{{.Id}}')"
-if [[ "$actual_image_id" != "$snapshot_image_id" ]]; then
+if [[ "$actual_image_id" != "$snapshot_image_id" && "$refresh_runtime_identity" -eq 0 ]]; then
     echo "snapshot image mismatch: expected=$snapshot_image_id actual=$actual_image_id" >&2
     exit 1
+fi
+restore_image_id="$snapshot_image_id"
+if [[ "$refresh_runtime_identity" -eq 1 ]]; then
+    restore_image_id="$actual_image_id"
 fi
 
 export QORL_JOB_DATA_DIR="$raw_dir/imdb"
@@ -103,7 +115,7 @@ compose=(
     docker compose
     --project-name "$project_name"
     --file "$repository_root/compose.yaml"
-    --file "$repository_root/compose.job.yaml"
+    --file "$repository_root/compose.fixture-build.yaml"
 )
 
 "${compose[@]}" config --quiet
@@ -136,7 +148,7 @@ docker run \
     --volume "$volume_name:/target" \
     --volume "$archive_dir:/snapshot:ro" \
     --entrypoint bash \
-    "$snapshot_image_id" \
+    "$restore_image_id" \
     -Eeuo pipefail -c '
         test -z "$(find /target -mindepth 1 -print -quit)"
         mkdir -p "/target/$1"
@@ -159,10 +171,16 @@ python3 -m scripts.job.verify_job_v1 \
 
 python3 "$repository_root/scripts/capture-benchmark-environment.py" \
     --container "$container" \
+    --runtime-profile "$runtime_profile" \
     --output-dir "$output_dir" \
     --phase post
 
 "${compose[@]}" down --volumes
 trap - ERR
+
+if [[ "$refresh_runtime_identity" -eq 1 ]]; then
+    python3 "$script_dir/update_snapshot_runtime.py" \
+        --snapshot-manifest "$snapshot_manifest"
+fi
 
 printf 'job-v1 clean-room restore verification passed: project=%s\n' "$project_name"

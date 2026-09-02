@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from qorl.fixture import DatabaseFixture, TaskSet
 from qorl.pool import (
@@ -23,11 +23,16 @@ class QorlRuntime(WorkerPool):
         workers: tuple[WorkerSlot, ...],
         pool_id: str,
         pool_config_sha256: str,
+        pool_config_path: str | None = None,
         calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
-        super().__init__(workers, pool_id, pool_config_sha256)
+        super().__init__(
+            workers, pool_id, pool_config_sha256, pool_config_path
+        )
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
+        self.data_identity = task_set.data_identity
+        self.runtime_identity = workers[0].worker.fixture.runtime_identity
 
     def pool_manifest(self) -> dict[str, object]:
         return self.manifest()
@@ -47,13 +52,14 @@ def start(
     pool: WorkerPool | None = None
     try:
         pool = start_pool(fixture, f"qorl-rl-{os.getpid()}", environment)
-        task_set = TaskSet.load(repository, "ceb-v1", fixture.identity)
+        task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
         configured_timeouts = environment.get(TIMEOUT_MANIFEST_ENV)
         calibrated_timeouts = (
             CalibratedTimeouts.load(
                 repository,
                 Path(configured_timeouts),
                 task_set,
+                fixture.runtime_identity,
             )
             if configured_timeouts
             else None
@@ -63,6 +69,7 @@ def start(
             workers=pool.workers,
             pool_id=pool.pool_id,
             pool_config_sha256=pool.pool_config_sha256,
+            pool_config_path=pool.pool_config_path,
             calibrated_timeouts=calibrated_timeouts,
         )
     except BaseException:

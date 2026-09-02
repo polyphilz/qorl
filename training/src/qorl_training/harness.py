@@ -103,6 +103,8 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         trace.info["qorl"] = {
             "task_id": task["task_id"],
             "template_id": task["template_id"],
+            "data_identity": active.data_identity,
+            "runtime_identity": active.runtime_identity,
             "database_pool": active.pool_manifest(),
             "database_worker": slot.resources.manifest(),
             "candidate_timeout_manifest": (

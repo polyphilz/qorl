@@ -57,6 +57,24 @@ The physical snapshot contains PostgreSQL's password hashes. Treat it as a
 private benchmark artifact, and supply the same runtime credentials used when
 it was built; neither plaintext password is written to the manifests.
 
+Rebuilding the database image does not change these frozen data bytes. Verify
+the archive against the rebuilt image and refresh only the snapshot's runtime
+identity with:
+
+```bash
+qorl_image_id="$(docker image inspect \
+  qorl-postgres:18.6-pg_hint_plan-1.8.0 --format '{{.Id}}')"
+qorl_image_short="${qorl_image_id#sha256:}"
+./scripts/job/restore-verify-job-v1.sh \
+  --snapshot-manifest artifacts/job-v1/job-v1.snapshot.json \
+  --build-verification artifacts/job-v1/job-v1.database.build.json \
+  --output-dir "artifacts/job-v1/restore-${qorl_image_short:0:12}" \
+  --refresh-runtime-identity
+```
+
+The command updates the image block only after schema, rows, indexes,
+statistics, representative results, and restored database fingerprints match.
+
 ## Checked-in JOB task inventory
 
 `data/job/queries/` contains the 113 exact, human-readable JOB SQL

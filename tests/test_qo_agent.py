@@ -156,25 +156,22 @@ class FakeEvaluator:
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         repository = Path(self.temporary_directory.name)
-        expected = repository / "docker/postgres/benchmark-v1.expected.json"
-        expected.parent.mkdir(parents=True)
-        expected.write_text(
-            json.dumps(
-                {
-                    "settings": {
-                        **{name: "on" for name in BOOLEAN_SETTINGS},
-                        **{name: "1" for name in NUMERIC_SETTINGS},
-                        **{name: "1" for name in INTEGER_SETTINGS},
-                    }
-                }
-            )
-        )
+        self.requested_settings: set[str] = set()
+
+        def settings(names: set[str]) -> dict[str, str]:
+            self.requested_settings = names
+            return {
+                **{name: "on" for name in BOOLEAN_SETTINGS},
+                **{name: "1" for name in NUMERIC_SETTINGS},
+                **{name: "1" for name in INTEGER_SETTINGS},
+            }
         self.task = TASK
         self.sql = "SELECT 1;"
         self.catalog = TaskCatalog.from_task(
             TASK, {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
         )
         self.worker = SimpleNamespace(
+            settings=settings,
             fixture=SimpleNamespace(
                 snapshot={"postgresql": {"server_version_num": "180006"}},
                 repository=repository,
@@ -320,7 +317,14 @@ class QoAgentTest(unittest.TestCase):
         self.assertEqual(evaluator.actions, [{"version": 1}])
         self.assertEqual(trace["stop_reason"], "model_finish")
         self.assertEqual(trace["usage"]["prompt_tokens"], 220)
-        self.assertEqual(trace["initial_observation"]["planner_settings"]["geqo"], "on")
+        self.assertEqual(
+            trace["initial_observation"]["planner_settings"]["enable_hashjoin"],
+            "on",
+        )
+        self.assertEqual(
+            evaluator.requested_settings,
+            set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS),
+        )
         self.assertEqual(
             trace["initial_observation"]["turn_budget"],
             {

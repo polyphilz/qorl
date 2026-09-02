@@ -322,7 +322,7 @@ def run_audit(
 
     fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(
-        repository, config["task_set"], fixture.identity
+        repository, config["task_set"], fixture.data_identity
     )
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -338,6 +338,8 @@ def run_audit(
         "snapshot_manifest_sha256": sha256_file(
             fixture.snapshot_manifest_path
         ),
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "results": [],
         "summary": None,
     }

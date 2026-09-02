@@ -50,7 +50,7 @@ LABEL org.opencontainers.image.title="qorl-postgres" \
       org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QORL plan-steering experiments" \
       org.opencontainers.image.version="18.6-pg_hint_plan-1.8.0" \
       org.opencontainers.image.source="https://github.com/ossc-db/pg_hint_plan" \
-      io.qorl.benchmark.config-id="benchmark-v1" \
+      io.qorl.benchmark.config-id="benchmark-v2" \
       io.qorl.postgresql.version="18.6" \
       io.qorl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
       io.qorl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
@@ -65,12 +65,12 @@ COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/18
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/18/extension/ /usr/share/postgresql/18/extension/
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/qorl/ /usr/share/qorl/
 
-COPY benchmark-v1.conf /etc/qorl/benchmark-v1.conf
-COPY benchmark-v1.expected.json /usr/share/qorl/benchmark-v1.expected.json
+COPY contract/benchmark.conf /etc/qorl/benchmark-v2.conf
+COPY contract/benchmark.expected.json /usr/share/qorl/benchmark-v2.expected.json
 COPY versions.json /usr/share/qorl/versions.json
-COPY --chmod=0555 assert-benchmark-config.sh /usr/local/bin/qorl-assert-benchmark-config
-COPY --chmod=0555 dump-postgres-state.sh /usr/local/bin/qorl-dump-postgres-state
-COPY --chmod=0555 initdb/001-qorl-bootstrap.sh /docker-entrypoint-initdb.d/001-qorl-bootstrap.sh
+COPY --chmod=0555 contract/assert-benchmark-config.sh /usr/local/bin/qorl-assert-benchmark-config
+COPY --chmod=0555 contract/dump-postgres-state.sh /usr/local/bin/qorl-dump-postgres-state
+COPY --chmod=0555 initdb/bootstrap.sh /docker-entrypoint-initdb.d/bootstrap.sh
 
 RUN set -eux; \
     test -f /usr/lib/postgresql/18/lib/pg_hint_plan.so; \
@@ -86,4 +86,4 @@ RUN set -eux; \
 HEALTHCHECK --interval=168h --timeout=15s --start-period=1m --start-interval=1s --retries=1 \
     CMD ["/usr/local/bin/qorl-assert-benchmark-config"]
 
-CMD ["postgres", "-c", "config_file=/etc/qorl/benchmark-v1.conf"]
+CMD ["postgres", "-c", "config_file=/etc/qorl/benchmark-v2.conf"]

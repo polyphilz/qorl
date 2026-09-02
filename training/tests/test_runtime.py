@@ -1,66 +1,55 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
-from qorl.pool import (
-    WorkerResources,
-    WorkerSlot,
-    memory_bytes,
+from qorl.pool import WorkerSlot
+from qorl.resources import (
+    DEFAULT_TRAINING_PROFILE,
+    load_runtime_profile,
     validate_host_topology,
-    worker_resources,
 )
 from qorl_training.runtime import QorlRuntime
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 class FakeWorker:
-    pass
+    fixture = SimpleNamespace(runtime_identity={})
 
 
 class WorkerPoolTest(unittest.TestCase):
     def test_resources_are_distinct_and_parameterized(self) -> None:
-        resources = worker_resources(
-            {
-                "QORL_RL_WORKER_CPUSETS": "0-1;2-3;4-5;6-7",
-                "QORL_RL_WORKER_MEMORY_LIMIT": "7g",
-                "QORL_RL_WORKER_PORT_BASE": "56000",
-            }
-        )
+        resources = load_runtime_profile(
+            ROOT, DEFAULT_TRAINING_PROFILE
+        ).workers
 
         self.assertEqual([item.index for item in resources], [0, 1, 2, 3])
         self.assertEqual(
             resources[0].compose_environment["QORL_POSTGRES_CPUSET"],
-            "0-1",
+            "0-3,16-19",
         )
         self.assertEqual(
             resources[3].compose_environment["QORL_POSTGRES_PORT"],
             "56003",
         )
-        self.assertEqual(resources[0].memory_bytes, 7 * 1024**3)
-
-    def test_overlapping_cpu_sets_are_rejected(self) -> None:
-        with self.assertRaisesRegex(ValueError, "must not overlap"):
-            worker_resources(
-                {"QORL_RL_WORKER_CPUSETS": "0-3;3-6;7-10;11-14"}
-            )
+        self.assertEqual(resources[0].memory_bytes, 8 * 1024**3)
 
     def test_claim_returns_workers_to_the_pool(self) -> None:
+        profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
         slots = tuple(
-            WorkerSlot(
-                WorkerResources(
-                    index,
-                    str(index),
-                    "1g",
-                    memory_bytes("1g"),
-                    56000 + index,
-                ),
-                FakeWorker(),  # type: ignore[arg-type]
-            )
-            for index in range(4)
+            WorkerSlot(resources, FakeWorker())  # type: ignore[arg-type]
+            for resources in profile.workers
         )
         runtime = QorlRuntime(  # type: ignore[arg-type]
-            object(), slots, "test-pool", "test-sha"
+            SimpleNamespace(data_identity={}),
+            slots,
+            "test-pool",
+            "test-sha",
         )
 
         with runtime.claim_worker() as first:
@@ -78,17 +67,12 @@ class WorkerPoolTest(unittest.TestCase):
                 (topology / "physical_package_id").write_text("0")
                 (topology / "core_id").write_text(str(cpu % 16))
 
-            validate_host_topology(worker_resources({}), root)
+            profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
+            validate_host_topology(profile.workers, root)
 
-            with self.assertRaisesRegex(RuntimeError, "four physical cores"):
+            with self.assertRaisesRegex(RuntimeError, "physical cores"):
                 validate_host_topology(
-                    worker_resources(
-                        {
-                            "QORL_RL_WORKER_CPUSETS": (
-                                "0-1;2-3;4-5;6-7"
-                            )
-                        }
-                    ),
+                    (replace(profile.workers[0], cpuset="0-1"),),
                     root,
                 )
 

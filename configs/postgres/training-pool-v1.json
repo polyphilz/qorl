@@ -1,8 +1,10 @@
 {
   "schema_version": 1,
-  "pool_id": "qorl-postgres-pool-v1",
+  "profile_id": "qorl-postgres-pool-v1",
   "worker_count": 4,
+  "cpuset_mems": "0",
   "worker_memory_limit": "8g",
+  "worker_shm_size": "1g",
   "worker_port_base": 56000,
   "workers": [
     {

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 output_dir="$repository_root/artifacts/job-v1"
 build_project="qorl-job-v1-build"
@@ -41,6 +42,8 @@ if [[ "$build_project" == "$restore_project" ]]; then
     echo "build and restore Compose project names must differ" >&2
     exit 2
 fi
+source "$repository_root/scripts/docker/runtime-profile.sh"
+qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
 for project_name in "$build_project" "$restore_project"; do
     if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
         echo "invalid Compose project name: $project_name" >&2
@@ -79,7 +82,7 @@ compose=(
     docker compose
     --project-name "$build_project"
     --file "$repository_root/compose.yaml"
-    --file "$repository_root/compose.job.yaml"
+    --file "$repository_root/compose.fixture-build.yaml"
 )
 container="$("${compose[@]}" ps --quiet postgres)"
 build_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}')"
@@ -97,6 +100,7 @@ python3 -m scripts.job.verify_job_v1 \
 
 python3 "$repository_root/scripts/capture-benchmark-environment.py" \
     --container "$container" \
+    --runtime-profile "$runtime_profile" \
     --output-dir "$output_dir" \
     --phase pre
 

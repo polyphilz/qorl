@@ -350,7 +350,9 @@ def main() -> None:
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, config["task_set"], fixture.identity)
+    task_set = TaskSet.load(
+        repository, config["task_set"], fixture.data_identity
+    )
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
     if arguments.preflight:
@@ -378,6 +380,8 @@ def main() -> None:
         "snapshot_manifest_sha256": sha256_file(
             fixture.snapshot_manifest_path
         ),
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "base_model": {
             "path": config["base_model"],
             "model_sha256": sha256_file(base_model / "model.safetensors"),

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Capture the QORL worker environment without recording container secrets.
+"""Capture a QORL worker environment without recording container secrets.
 
-The benchmark orchestrator will call this before and after a run. It is also a
-standalone primitive for smoke tests while the orchestrator is being built.
+The orchestrator calls this automatically before and after measurements. It is
+also available directly for fixture verification and development diagnostics.
 """
 
 from __future__ import annotations
@@ -248,8 +248,8 @@ printf 'shm_size_bytes=%s\n' "$((shm_block_size * shm_blocks))"
 
 def image_file_digests(container: str) -> dict[str, str]:
     paths = (
-        "/etc/qorl/benchmark-v1.conf",
-        "/usr/share/qorl/benchmark-v1.expected.json",
+        "/etc/qorl/benchmark-v2.conf",
+        "/usr/share/qorl/benchmark-v2.expected.json",
         "/usr/share/qorl/versions.json",
         "/usr/lib/postgresql/18/lib/pg_hint_plan.so",
     )
@@ -288,17 +288,6 @@ def gpu_state() -> dict[str, Any] | None:
     }
 
 
-def resolve_container(explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    container = run(
-        ["docker", "compose", "--file", "compose.yaml", "ps", "--quiet", "postgres"]
-    ).strip()
-    if not container:
-        raise RuntimeError("the Compose PostgreSQL service is not running")
-    return container
-
-
 def capture_postgres(container: str, mode: str) -> str:
     return run(
         [
@@ -313,12 +302,23 @@ def capture_postgres(container: str, mode: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--container", help="container name or ID; defaults to Compose postgres")
+    parser.add_argument("--container", required=True, help="container name or ID")
+    parser.add_argument("--runtime-profile", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--phase", required=True, choices=("pre", "post"))
     args = parser.parse_args()
 
-    container = resolve_container(args.container)
+    container = args.container
+    profile_path = args.runtime_profile.resolve()
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    if profile.get("schema_version") != 1 or not isinstance(
+        profile.get("profile_id"), str
+    ):
+        raise RuntimeError("invalid PostgreSQL runtime profile")
+    try:
+        displayed_profile_path = str(profile_path.relative_to(Path.cwd()))
+    except ValueError:
+        displayed_profile_path = str(profile_path)
     assertion_output = run(
         ["docker", "exec", container, "/usr/local/bin/qorl-assert-benchmark-config"]
     ).strip()
@@ -348,10 +348,18 @@ def main() -> None:
 
     environment = {
         "schema_version": 1,
-        "benchmark_config_id": "benchmark-v1",
+        "benchmark_config_id": image_info["labels"].get(
+            "io.qorl.benchmark.config-id"
+        ),
         "phase": args.phase,
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "assertion_output": assertion_output,
+        "runtime_profile": {
+            "id": profile["profile_id"],
+            "path": displayed_profile_path,
+            "sha256": sha256_file(profile_path),
+            "configuration": profile,
+        },
         "host": {
             "hostname": platform.node(),
             "os_release": parse_os_release(),

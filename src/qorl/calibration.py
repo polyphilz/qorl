@@ -249,7 +249,7 @@ def calibrate(
         raise RuntimeError("--split requires --selection")
 
     task_set = TaskSet.load(
-        repository, task_set_ids[workload], fixture.identity
+        repository, task_set_ids[workload], fixture.data_identity
     )
     selection: dict[str, Any] | None = None
     selected_split: str | None = None
@@ -290,7 +290,8 @@ def calibrate(
         "inventory_id": task_set.inventory["inventory_id"],
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "database": task_set.inventory["database"],
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "orchestrator": {
             "qorl_version": __version__,
@@ -320,6 +321,7 @@ def calibrate(
             else None
         ),
         "worker_pool": None,
+        "worker_profile": None,
         "task_count": len(tasks),
         "completed_task_count": 0,
         "failed_task_count": 0,
@@ -334,6 +336,8 @@ def calibrate(
             worker = PostgresWorker(fixture, project_name)
             worker.start()
             pool = None
+            manifest["worker_profile"] = worker.runtime_manifest()
+            write_json(manifest_path, manifest)
             worker.capture_environment(output_dir, "pre")
             for index, task in enumerate(tasks, start=1):
                 task_id = task["task_id"]

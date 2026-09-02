@@ -52,7 +52,7 @@ class ProtocolDatasetTest(unittest.TestCase):
                 }
             ],
             "scans": [{"relation": "a", "force": "index", "indexes": ["i"]}],
-            "settings": {"geqo": True},
+            "settings": {"enable_hashjoin": True},
         }
         self.assertEqual(
             action_families(action),

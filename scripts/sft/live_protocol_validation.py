@@ -483,7 +483,7 @@ def main() -> None:
         )
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.identity)
+    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
     tasks, dataset = validation_tasks(repository, task_set)
     report: dict[str, Any] = {
         "schema_version": 1,
@@ -494,6 +494,8 @@ def main() -> None:
         "protocol": "live CEB protocol evaluation; no final timing pairs",
         "policy_order": [name for name, _ in order],
         "task_set_id": "ceb-v1",
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "task_count": len(tasks),
         "task_ids": [task["task_id"] for task in tasks],
         "dataset_manifest_sha256": sha256_file(

@@ -16,3 +16,6 @@ The completed pre-RL report records the policy checksum from before
 `qorl rl` pilot gate against the reorganized policy file will therefore reject
 that historical report; the completed pilot and validation artifacts remain
 valid.
+
+This experiment used `benchmark-v1`, with GEQO enabled. Results for tasks with
+at least 12 relations are not directly comparable with `benchmark-v2` results.

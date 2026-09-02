@@ -10,3 +10,7 @@ bind stable run prefixes to the shared policy definitions in `configs/policy/`.
 - Identity: model revision
   `c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e`; JOB inventory
   `job-v1-tasks-v1`
+
+This experiment used `benchmark-v1`, with GEQO enabled. Its results for the 20
+JOB tasks containing at least 12 relations are not directly comparable with
+results collected under `benchmark-v2`.

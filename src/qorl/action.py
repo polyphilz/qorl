@@ -38,7 +38,6 @@ BOOLEAN_SETTINGS = {
     "enable_seqscan",
     "enable_sort",
     "enable_tidscan",
-    "geqo",
 }
 
 NUMERIC_SETTINGS = {
@@ -49,18 +48,12 @@ NUMERIC_SETTINGS = {
     "cpu_operator_cost": (0.0, 1_000_000.0),
     "parallel_setup_cost": (0.0, 1_000_000.0),
     "parallel_tuple_cost": (0.0, 1_000_000.0),
-    "geqo_selection_bias": (1.5, 2.0),
-    "geqo_seed": (0.0, 1.0),
 }
 
 INTEGER_SETTINGS = {
     "effective_cache_size": (1, 4_194_304),
     "from_collapse_limit": (1, 32),
     "join_collapse_limit": (1, 32),
-    "geqo_threshold": (2, 32),
-    "geqo_effort": (1, 10),
-    "geqo_pool_size": (0, 10_000),
-    "geqo_generations": (0, 10_000),
 }
 
 

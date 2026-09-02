@@ -37,11 +37,6 @@ class AgentProtocol:
             len(aliases) * 3,
             max(0, maximum_model_turns - reserved_decision_turns),
         )
-        expected_path = (
-            evaluator.worker.fixture.repository
-            / "docker/postgres/benchmark-v1.expected.json"
-        )
-        expected = json.loads(expected_path.read_text(encoding="utf-8"))
         settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
         observation = {
             "task_id": evaluator.task["task_id"],
@@ -56,9 +51,7 @@ class AgentProtocol:
             "postgresql_server_version_num": evaluator.worker.fixture.snapshot[
                 "postgresql"
             ]["server_version_num"],
-            "planner_settings": {
-                name: expected["settings"][name] for name in sorted(settings)
-            },
+            "planner_settings": evaluator.worker.settings(settings),
             "default_plan": evaluator.default["compact_plan"],
             "default_median_execution_time_ms": evaluator.default[
                 "median_execution_time_ms"

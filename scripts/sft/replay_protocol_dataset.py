@@ -46,7 +46,7 @@ def main() -> None:
         output = repository / output
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.identity)
+    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
 
     samples: dict[str, dict[str, Any]] = {}
@@ -105,7 +105,8 @@ def main() -> None:
         "status": "passed",
         "selection": "lowest dataset ordinal per template",
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
-        "fixture_identity": fixture.identity,
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "templates": len(records),
         "candidates": sum(len(record["candidate_ids"]) for record in records),
         "records": records,

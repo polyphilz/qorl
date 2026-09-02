@@ -26,6 +26,10 @@ class RlRunV2ConfigTest(unittest.TestCase):
             config["env_vars"]["QORL_RL_TIMEOUT_MANIFEST"],
             "experiments/004-rl-run-v2/timeouts.json",
         )
+        self.assertEqual(
+            config["env_vars"]["QORL_RL_WORKER_POOL_CONFIG"],
+            "configs/postgres/training-pool-v1.json",
+        )
         self.assertEqual(config["orchestrator"]["group_size"], 4)
         self.assertEqual(config["orchestrator"]["batch_size"], 16)
         self.assertEqual(config["orchestrator"]["max_off_policy_steps"], 1)

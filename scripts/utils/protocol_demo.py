@@ -10,7 +10,7 @@ from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import AgentProtocol, RESERVED_DECISION_TURNS
 from qorl.agent.tools import agent_tools
 from qorl.calibration import plan_sha256
-from qorl.fixture import TaskSet
+from qorl.fixture import TaskSet, data_identity
 from qorl.plan import verify_action
 from qorl.rollout import MAX_CANDIDATES
 
@@ -74,8 +74,13 @@ def validate_protocol_demo(
     )
     require(task["partition"] == partition, "demo task partition mismatch")
     require(
-        metadata.get("database") == task_set.inventory["database"],
-        "demo database identity differs from its task inventory",
+        data_identity(metadata.get("data_identity", {}))
+        == task_set.data_identity,
+        "demo data identity differs from its task inventory",
+    )
+    require(
+        isinstance(metadata.get("runtime_identity"), dict),
+        "demo runtime identity must be an object",
     )
     sql = task_set.load_sql(task)
 

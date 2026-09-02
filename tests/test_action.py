@@ -190,6 +190,13 @@ class ActionTest(unittest.TestCase):
             "effective_io_concurrency",
             "max_parallel_workers_per_gather",
             "enable_partition_pruning",
+            "geqo",
+            "geqo_threshold",
+            "geqo_effort",
+            "geqo_pool_size",
+            "geqo_generations",
+            "geqo_selection_bias",
+            "geqo_seed",
         ):
             with self.subTest(name=name):
                 self.assertNotIn(name, settings)

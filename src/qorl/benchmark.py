@@ -167,7 +167,7 @@ def load_run_config(
 
 def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "job-v1", fixture.identity)
+    task_set = TaskSet.load(repository, "job-v1", fixture.data_identity)
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
     agent: QoAgentPolicy | None = None
@@ -189,7 +189,8 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         "completed_at_utc": None,
         "inventory_id": task_set.inventory["inventory_id"],
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "database": task_set.inventory["database"],
+        "data_identity": fixture.data_identity,
+        "runtime_identity": fixture.runtime_identity,
         "snapshot_manifest_sha256": sha256_file(
             fixture.snapshot_manifest_path
         ),
@@ -233,6 +234,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             ),
             "score": "clip(default_median / candidate_median, 0.1, 10)",
         },
+        "worker_profile": None,
         "task_count": task_set.inventory["task_count"],
         "completed_task_count": 0,
         "failed_task_count": 0,
@@ -247,6 +249,8 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     results: list[dict[str, Any]] = []
     try:
         with PostgresWorker(fixture, project_name) as worker:
+            manifest["worker_profile"] = worker.runtime_manifest()
+            write_json(manifest_path, manifest)
             worker.capture_environment(output_dir, "pre")
             for index, task in enumerate(
                 task_set.inventory["tasks"], start=1

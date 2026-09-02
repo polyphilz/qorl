@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qorl.fixture import TaskSet, sha256_file
+from qorl.fixture import TaskSet, data_identity, sha256_file
 
 
 TIMEOUT_FLOOR_MS = 5_000
@@ -48,13 +48,31 @@ class CalibratedTimeouts:
         repository: Path,
         path: Path,
         task_set: TaskSet,
+        expected_runtime_identity: dict[str, str] | None = None,
     ) -> CalibratedTimeouts:
         path = path if path.is_absolute() else repository / path
         manifest = json.loads(path.read_text(encoding="utf-8"))
         if manifest.get("schema_version") != 1:
             raise RuntimeError("unsupported calibrated-timeout manifest")
-        if manifest.get("database") != task_set.inventory.get("database"):
+        recorded_data_identity = manifest.get(
+            "data_identity", manifest.get("database", {})
+        )
+        if data_identity(recorded_data_identity) != task_set.data_identity:
             raise RuntimeError("calibrated timeouts use a different database")
+        recorded_runtime_identity = manifest.get("runtime_identity")
+        if (
+            expected_runtime_identity is not None
+            and recorded_runtime_identity is not None
+            and recorded_runtime_identity != expected_runtime_identity
+        ):
+            raise RuntimeError("calibrated timeouts use a different runtime")
+        if (
+            expected_runtime_identity is not None
+            and recorded_runtime_identity is None
+            and manifest.get("database", {}).get("postgres_image_id")
+            != expected_runtime_identity["postgres_image_id"]
+        ):
+            raise RuntimeError("calibrated timeouts use a different runtime")
 
         selection = manifest.get("selection", {})
         selection_path = repository / selection.get("path", "")

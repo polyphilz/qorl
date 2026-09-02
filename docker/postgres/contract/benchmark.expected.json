@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "benchmark_config_id": "benchmark-v1",
+  "benchmark_config_id": "benchmark-v2",
   "postgresql": {
     "server_version_num": "180006",
     "extension_name": "pg_hint_plan",
@@ -34,7 +34,7 @@
     "plan_cache_mode": "auto",
     "from_collapse_limit": "8",
     "join_collapse_limit": "8",
-    "geqo": "on",
+    "geqo": "off",
     "geqo_threshold": "12",
     "geqo_effort": "5",
     "geqo_pool_size": "0",
@@ -116,12 +116,5 @@
     "autovacuum worker",
     "logical replication launcher",
     "logical replication worker"
-  ],
-  "runtime": {
-    "cpuset_cpus": "8-15,24-31",
-    "cpuset_mems": "0",
-    "memory_max_bytes": "34359738368",
-    "memory_swap_max_bytes": "0",
-    "shm_size_bytes": "1073741824"
-  }
+  ]
 }

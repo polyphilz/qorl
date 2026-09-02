@@ -171,6 +171,18 @@ def finalize_dataset(
     counts = Counter(document["metadata"]["partition"] for _, document in records)
     if dict(counts) != SPLIT_COUNTS:
         raise ValueError(f"demonstration counts differ: {dict(counts)}")
+    identities = {
+        canonical_json(
+            {
+                "data_identity": document["metadata"]["data_identity"],
+                "runtime_identity": document["metadata"]["runtime_identity"],
+            }
+        )
+        for _, document in records
+    }
+    if len(identities) != 1:
+        raise ValueError("demonstrations use different database identities")
+    identities_record = json.loads(identities.pop())
 
     tool_calls = Counter()
     candidate_counts = Counter()
@@ -264,7 +276,7 @@ def finalize_dataset(
         "dataset_id": DATASET_ID,
         "seed": DATASET_SEED,
         "task_set_id": task_set.task_set_id,
-        "database": task_set.inventory["database"],
+        **identities_record,
         "sources": {
             "ceb_inventory": {
                 "path": task_set.inventory_path.relative_to(repository).as_posix(),

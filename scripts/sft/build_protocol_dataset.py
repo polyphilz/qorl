@@ -262,7 +262,7 @@ def default_derived_actions(
                 break
 
     settings = [
-        {"geqo": True},
+        {"enable_memoize": True},
         {"random_page_cost": 4.0},
         {"join_collapse_limit": 8},
     ]
@@ -534,7 +534,8 @@ def build_document(
             "template_id": task["template_id"],
             "partition": task["partition"],
             "sql_sha256": task["sql_sha256"],
-            "database": task_set.inventory["database"],
+            "data_identity": worker.fixture.data_identity,
+            "runtime_identity": worker.fixture.runtime_identity,
             "in_author_unique_plans_subset": task[
                 "in_author_unique_plans_subset"
             ],
@@ -589,7 +590,7 @@ def main() -> None:
         output_dir = repository / output_dir
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.identity)
+    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
     selected = {
         partition: select_tasks(
             task_set.inventory["tasks"], partition, count, DATASET_SEED

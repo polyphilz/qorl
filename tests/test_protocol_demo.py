@@ -123,7 +123,11 @@ def synthetic_demo() -> dict[str, Any]:
         "metadata": {
             "task_set_id": "ceb-v1",
             "task_id": task["task_id"],
-            "database": task_set.inventory["database"],
+            "data_identity": task_set.data_identity,
+            "runtime_identity": {
+                "postgres_image_id": "sha256:test",
+                "benchmark_config_id": "benchmark-v2",
+            },
             "maximum_model_turns": maximum_turns,
             "call_sequence": CALL_SEQUENCE,
         },

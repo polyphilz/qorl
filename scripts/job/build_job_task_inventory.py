@@ -73,7 +73,7 @@ def build_tasks(source_dir: Path, query_glob: str) -> tuple[list[dict[str, Any]]
     return tasks, queries
 
 
-def database_identity(
+def snapshot_data_identity(
     snapshot_manifest_path: Path,
     source_manifest_sha256: str,
 ) -> dict[str, Any]:
@@ -84,7 +84,6 @@ def database_identity(
         "fixture_id": snapshot["fixture_id"],
         "snapshot_id": snapshot["snapshot_id"],
         "snapshot_archive_sha256": snapshot["archive"]["sha256"],
-        "postgres_image_id": snapshot["image"]["id"],
         "postgres_system_identifier": snapshot["postgresql"]["system_identifier"],
     }
 
@@ -112,7 +111,9 @@ def build_inventory(
 
     source_manifest_sha256 = sha256_file(source_manifest_path)
     if snapshot_manifest_path:
-        database = database_identity(snapshot_manifest_path, source_manifest_sha256)
+        database = snapshot_data_identity(
+            snapshot_manifest_path, source_manifest_sha256
+        )
     elif existing_database:
         database = existing_database
     else:
@@ -176,10 +177,22 @@ def check_inventory(
 ) -> None:
     inventory_path = output_dir / "tasks.json"
     existing = json.loads(inventory_path.read_text(encoding="utf-8"))
+    if snapshot_manifest_path is not None:
+        snapshot_database = snapshot_data_identity(
+            snapshot_manifest_path, sha256_file(source_manifest_path)
+        )
+        existing_data = {
+            name: existing["database"][name]
+            for name in snapshot_database
+        }
+        if existing_data != snapshot_database:
+            raise RuntimeError(
+                "checked-in inventory and snapshot contain different data"
+            )
     expected, source_queries = build_inventory(
         source_manifest_path,
         source_dir,
-        snapshot_manifest_path,
+        None,
         existing_database=existing["database"],
     )
     if existing != expected:

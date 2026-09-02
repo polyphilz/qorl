@@ -18,7 +18,7 @@ admin_psql=(
 PGAPPNAME=qorl-config-assert "${admin_psql[@]}" <<'SQL'
 DO $assert$
 DECLARE
-    contract jsonb := pg_read_file('/usr/share/qorl/benchmark-v1.expected.json')::jsonb;
+    contract jsonb := pg_read_file('/usr/share/qorl/benchmark-v2.expected.json')::jsonb;
     mismatch text;
     actual_value text;
 BEGIN
@@ -43,7 +43,7 @@ BEGIN
     FROM mismatches;
 
     IF mismatch IS NOT NULL THEN
-        RAISE EXCEPTION 'benchmark-v1 PostgreSQL setting mismatch:%', E'\n' || mismatch;
+        RAISE EXCEPTION 'benchmark-v2 PostgreSQL setting mismatch:%', E'\n' || mismatch;
     END IF;
 
     SELECT string_agg(name, ', ' ORDER BY name)
@@ -206,4 +206,4 @@ if [[ "${QORL_ASSERT_RUNTIME:-0}" == "1" ]]; then
     assert_equal "shared memory bytes" "$QORL_EXPECTED_SHM_BYTES" "$shm_size_bytes"
 fi
 
-echo "QORL benchmark-v1 configuration assertions passed."
+echo "QORL benchmark-v2 configuration assertions passed."

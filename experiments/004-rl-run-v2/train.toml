@@ -17,7 +17,7 @@ num_infer_gpus = 1
 
 [env_vars]
 VLLM_USE_FLASHINFER_SAMPLER = "0"
-QORL_RL_WORKER_POOL_CONFIG = "configs/postgres-pool-v1.json"
+QORL_RL_WORKER_POOL_CONFIG = "configs/postgres/training-pool-v1.json"
 QORL_RL_TIMEOUT_MANIFEST = "experiments/004-rl-run-v2/timeouts.json"
 
 [trainer.model]

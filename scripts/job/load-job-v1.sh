@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 project_name="qorl-job-v1-build"
 skip_fetch=0
@@ -39,6 +40,8 @@ fi
 
 command -v docker >/dev/null
 command -v python3 >/dev/null
+source "$repository_root/scripts/docker/runtime-profile.sh"
+qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
 
 if ((skip_fetch == 0)); then
     PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
@@ -53,7 +56,7 @@ compose=(
     docker compose
     --project-name "$project_name"
     --file "$repository_root/compose.yaml"
-    --file "$repository_root/compose.job.yaml"
+    --file "$repository_root/compose.fixture-build.yaml"
 )
 
 "${compose[@]}" config --quiet
