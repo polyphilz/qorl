@@ -4,7 +4,7 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from qorl.db.fixture import TaskSet
+from qorl.workload.taskset import TaskSet
 from scripts.utils.protocol_dataset import (
     DATASET_SEED,
     action_families,

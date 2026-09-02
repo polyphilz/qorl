@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import itertools
 import json
 import math
 import re
 from typing import Any, Iterable
+
+from qorl.util.hashing import sha256_bytes
 
 
 TABLE_TERM = re.compile(
@@ -30,10 +31,6 @@ INVENTORY_JOIN_EDGE = re.compile(
 )
 
 JoinPredicate = tuple[str, str, str, str]
-
-
-def sha256_bytes(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
 
 
 def _canonical_graph_sha256(

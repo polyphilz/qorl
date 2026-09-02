@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
 runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 project_name="qorl-job-v1-build"
@@ -44,8 +45,7 @@ source "$repository_root/scripts/docker/runtime-profile.sh"
 qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
 
 if ((skip_fetch == 0)); then
-    PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
-        python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+    python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 fi
 
 raw_dir="$(cd -- "$raw_dir" && pwd)"

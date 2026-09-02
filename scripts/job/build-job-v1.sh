@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
 runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 output_dir="$repository_root/artifacts/job-v1"
@@ -60,8 +61,7 @@ output_dir="$(cd -- "$output_dir" && pwd)"
 
 trap 'echo "job-v1 build stopped; failed resources were retained for diagnosis" >&2' ERR
 
-PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
-    python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 raw_dir="$(cd -- "$raw_dir" && pwd)"
 
 source_manifest_copy="$output_dir/job-v1.source.json"
@@ -91,7 +91,6 @@ if [[ -z "$build_volume" ]]; then
     exit 1
 fi
 
-PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
 python3 -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \
@@ -107,7 +106,6 @@ python3 "$repository_root/scripts/capture-benchmark-environment.py" \
 "${compose[@]}" stop --timeout 60 postgres
 container="$("${compose[@]}" ps --all --quiet postgres)"
 
-PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
 python3 -m scripts.job.seal_job_v1 \
     --container "$container" \
     --manifest "$output_dir/job-v1.source.json" \

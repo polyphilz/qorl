@@ -5,7 +5,7 @@ import unittest
 from copy import deepcopy
 from typing import Any
 
-from qorl.measure.calibration import plan_sha256
+from qorl.plans.fingerprint import plan_sha256
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RL_TRAINING_PROTOCOL_V1,

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
+export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
 runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
 raw_dir="$repository_root/data/raw/job-v1"
 project_name="qorl-job-v1-restore"
@@ -161,7 +162,6 @@ docker run \
 "${compose[@]}" up --detach --wait --no-build postgres
 container="$("${compose[@]}" ps --quiet postgres)"
 
-PYTHONPATH="$repository_root${PYTHONPATH:+:$PYTHONPATH}" \
 python3 -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \

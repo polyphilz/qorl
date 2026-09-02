@@ -10,8 +10,8 @@ from qorl.plans.action import TaskCatalog, compile_action
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import AgentProtocol, RESERVED_DECISION_TURNS
 from qorl.agent.tools import agent_tools
-from qorl.db.fixture import TaskSet
-from qorl.measure.calibration import plan_sha256
+from qorl.plans.fingerprint import plan_sha256
+from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import MAX_CANDIDATES
 from scripts.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from scripts.utils.protocol_demo import DemoValidationError, validate_protocol_demo

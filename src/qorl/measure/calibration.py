@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import platform
 import statistics
-import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from qorl import __version__
-from qorl.db.fixture import DatabaseFixture, TaskSet, sha256_file
+from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
+from qorl.util.hashing import sha256_file
+from qorl.util.io import display_path, utc_now, write_json
+from qorl.workload.taskset import TaskSet
 
 
 MEASUREMENT_RUNS = 20
@@ -22,81 +24,6 @@ MIN_WARMUP_RUNS = 2
 MAX_WARMUP_RUNS = 5
 BUFFER_STABILITY_TOLERANCE = 0.02
 STATEMENT_TIMEOUT_MS = 120_000
-PLAN_FINGERPRINT_VERSION = 3
-
-RUNTIME_PLAN_KEYS = {
-    "Cache Evictions",
-    "Cache Hits",
-    "Cache Misses",
-    "Cache Overflows",
-    "Conflicting Tuples",
-    "Disk Usage",
-    "Full-sort Groups",
-    "Hash Batches",
-    "HashAgg Batches",
-    "Hash Buckets",
-    "Heap Fetches",
-    "I/O Read Time",
-    "I/O Write Time",
-    "Index Searches",
-    "Maximum Storage",
-    "Memory Usage",
-    "Original Hash Batches",
-    "Original Hash Buckets",
-    "Peak Memory Usage",
-    "Pre-sorted Groups",
-    "Sort Method",
-    "Sort Space Type",
-    "Sort Space Used",
-    "Storage",
-    "Subplans Removed",
-    "Tuples Deleted",
-    "Tuples Inserted",
-    "Tuples Updated",
-    "Workers",
-    "Workers Launched",
-}
-RUNTIME_PLAN_PREFIXES = ("Actual ", "Rows Removed by ", "WAL ")
-
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def write_json(path: Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(value, indent=2, sort_keys=True) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
-    ) as temporary:
-        temporary.write(content)
-        temporary.flush()
-        os.fsync(temporary.fileno())
-        temporary_path = Path(temporary.name)
-    temporary_path.replace(path)
-
-
-def canonical_plan(value: Any) -> Any:
-    if isinstance(value, list):
-        return [canonical_plan(item) for item in value]
-    if not isinstance(value, dict):
-        return value
-    return {
-        key: canonical_plan(item)
-        for key, item in value.items()
-        if key not in RUNTIME_PLAN_KEYS
-        and not key.startswith(RUNTIME_PLAN_PREFIXES)
-        and not key.endswith(" Blocks")
-    }
-
-
-def plan_sha256(plan: dict[str, Any]) -> str:
-    encoded = json.dumps(
-        canonical_plan(plan), sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def observation(explain: dict[str, Any], run_number: int) -> dict[str, Any]:
     plan = explain["Plan"]
     return {
@@ -226,13 +153,6 @@ def failed_task(task: dict[str, Any], error: Exception) -> dict[str, Any]:
         "completed_at_utc": utc_now(),
         "error": str(error),
     }
-
-
-def display_path(repository: Path, path: Path) -> str:
-    try:
-        return str(path.relative_to(repository))
-    except ValueError:
-        return str(path)
 
 
 def calibrate(

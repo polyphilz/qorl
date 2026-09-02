@@ -13,20 +13,15 @@ import tempfile
 import urllib.request
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any
+
+from qorl.util.hashing import sha256_stream
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/ceb-v1"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
-
-
-def sha256_stream(source: BinaryIO) -> str:
-    digest = hashlib.sha256()
-    for block in iter(lambda: source.read(1024 * 1024), b""):
-        digest.update(block)
-    return digest.hexdigest()
 
 
 def verify_file(path: Path, specification: dict[str, Any]) -> None:

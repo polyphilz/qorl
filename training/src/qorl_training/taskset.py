@@ -7,7 +7,7 @@ from typing import Literal
 
 import verifiers.v1 as vf
 
-from qorl.db.fixture import TaskSet
+from qorl.workload.taskset import TaskSet
 
 
 SELECTION_SPLITS = {

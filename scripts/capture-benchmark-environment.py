@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import os
 import platform
@@ -18,6 +17,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from qorl.util.hashing import sha256_file
 
 
 def run(command: list[str], *, check: bool = True) -> str:
@@ -62,14 +63,6 @@ def write_atomic(path: Path, content: str) -> None:
         os.fsync(temporary.fileno())
         temporary_path = Path(temporary.name)
     temporary_path.replace(path)
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def parse_os_release() -> dict[str, str]:

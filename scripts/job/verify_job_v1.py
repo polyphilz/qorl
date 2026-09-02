@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -13,6 +12,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from qorl.util.hashing import sha256_bytes, sha256_file
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -36,18 +37,6 @@ def run(command: list[str], *, input_text: str | None = None) -> str:
             f"{completed.stderr.strip()}"
         )
     return completed.stdout
-
-
-def sha256_bytes(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def fingerprint(value: Any) -> str:

@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from qorl.util.hashing import sha256_bytes, sha256_file
 from scripts.utils.ceb import SPLIT_SALT, choose_validation_templates
 from scripts.utils.query_structure import (
     extract_join_structure,
@@ -20,18 +20,6 @@ from scripts.utils.query_structure import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CEB_DIR = REPOSITORY_ROOT / "data/ceb"
 DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
-
-
-def sha256_bytes(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:

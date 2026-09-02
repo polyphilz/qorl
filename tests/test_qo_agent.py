@@ -17,7 +17,8 @@ from qorl.plans.action import (
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.agent.protocol import AgentProtocol
-from qorl.agent.tools import AgentEnvironment, agent_tools
+from qorl.agent.tool_runtime import AgentEnvironment
+from qorl.agent.tools import agent_tools
 
 TASK = {
     "task_id": "job-test",

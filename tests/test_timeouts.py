@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from qorl.db.fixture import TaskSet
+from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts
 
 

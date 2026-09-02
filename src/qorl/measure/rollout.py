@@ -6,16 +6,16 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.db.fixture import TaskSet
 from qorl.db.worker import (
     ExplainResult,
     PostgresWorker,
     QueryTimeout,
     WorkerError,
 )
-from qorl.measure.calibration import plan_sha256
 from qorl.plans.action import ActionError, TaskCatalog, compile_action
+from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
+from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
 
 DEFAULT_MEASUREMENTS = 3

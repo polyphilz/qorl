@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import tomllib
@@ -12,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from qorl.util.hashing import sha256_bytes
 from scripts.utils.query_structure import (
     extract_join_structure,
     task_join_fingerprints,
@@ -21,10 +21,6 @@ from scripts.utils.query_structure import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
 TEMPLATE_NAME = re.compile(r"^(?P<template>[0-9]+[a-z])", re.IGNORECASE)
-
-
-def sha256_bytes(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
 
 
 def template_id(path: Path) -> str:

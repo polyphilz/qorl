@@ -12,24 +12,14 @@ import tarfile
 import tempfile
 import urllib.request
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any
+
+from qorl.util.hashing import sha256_file, sha256_stream
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/job-v1"
-
-
-def sha256_stream(source: BinaryIO) -> str:
-    digest = hashlib.sha256()
-    for block in iter(lambda: source.read(1024 * 1024), b""):
-        digest.update(block)
-    return digest.hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    with path.open("rb") as source:
-        return sha256_stream(source)
 
 
 def verify_file(path: Path, spec: dict[str, Any]) -> None:

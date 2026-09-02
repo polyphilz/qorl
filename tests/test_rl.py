@@ -6,7 +6,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-from qorl.db.fixture import sha256_file
+from qorl.util.hashing import sha256_file
 from qorl.rl import CONFIG, PRE_RL_REPORT, verify_pre_rl_validation
 
 

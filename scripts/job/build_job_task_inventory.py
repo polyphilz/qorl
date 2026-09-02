@@ -12,10 +12,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from qorl.util.hashing import sha256_bytes, sha256_file
 from scripts.utils.query_structure import (
     extract_join_structure as extract_structure,
 )
-from scripts.utils.query_structure import sha256_bytes
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -24,14 +24,6 @@ DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "data/raw/job-v1/source"
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "data/job"
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def natural_query_key(path: Path) -> tuple[int, str]:
     match = QUERY_NAME.fullmatch(path.name)
     if not match:

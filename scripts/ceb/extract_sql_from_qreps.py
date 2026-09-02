@@ -12,6 +12,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from qorl.util.hashing import sha256_bytes, sha256_file
 from scripts.utils.ceb import extract_sql_bytes
 
 
@@ -22,18 +23,6 @@ DEFAULT_UNIQUE_SOURCE = (
     REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb-unique-plans"
 )
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "data/ceb"
-
-
-def sha256_bytes(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def manifest_sha256(records: list[dict[str, Any]], key: str, path_key: str) -> str:

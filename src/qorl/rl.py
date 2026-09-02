@@ -7,7 +7,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from qorl.db.fixture import sha256_file
+from qorl.util.hashing import sha256_file
 from qorl.sft import model_snapshot, run
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")

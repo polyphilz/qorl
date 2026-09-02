@@ -9,13 +9,9 @@ from qorl.agent.client import ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.tools import AgentEnvironment
+from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.measure.rollout import RolloutEvaluator
-
-
-def sha256_json(value: Any) -> str:
-    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
+from qorl.util.hashing import sha256_json
 
 
 class QoAgentPolicy:

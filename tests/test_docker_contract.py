@@ -11,6 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DockerContractTest(unittest.TestCase):
+    def test_fixture_entrypoints_expose_src_and_repository_to_python(self) -> None:
+        expected = (
+            'export PYTHONPATH="$repository_root/src:$repository_root'
+            '${PYTHONPATH:+:$PYTHONPATH}"'
+        )
+        for name in (
+            "build-job-v1.sh",
+            "load-job-v1.sh",
+            "restore-verify-job-v1.sh",
+        ):
+            script = (ROOT / "scripts/job" / name).read_text(encoding="utf-8")
+            self.assertIn(expected, script)
+
     def test_contract_defines_every_prompt_visible_planner_setting(self) -> None:
         contract = json.loads(
             (

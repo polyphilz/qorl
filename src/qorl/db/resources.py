@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from qorl.db.fixture import sha256_file
+from qorl.util.hashing import sha256_file
 
 
 DEFAULT_EVALUATION_PROFILE = Path(
