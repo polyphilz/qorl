@@ -13,7 +13,7 @@ import tempfile
 import urllib.request
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 from qorl.util.hashing import sha256_stream
 

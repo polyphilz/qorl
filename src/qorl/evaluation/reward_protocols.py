@@ -203,7 +203,9 @@ def correlation(left: list[float], right: list[float]) -> float | None:
         return None
     left_mean = statistics.fmean(left)
     right_mean = statistics.fmean(right)
-    numerator = sum((x - left_mean) * (y - right_mean) for x, y in zip(left, right))
+    numerator = sum(
+        (x - left_mean) * (y - right_mean) for x, y in zip(left, right, strict=True)
+    )
     denominator = math.sqrt(
         sum((x - left_mean) ** 2 for x in left)
         * sum((y - right_mean) ** 2 for y in right)
@@ -229,11 +231,11 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
     ]
     strict_agreements = [
         direction(cheap) == direction(full)
-        for cheap, full in zip(cheap_scores, full_scores)
+        for cheap, full in zip(cheap_scores, full_scores, strict=True)
     ]
     material_agreements = [
         direction(cheap, material_ratio) == direction(full, material_ratio)
-        for cheap, full in zip(cheap_scores, full_scores)
+        for cheap, full in zip(cheap_scores, full_scores, strict=True)
     ]
     opposite_material = [
         {
@@ -241,7 +243,7 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
             direction(full, material_ratio),
         }
         == {"improved", "regressed"}
-        for cheap, full in zip(cheap_scores, full_scores)
+        for cheap, full in zip(cheap_scores, full_scores, strict=True)
     ]
     reward_agreements = [
         sign(float(result["rl-training-v1"]["final"]["trajectory_reward"]))
@@ -282,7 +284,7 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
         "mean_absolute_log_speedup_error": (
             statistics.fmean(
                 abs(math.log(cheap) - math.log(full))
-                for cheap, full in zip(cheap_scores, full_scores)
+                for cheap, full in zip(cheap_scores, full_scores, strict=True)
             )
             if count
             else None

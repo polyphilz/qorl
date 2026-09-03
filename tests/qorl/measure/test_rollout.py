@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import random
 import unittest
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from qorl.db.worker import ExplainResult, QueryTimeout
@@ -292,6 +294,27 @@ class RolloutTest(unittest.TestCase):
         self.assertEqual(len(final["pair_orders"]), 3)
         self.assertEqual(final["measurement_protocol_id"], "rl-training-v1")
         self.assertEqual(RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13)
+
+    def test_serialized_rollout_record_is_unchanged(self) -> None:
+        evaluator = RolloutEvaluator(
+            CountingWorker(),
+            Fixture(),  # type: ignore[arg-type]
+            TASK,
+        )
+
+        default, candidates, final = self.run_full_rollout(evaluator)
+        record = {
+            "schema_version": 1,
+            "task_id": TASK["task_id"],
+            "template_id": "test",
+            "default": default,
+            "candidates": candidates,
+            "final": final,
+        }
+
+        golden_path = Path(__file__).with_name("golden_rollout.json")
+        expected = json.loads(golden_path.read_text(encoding="utf-8"))
+        assert record == expected
 
     def test_calibrated_candidate_timeout_is_a_handled_failure(self) -> None:
         default_plan = deepcopy(DEFAULT_PLAN)
