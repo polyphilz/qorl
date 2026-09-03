@@ -355,10 +355,3 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     )
     write_json(manifest_path, manifest)
     return output_dir
-
-
-def run_random_benchmark(repository: Path) -> Path:
-    """Compatibility entry point for the original frozen random baseline."""
-    return run_benchmark(
-        repository, "experiments/000-vanilla-baseline/random.json"
-    )

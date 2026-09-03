@@ -5,6 +5,8 @@
 This 100-update CEB run contains its task selection, calibrated timeouts,
 four-worker concurrency preflight, training configuration, checkpoint
 evaluation, and reward-protocol audit in one place.
+`build_inventory.py` constructs the selection, and `build_timeouts.py` derives
+its runtime limits from the matching calibration.
 
 - Outputs: `outputs/rl/rl-run-v2/`,
   `outputs/rl/qorl-rl-run-v2-checkpoint-evaluation-v1/`, and

@@ -5,6 +5,8 @@
 This experiment evaluates the untrained Qwen distill policy and the frozen
 random structured-action policy on held-out JOB. `run.json` and `random.json`
 bind stable run prefixes to the shared policy definitions in `configs/policy/`.
+`run.py` reproduces the random structured-action run; the regular `qorl run`
+command uses `run.json` for the untrained model run.
 
 - Outputs: `outputs/runs/<run-id>/`
 - Identity: model revision

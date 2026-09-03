@@ -51,5 +51,5 @@ uv pip install --python .venv-vllm/bin/python 'vllm==0.27.1'
 To reproduce the frozen random baseline instead:
 
 ```bash
-QORL_RUN_CONFIG=experiments/000-vanilla-baseline/random.json uv run qorl run
+uv run python experiments/000-vanilla-baseline/run.py
 ```

@@ -6,8 +6,6 @@ from pathlib import Path
 from qorl import __version__
 from qorl.evaluation.benchmark import run_benchmark
 from qorl.measure.calibration import calibrate
-from qorl.rl import rl
-from qorl.sft import sft
 
 
 def parser() -> argparse.ArgumentParser:
@@ -34,8 +32,6 @@ def parser() -> argparse.ArgumentParser:
         help="selection split; inferred when the manifest has only one",
     )
     commands.add_parser("run", help="run the configured policy on JOB")
-    commands.add_parser("sft", help="train the protocol-SFT LoRA adapter")
-    commands.add_parser("rl", help="run reinforcement learning on CEB")
     return root
 
 
@@ -45,11 +41,6 @@ def main() -> int:
         parser().print_help()
         return 0
     try:
-        actions = {
-            "run": run_benchmark,
-            "sft": sft,
-            "rl": rl,
-        }
         if arguments.command == "calibrate":
             output_dir = calibrate(
                 Path.cwd(),
@@ -58,7 +49,7 @@ def main() -> int:
                 arguments.split,
             )
         else:
-            output_dir = actions[arguments.command](Path.cwd())
+            output_dir = run_benchmark(Path.cwd())
     except (RuntimeError, OSError) as error:
         print(f"qorl: {error}")
         return 1

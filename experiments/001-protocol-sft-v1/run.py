@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -88,7 +89,7 @@ def training_report(
 
 def sft(repository: Path) -> Path:
     if platform.system() != "Linux" or platform.machine() != "x86_64":
-        raise RuntimeError("qorl sft requires a Linux x86_64 CUDA training host")
+        raise RuntimeError("protocol-SFT v1 requires a Linux x86_64 CUDA training host")
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is not installed")
@@ -197,3 +198,16 @@ def sft(repository: Path) -> Path:
         repository,
     )
     return training_report(repository, model, steps)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run the frozen protocol-SFT v1 experiment."
+    )
+    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    arguments = parser.parse_args()
+    print(sft(arguments.repository.resolve()))
+
+
+if __name__ == "__main__":
+    main()

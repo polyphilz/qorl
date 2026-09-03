@@ -4,6 +4,8 @@
 
 This 12-update pilot uses 48 CEB training tasks and a fixed 16-task validation
 slice to verify that the initial reward and training path can learn at all.
+`build_inventory.py` produces the frozen selection, and `run.py` preserves the
+pilot's experiment-specific training and preflight logic.
 
 - Outputs: `outputs/rl/rl-pilot-v1/` and
   `outputs/rl/qorl-rl-pilot-validation-v1/{pre,post}/`
@@ -13,7 +15,7 @@ slice to verify that the initial reward and training path can learn at all.
 
 The completed pre-RL report records the policy checksum from before
 `run_id_prefix` moved out of `configs/policy/run-v1.json`. Re-running the legacy
-`qorl rl` pilot gate against the reorganized policy file will therefore reject
+The preserved `run.py` gate against the reorganized policy file will therefore reject
 that historical report; the completed pilot and validation artifacts remain
 valid.
 

@@ -4,7 +4,7 @@
 
 This experiment teaches the base model the QORL message and tool-call protocol.
 `spike.toml` checks compatibility; `train.toml` defines the full one-epoch LoRA
-run.
+run. `run.py` preserves the exact experiment-specific training orchestration.
 
 - Outputs: `outputs/sft/protocol-sft-spike/`, the prepared dataset under
   `outputs/sft/protocol-sft-v1/`, and training under

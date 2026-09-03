@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+import runpy
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
 
 from qorl.util.hashing import sha256_file
-from qorl.rl import CONFIG, PRE_RL_REPORT, verify_pre_rl_validation
+
+
+PILOT = runpy.run_path("experiments/003-rl-pilot-v1/run.py")
+CONFIG = PILOT["CONFIG"]
+PRE_RL_REPORT = PILOT["PRE_RL_REPORT"]
+verify_pre_rl_validation = PILOT["verify_pre_rl_validation"]
 
 
 class RlTest(unittest.TestCase):

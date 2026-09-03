@@ -1,24 +1,42 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+from qorl.adapters.model import model_snapshot
 from qorl.adapters.verify import verify_merged_model
 from qorl.util.hashing import sha256_file
-from qorl.sft import pinned_policy, run
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
-INVENTORY_CHECK = Path("scripts/rl/build_pilot_inventory.py")
+INVENTORY_CHECK = Path("experiments/003-rl-pilot-v1/build_inventory.py")
 MERGE_MODULE = "qorl_training.adapters.merge"
 SFT_RUN = Path("outputs/sft/protocol-sft-train-v1")
 MERGED_MODEL = Path("outputs/rl/protocol-sft-v1-merged")
 PRE_RL_REPORT = Path("outputs/rl/qorl-rl-pilot-validation-v1/pre/report.json")
 RUN = Path("outputs/rl/rl-pilot-v1")
 FINAL_STEP = 12
+
+
+def run(command: list[str], repository: Path) -> None:
+    try:
+        subprocess.run(command, cwd=repository, check=True)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(
+            f"command failed with status {error.returncode}: {' '.join(command)}"
+        ) from error
+
+
+def pinned_policy(repository: Path) -> tuple[Path, dict]:
+    policy = json.loads(
+        (repository / "configs/policy/run-v1.json").read_text()
+    )["policy"]
+    return model_snapshot(policy), policy
 
 
 def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None:
@@ -53,7 +71,7 @@ def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None
 
 def rl(repository: Path) -> Path:
     if platform.system() != "Linux" or platform.machine() != "x86_64":
-        raise RuntimeError("qorl rl requires a Linux x86_64 CUDA training host")
+        raise RuntimeError("RL pilot v1 requires a Linux x86_64 CUDA training host")
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is not installed")
@@ -137,3 +155,16 @@ def rl(repository: Path) -> Path:
     if not checkpoint.is_dir():
         raise RuntimeError(f"RL pilot completed without a step-{FINAL_STEP} checkpoint")
     return checkpoint
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run the frozen RL pilot v1 experiment."
+    )
+    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    arguments = parser.parse_args()
+    print(rl(arguments.repository.resolve()))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import runpy
 import unittest
 
-from scripts.rl.build_pilot_inventory import OUTPUT, SOURCE, build
+
+BUILDER = runpy.run_path("experiments/003-rl-pilot-v1/build_inventory.py")
+OUTPUT = BUILDER["OUTPUT"]
+SOURCE = BUILDER["SOURCE"]
+build = BUILDER["build"]
 
 
 class RlPilotInventoryTest(unittest.TestCase):
