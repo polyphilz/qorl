@@ -269,8 +269,8 @@ class TestQoAgent:
             for request in client.requests
         ]
         assert digests == [
-            "83a76ec61fc4670286a44649c040eaeb6ec3815e4d7d0f069004cd4363925517",
-            "dfed7b674193dfe6cc6def422cc8eae036ed3c0244b6fbad59483e11639d5e3d",
+            "8f72f35008607b0bc9652a4e7725816efbaeb2a2affe72fb964c60c684435c52",
+            "5b9ba92a0143879b01ead2e238f3cb59a0e7c0264712d799d4f51e811751f0a1",
         ]
 
     def test_protocol_exposes_a_one_candidate_training_budget(

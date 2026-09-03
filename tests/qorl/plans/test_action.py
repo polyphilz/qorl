@@ -184,6 +184,7 @@ class TestAction:
     def test_model_schema_matches_the_setting_allowlist(self) -> None:
         settings = PlanAction.tool_schema()["$defs"]["PlannerSettings"]["properties"]
         assert "enable_hashjoin" in settings
+        assert "enable_group_by_reordering" in settings
         assert "work_mem" not in settings
 
     def test_tool_schema_matches_golden(self) -> None:
@@ -214,10 +215,29 @@ class TestAction:
             "geqo_generations",
             "geqo_selection_bias",
             "geqo_seed",
+            "from_collapse_limit",
+            "join_collapse_limit",
+            "enable_async_append",
+            "enable_distinct_reordering",
+            "enable_parallel_append",
+            "enable_partitionwise_aggregate",
+            "enable_partitionwise_join",
+            "enable_presorted_aggregate",
+            "enable_tidscan",
         ):
             assert name not in settings
             with pytest.raises(ActionError, match="unknown fields"):
                 compile_raw({"version": 1, "settings": {name: 1}}, self.catalog)
+
+    def test_tid_scan_is_not_exposed_or_accepted(self) -> None:
+        scan = PlanAction.tool_schema()["$defs"]["ScanConstraint"]["properties"]
+        assert "tid" not in scan["force"]["enum"]
+        assert "tid" not in scan["forbid"]["items"]["enum"]
+        with pytest.raises(ActionError, match="must be one of"):
+            compile_raw(
+                {"version": 1, "scans": [{"relation": "a", "force": "tid"}]},
+                self.catalog,
+            )
 
     def test_parallel_workers_are_capped_at_two(self) -> None:
         parallel = PlanAction.tool_schema()["$defs"]["ParallelRequest"]

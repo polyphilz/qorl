@@ -19,7 +19,7 @@ from qorl.plans.schemas import (
     ScanMethod,
 )
 
-SAMPLER_VERSION = 2
+SAMPLER_VERSION = 3
 
 
 class ActionFamily(StrEnum):
@@ -72,7 +72,6 @@ SETTING_VALUES: dict[str, list[bool | int | float]] = {
     "random_page_cost": [1.0, 2.0, 8.0],
     "seq_page_cost": [0.5, 2.0],
     "cpu_tuple_cost": [0.005, 0.02],
-    "join_collapse_limit": [1, 16],
 }
 
 
@@ -241,7 +240,6 @@ def sampler_manifest() -> dict[str, Any]:
         "join_directive_weights": JOIN_DIRECTIVE_WEIGHTS,
         "scan_force_probability": SCAN_FORCE_PROBABILITY,
         "named_index_probability_given_index_scan": NAMED_INDEX_PROBABILITY,
-        "tid_scan_sampling": False,
         "disabled_index_sampling": True,
         "setting_values": SETTING_VALUES,
         "postgresql_applicability_filtering": False,

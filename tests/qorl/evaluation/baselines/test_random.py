@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import random
 
-from qorl.evaluation.baselines.random import FAMILY_WEIGHTS, sample_action
+from qorl.evaluation.baselines.random import (
+    FAMILY_WEIGHTS,
+    SAMPLER_VERSION,
+    SETTING_VALUES,
+    sample_action,
+)
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.schemas import PlanAction
 
@@ -55,3 +60,7 @@ class TestRandomPolicy:
                 field_to_family[field] for field in action if field != "version"
             )
         assert observed == set(FAMILY_WEIGHTS)
+
+    def test_sampler_uses_the_current_action_space(self) -> None:
+        assert SAMPLER_VERSION == 3
+        assert "join_collapse_limit" not in SETTING_VALUES

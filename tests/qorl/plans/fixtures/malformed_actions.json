@@ -150,7 +150,7 @@
   {
     "name": "scan force enum",
     "action": {"version": 1, "scans": [{"relation": "a", "force": "heap"}]},
-    "error": "scans[0].force must be one of ['bitmap', 'index', 'index_only', 'seq', 'tid']"
+    "error": "scans[0].force must be one of ['bitmap', 'index', 'index_only', 'seq']"
   },
   {
     "name": "scan index list",
@@ -187,7 +187,7 @@
       "scans": [
         {
           "relation": "a",
-          "forbid": ["seq", "tid", "index", "index_only", "bitmap"]
+          "forbid": ["seq", "index", "index_only", "bitmap"]
         }
       ]
     },

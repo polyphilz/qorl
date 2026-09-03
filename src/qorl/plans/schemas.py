@@ -27,7 +27,6 @@ class JoinMethod(StrEnum):
 
 class ScanMethod(StrEnum):
     SEQ = "seq"
-    TID = "tid"
     INDEX = "index"
     INDEX_ONLY = "index_only"
     BITMAP = "bitmap"
@@ -56,7 +55,6 @@ ACTION_SCHEMA_VERSION = 1
 MAX_PARALLEL_WORKERS = 2
 MAX_COST_SETTING = 1_000_000.0
 MAX_EFFECTIVE_CACHE_PAGES = 4_194_304
-MAX_COLLAPSE_LIMIT = 32
 MIN_ROW_MULTIPLIER = 0.001
 MAX_ROW_MULTIPLIER = 1_000.0
 MIN_ABSOLUTE_ROW_COUNT = 1.0
@@ -66,9 +64,7 @@ JOIN_METHODS = {method.value for method in JoinMethod}
 SCAN_METHODS = {method.value for method in ScanMethod}
 
 BOOLEAN_SETTINGS = {
-    "enable_async_append",
     "enable_bitmapscan",
-    "enable_distinct_reordering",
     "enable_gathermerge",
     "enable_group_by_reordering",
     "enable_hashagg",
@@ -80,15 +76,10 @@ BOOLEAN_SETTINGS = {
     "enable_memoize",
     "enable_mergejoin",
     "enable_nestloop",
-    "enable_parallel_append",
     "enable_parallel_hash",
-    "enable_partitionwise_aggregate",
-    "enable_partitionwise_join",
-    "enable_presorted_aggregate",
     "enable_self_join_elimination",
     "enable_seqscan",
     "enable_sort",
-    "enable_tidscan",
 }
 
 NUMERIC_SETTINGS = {
@@ -103,8 +94,6 @@ NUMERIC_SETTINGS = {
 
 INTEGER_SETTINGS = {
     "effective_cache_size": (1, MAX_EFFECTIVE_CACHE_PAGES),
-    "from_collapse_limit": (1, MAX_COLLAPSE_LIMIT),
-    "join_collapse_limit": (1, MAX_COLLAPSE_LIMIT),
 }
 
 JoinForce = Annotated[
@@ -174,11 +163,6 @@ EffectiveCachePages = Annotated[
             "maximum": MAX_EFFECTIVE_CACHE_PAGES,
         }
     ),
-]
-CollapseLimit = Annotated[
-    int | None,
-    Field(ge=1, le=MAX_COLLAPSE_LIMIT),
-    WithJsonSchema({"type": "integer", "minimum": 1, "maximum": MAX_COLLAPSE_LIMIT}),
 ]
 
 
@@ -454,9 +438,7 @@ class ParallelRequest(ActionModel):
 
 
 class PlannerSettings(ActionModel):
-    enable_async_append: PlannerBoolean = None
     enable_bitmapscan: PlannerBoolean = None
-    enable_distinct_reordering: PlannerBoolean = None
     enable_gathermerge: PlannerBoolean = None
     enable_group_by_reordering: PlannerBoolean = None
     enable_hashagg: PlannerBoolean = None
@@ -468,15 +450,10 @@ class PlannerSettings(ActionModel):
     enable_memoize: PlannerBoolean = None
     enable_mergejoin: PlannerBoolean = None
     enable_nestloop: PlannerBoolean = None
-    enable_parallel_append: PlannerBoolean = None
     enable_parallel_hash: PlannerBoolean = None
-    enable_partitionwise_aggregate: PlannerBoolean = None
-    enable_partitionwise_join: PlannerBoolean = None
-    enable_presorted_aggregate: PlannerBoolean = None
     enable_self_join_elimination: PlannerBoolean = None
     enable_seqscan: PlannerBoolean = None
     enable_sort: PlannerBoolean = None
-    enable_tidscan: PlannerBoolean = None
 
     cpu_index_tuple_cost: PlannerCost = None
     cpu_operator_cost: PlannerCost = None
@@ -487,8 +464,6 @@ class PlannerSettings(ActionModel):
     seq_page_cost: PlannerCost = None
 
     effective_cache_size: EffectiveCachePages = None
-    from_collapse_limit: CollapseLimit = None
-    join_collapse_limit: CollapseLimit = None
 
     @model_validator(mode="before")
     @classmethod
@@ -658,7 +633,6 @@ class PlanAction(ActionModel):
         }
         scan_setting = {
             ScanMethod.SEQ: "enable_seqscan",
-            ScanMethod.TID: "enable_tidscan",
             ScanMethod.INDEX: "enable_indexscan",
             ScanMethod.INDEX_ONLY: "enable_indexonlyscan",
             ScanMethod.BITMAP: "enable_bitmapscan",
@@ -745,7 +719,6 @@ class PlanAction(ActionModel):
 
         scan_names = {
             ScanMethod.SEQ: "SeqScan",
-            ScanMethod.TID: "TidScan",
             ScanMethod.INDEX: "IndexScan",
             ScanMethod.INDEX_ONLY: "IndexOnlyScan",
             ScanMethod.BITMAP: "BitmapScan",

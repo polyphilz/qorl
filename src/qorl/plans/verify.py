@@ -43,8 +43,6 @@ JOIN_METHODS = {
 
 SCAN_METHODS = {
     "Seq Scan": ScanMethod.SEQ.value,
-    "Tid Scan": ScanMethod.TID.value,
-    "Tid Range Scan": ScanMethod.TID.value,
     "Index Scan": ScanMethod.INDEX.value,
     "Index Only Scan": ScanMethod.INDEX_ONLY.value,
     "Bitmap Heap Scan": ScanMethod.BITMAP.value,

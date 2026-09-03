@@ -18,5 +18,5 @@ JOB tasks containing at least 12 relations are not directly comparable with
 results collected under `benchmark-v2`.
 
 The frozen runs also predate the current protocol: the random sampler is now
-version 2, and GEQO controls are no longer present in the observation or tool
-schema.
+version 3, and GEQO controls and workload-inapplicable actions are no longer
+present in the observation or tool schema.

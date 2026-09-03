@@ -295,7 +295,6 @@ def default_derived_actions(
     settings = [
         {"enable_memoize": True},
         {"random_page_cost": 4.0},
-        {"join_collapse_limit": 8},
     ]
     rng.shuffle(settings)
     for values in settings:
