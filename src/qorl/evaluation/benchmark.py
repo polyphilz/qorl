@@ -5,7 +5,6 @@ import math
 import os
 import platform
 import random
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -13,11 +12,12 @@ from typing import Any
 from qorl import __version__
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
+from qorl.agent.types import PolicyType
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.worker import PostgresWorker
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
-from qorl.evaluation.types import PolicyType, RunStatus
 from qorl.measure.rollout import (
     DEFAULT_MEASUREMENTS,
     FINAL_PAIRS,
@@ -26,7 +26,8 @@ from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RolloutEvaluator,
 )
-from qorl.measure.schemas import FinalStatus
+from qorl.measure.run import TaskRun
+from qorl.measure.schemas import FinalStatus, RunStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
@@ -256,36 +257,47 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     project_name = f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     tasks = task_set.inventory["tasks"]
     results_by_task: dict[str, dict[str, Any]] = {}
-    pool: WorkerPool | None = None
-    try:
-        pool = start_pool(fixture, project_name)
-        manifest["worker_pool"] = pool.manifest()
-        manifest["protocol"].update(
-            {
-                "worker_count": len(pool.workers),
-                "concurrent_tasks": min(len(pool.workers), len(tasks)),
-                "one_query_per_worker": True,
-            }
-        )
-        write_json(manifest_path, manifest)
-        for slot in pool.workers:
-            slot.worker.capture_environment(
-                output_dir / f"worker-{slot.resources.index}", "pre"
-            )
+    run = TaskRun(
+        fixture,
+        project_name,
+        output_dir,
+        manifest_path,
+        manifest,
+        pool_field="worker_pool",
+    )
 
-        with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
-            futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
-                executor.submit(
-                    run_task_on_worker, pool, task_set, task, policy, agent
-                ): task
-                for task in tasks
-            }
-            for index, future in enumerate(as_completed(futures), start=1):
-                task = futures[future]
+    def execute_task(
+        pool: WorkerPool, task: dict[str, Any]
+    ) -> tuple[WorkerSlot, dict[str, Any]]:
+        return run_task_on_worker(pool, task_set, task, policy, agent)
+
+    try:
+        with run:
+            if run.pool is None:
+                raise RuntimeError("benchmark worker pool did not start")
+            manifest["protocol"].update(
+                {
+                    "worker_count": len(run.pool.workers),
+                    "concurrent_tasks": min(len(run.pool.workers), len(tasks)),
+                    "one_query_per_worker": True,
+                }
+            )
+            run.write()
+            for completion in run.map(
+                tasks,
+                execute_task,
+                handled_errors=(ModelError, WorkerError),
+            ):
+                task = completion.item
                 task_id = task["task_id"]
-                print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
-                try:
-                    slot, result = future.result()
+                print(
+                    f"[{completion.ordinal}/{manifest['task_count']}] {task_id}",
+                    flush=True,
+                )
+                if completion.error is None:
+                    if completion.result is None:
+                        raise RuntimeError("benchmark task returned no result")
+                    slot, result = completion.result
                     if result["status"] == RunStatus.COMPLETED:
                         manifest["completed_task_count"] += 1
                         print(
@@ -295,30 +307,21 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                     else:
                         manifest["failed_task_count"] += 1
                         print("  no valid candidate")
-                except (ModelError, WorkerError) as error:
+                else:
                     result = {
                         "schema_version": 1,
                         "task_id": task["task_id"],
                         "template_id": task["template_id"],
                         "status": RunStatus.FAILED.value,
                         "completed_at_utc": utc_now(),
-                        "error": str(error),
+                        "error": str(completion.error),
                     }
                     manifest["failed_task_count"] += 1
-                    print(f"  failed: {error}")
+                    print(f"  failed: {completion.error}")
                 results_by_task[task_id] = result
                 write_json(task_dir / f"{task_id}.json", result)
-                write_json(manifest_path, manifest)
-
-        for slot in pool.workers:
-            slot.worker.capture_environment(
-                output_dir / f"worker-{slot.resources.index}", "post"
-            )
-        pool.close()
-        pool = None
+                run.write()
     except BaseException:
-        if pool is not None:
-            pool.close()
         manifest["status"] = RunStatus.INTERRUPTED.value
         manifest["completed_at_utc"] = utc_now()
         manifest["summary"] = summarize(

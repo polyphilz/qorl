@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.db.worker import PostgresWorker, QueryTimeout, WorkerError
+from qorl.db.exceptions import QueryTimeout, WorkerError
+from qorl.db.worker import PostgresWorker
 
 
 class TimeoutWorker(PostgresWorker):
     def __init__(self) -> None:
-        self.container = "test"
         self.explain_calls = 0
         self.explain_analyze_calls = 0
+
+    @property
+    def container(self) -> str:
+        return "test"
 
     def execute(self, *args, **kwargs):
         raise WorkerError("ERROR: canceling statement due to statement timeout")

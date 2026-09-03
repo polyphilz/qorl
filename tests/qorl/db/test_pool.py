@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from qorl.db.container import PostgresContainer
 from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
@@ -18,6 +19,11 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class FakeWorker(PostgresWorker):
+    def __init__(self) -> None:
+        pass
+
+
+class FakeContainer(PostgresContainer):
     def __init__(self) -> None:
         pass
 
@@ -79,7 +85,8 @@ class WorkerPoolTest(unittest.TestCase):
     def test_claim_returns_workers_to_the_pool(self) -> None:
         profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
         slots = tuple(
-            WorkerSlot(resources, FakeWorker()) for resources in profile.workers
+            WorkerSlot(resources, FakeContainer(), FakeWorker())
+            for resources in profile.workers
         )
         pool = WorkerPool(slots, "test-pool", "test-sha")
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.db.fixture import DatabaseFixture, data_identity
-from qorl.evaluation.types import RunStatus
+from qorl.measure.schemas import RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet

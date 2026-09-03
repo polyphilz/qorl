@@ -7,7 +7,6 @@ import platform
 import random
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,25 +17,22 @@ from qorl import __version__
 from qorl.adapters.model import adapter_rank
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.db.worker import WorkerError
-from qorl.evaluation.live_validation import trace_metrics, wait_for_server
+from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.evaluation.live_validation import trace_metrics
 from qorl.evaluation.paired_validation import load_tasks, summarize
-from qorl.evaluation.types import RunStatus
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import FinalStatus
+from qorl.measure.run import TaskRun
+from qorl.measure.schemas import FinalStatus, RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.util.serving import ServedModel
 from qorl.workload.taskset import TaskSet
 
 CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
 START_POLICY = "start"
 PRINT_LOCK = Lock()
-EXPECTED_CONCURRENCY = 4
-FIRST_CHECKPOINT_STEP = 10
-FINAL_CHECKPOINT_STEP = 100
-CHECKPOINT_INTERVAL = 10
 
 
 def policy_name(step: int) -> str:
@@ -49,18 +45,14 @@ def load_config(repository: Path) -> tuple[dict[str, Any], Path]:
     steps = config.get("checkpoint_steps")
     if (
         config.get("schema_version") != 1
-        or config.get("concurrency") != EXPECTED_CONCURRENCY
+        or type(config.get("concurrency")) is not int
+        or config["concurrency"] < 1
         or not isinstance(steps, list)
-        or steps
-        != list(
-            range(
-                FIRST_CHECKPOINT_STEP,
-                FINAL_CHECKPOINT_STEP + 1,
-                CHECKPOINT_INTERVAL,
-            )
-        )
+        or not steps
+        or any(type(step) is not int or step < 1 for step in steps)
+        or len(steps) != len(set(steps))
     ):
-        raise RuntimeError("invalid v2 checkpoint-evaluation configuration")
+        raise RuntimeError("invalid checkpoint-evaluation configuration")
     return config, path
 
 
@@ -426,23 +418,44 @@ def main() -> None:
         arguments.port,
     )
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
-    process: subprocess.Popen[Any] | None = None
     pool: WorkerPool | None = None
-    results = {name: [] for name in policies}
-    with (output_dir / "vllm.log").open("w") as log:
+    results: dict[str, list[dict[str, Any]]] = {name: [] for name in policies}
+    run = TaskRun(
+        fixture,
+        f"qorl-v2-checkpoints-{os.getpid()}",
+        output_dir,
+        report_path,
+        report,
+        pool_field="database_pool",
+        environment_dir=output_dir / "environment",
+    )
+
+    def execute_job(
+        active_pool: WorkerPool,
+        job: tuple[dict[str, Any], int, int],
+    ) -> list[dict[str, Any]]:
+        task, seed, index = job
+        return evaluate_series(
+            active_pool,
+            task_set,
+            task,
+            seed,
+            policies,
+            index,
+            base_config,
+            config["evaluation_id"],
+            output_dir,
+        )
+
+    with ServedModel(
+        command,
+        repository=repository,
+        log_path=output_dir / "vllm.log",
+        health_url=f"http://127.0.0.1:{arguments.port}/health",
+        startup_timeout=arguments.startup_timeout,
+        environment=environment,
+    ):
         try:
-            process = subprocess.Popen(
-                command,
-                cwd=repository,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                env=environment,
-            )
-            wait_for_server(
-                f"http://127.0.0.1:{arguments.port}/health",
-                process,
-                arguments.startup_timeout,
-            )
             base_config = QoAgentConfig.from_dict(
                 {
                     **policy,
@@ -452,13 +465,7 @@ def main() -> None:
                 }
             )
             report["model_server"] = QoAgentPolicy(base_config).preflight()
-            pool = start_pool(fixture, f"qorl-v2-checkpoints-{os.getpid()}")
-            report["database_pool"] = pool.manifest()
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / "environment" / f"worker-{slot.resources.index}",
-                    "pre",
-                )
+            pool = run.start()
             report["status"] = RunStatus.RUNNING.value
             for name in policies:
                 report["policies"][name]["status"] = RunStatus.RUNNING.value
@@ -470,36 +477,23 @@ def main() -> None:
                     (task, seed) for task in tasks for seed in seeds
                 )
             ]
-            with ThreadPoolExecutor(max_workers=config["concurrency"]) as executor:
-                futures = [
-                    executor.submit(
-                        evaluate_series,
-                        pool,
-                        task_set,
-                        task,
-                        seed,
-                        policies,
-                        index,
-                        base_config,
-                        config["evaluation_id"],
-                        output_dir,
+            for completion in run.map(
+                jobs,
+                execute_job,
+                concurrency=config["concurrency"],
+            ):
+                if completion.result is None:
+                    raise RuntimeError("checkpoint-validation task returned no result")
+                for result in completion.result:
+                    results[result["model"]].append(result)
+                for name in policies:
+                    report["policies"][name]["summary"] = checkpoint_summary(
+                        results[name], expected_rollouts
                     )
-                    for task, seed, index in jobs
-                ]
-                for future in as_completed(futures):
-                    for result in future.result():
-                        results[result["model"]].append(result)
-                    for name in policies:
-                        report["policies"][name]["summary"] = checkpoint_summary(
-                            results[name], expected_rollouts
-                        )
-                    write_json(report_path, report)
+                run.write()
 
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / "environment" / f"worker-{slot.resources.index}",
-                    "post",
-                )
+            run.finish()
+            pool = None
             for name in policies:
                 failures = sum(
                     item["status"] != RunStatus.COMPLETED for item in results[name]
@@ -536,14 +530,7 @@ def main() -> None:
             raise
         finally:
             if pool is not None:
-                pool.close()
-            if process is not None:
-                process.terminate()
-                try:
-                    process.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
+                run.close()
 
 
 if __name__ == "__main__":

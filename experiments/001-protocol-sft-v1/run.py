@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import model_snapshot
-from qorl.evaluation.types import RunStatus
+from qorl.measure.schemas import RunStatus
 
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"

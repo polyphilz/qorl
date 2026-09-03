@@ -4,16 +4,17 @@ import json
 import os
 import platform
 import statistics
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from qorl import __version__
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.db.worker import PostgresWorker, WorkerError
-from qorl.evaluation.types import RunStatus
+from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.worker import PostgresWorker
+from qorl.measure.run import TaskRun
+from qorl.measure.schemas import RunStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
 from qorl.util.hashing import sha256_file
 from qorl.util.io import display_path, utc_now, write_json
@@ -241,26 +242,37 @@ def calibrate(
 
     project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
-    try:
-        pool = start_pool(fixture, project_name)
-        manifest["worker_pool"] = pool.manifest()
-        write_json(manifest_path, manifest)
-        for slot in pool.workers:
-            slot.worker.capture_environment(
-                output_dir / f"worker-{slot.resources.index}", "pre"
-            )
+    run = TaskRun(
+        fixture,
+        project_name,
+        output_dir,
+        manifest_path,
+        manifest,
+        pool_field="worker_pool",
+    )
 
-        with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
-            futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
-                executor.submit(calibrate_on_worker, pool, task_set, task): task
-                for task in tasks
-            }
-            for index, future in enumerate(as_completed(futures), start=1):
-                task = futures[future]
+    def execute_task(
+        pool: WorkerPool, task: dict[str, Any]
+    ) -> tuple[WorkerSlot, dict[str, Any]]:
+        return calibrate_on_worker(pool, task_set, task)
+
+    try:
+        with run:
+            for completion in run.map(
+                tasks,
+                execute_task,
+                handled_errors=(WorkerError,),
+            ):
+                task = completion.item
                 task_id = task["task_id"]
-                print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
-                try:
-                    slot, result = future.result()
+                print(
+                    f"[{completion.ordinal}/{manifest['task_count']}] {task_id}",
+                    flush=True,
+                )
+                if completion.error is None:
+                    if completion.result is None:
+                        raise RuntimeError("calibration task returned no result")
+                    slot, result = completion.result
                     summary = result["summary"]
                     print(
                         f"  worker={slot.resources.index} "
@@ -268,22 +280,16 @@ def calibrate(
                         f"cv={summary['coefficient_of_variation']:.4f}"
                     )
                     manifest["completed_task_count"] += 1
-                except WorkerError as error:
+                else:
+                    if not isinstance(completion.error, WorkerError):
+                        raise completion.error
                     failures += 1
-                    result = failed_task(task, error)
+                    result = failed_task(task, completion.error)
                     manifest["failed_task_count"] += 1
-                    print(f"  failed: {error}")
+                    print(f"  failed: {completion.error}")
                 write_json(task_dir / f"{task_id}.json", result)
-                write_json(manifest_path, manifest)
-
-        for slot in pool.workers:
-            slot.worker.capture_environment(
-                output_dir / f"worker-{slot.resources.index}", "post"
-            )
-        pool.close()
+                run.write()
     except BaseException:
-        if "pool" in locals():
-            pool.close()
         manifest["status"] = RunStatus.INTERRUPTED.value
         manifest["completed_at_utc"] = utc_now()
         write_json(manifest_path, manifest)

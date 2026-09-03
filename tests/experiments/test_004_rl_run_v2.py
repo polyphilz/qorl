@@ -83,6 +83,25 @@ def test_final_run_is_pinned_to_its_inputs_and_limits() -> None:
     assert run_dir / "checkpoints" == Path("outputs/rl/rl-run-v2/checkpoints")
 
 
+def test_checkpoint_evaluation_cadence_and_cohort_are_frozen() -> None:
+    config = json.loads(
+        (ROOT / "experiments/004-rl-run-v2/checkpoint-evaluation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert config["selection"] == "experiments/003-rl-pilot-v1/selection.json"
+    assert config["split"] == "validation"
+    assert config["rollout_seeds"] == [
+        2026083100,
+        2026083101,
+        2026083102,
+        2026083103,
+    ]
+    assert config["checkpoint_steps"] == list(range(10, 101, 10))
+    assert config["concurrency"] == 4
+
+
 def test_spike_matches_four_rollouts_to_four_database_workers() -> None:
     config = tomllib.loads(
         (ROOT / "experiments/004-rl-run-v2/concurrency-spike.toml").read_text(

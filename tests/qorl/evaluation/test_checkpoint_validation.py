@@ -5,27 +5,12 @@ from pathlib import Path
 
 from qorl.evaluation.checkpoint_validation import (
     checkpoint_summary,
-    load_config,
     model_command,
     rotated,
 )
 
 
 class RlCheckpointValidationTest(unittest.TestCase):
-    def test_configuration_pins_the_frozen_cohort_and_checkpoint_cadence(self) -> None:
-        config, _ = load_config(Path.cwd())
-
-        self.assertEqual(
-            config["selection"], "experiments/003-rl-pilot-v1/selection.json"
-        )
-        self.assertEqual(config["split"], "validation")
-        self.assertEqual(
-            config["rollout_seeds"],
-            [2026083100, 2026083101, 2026083102, 2026083103],
-        )
-        self.assertEqual(config["checkpoint_steps"], list(range(10, 101, 10)))
-        self.assertEqual(config["concurrency"], 4)
-
     def test_policy_order_rotates_without_changing_membership(self) -> None:
         policies = ["start", "step-010", "step-020"]
 

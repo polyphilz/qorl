@@ -7,7 +7,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from qorl.db.worker import ExplainResult, QueryTimeout
+from qorl.db.exceptions import QueryTimeout
+from qorl.db.worker import ExplainResult
 from qorl.measure.protocols import QueryExecutor
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,

@@ -13,6 +13,17 @@ DUPLICATE_ATTEMPT_PENALTY = 0.05
 NO_VALID_CANDIDATE_REWARD = -3.0
 
 
+class RunStatus(StrEnum):
+    PENDING = "pending"
+    STARTING = "starting"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    COMPLETED_WITH_FAILURES = "completed_with_failures"
+    INTERRUPTED = "interrupted"
+    FAILED = "failed"
+    PASSED = "passed"
+
+
 class MeasurementProtocolId(StrEnum):
     RIGOROUS_EVALUATION_V1 = "rigorous-evaluation-v1"
     RL_TRAINING_V1 = "rl-training-v1"

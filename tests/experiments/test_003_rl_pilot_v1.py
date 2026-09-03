@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,29 @@ def test_pilot_config_has_twelve_four_group_updates(
         config["orchestrator"]["train"]["source"][0]["env"]["taskset"]["split"]
         == "train"
     )
+
+
+def test_paired_validation_cohort_and_seeds_are_frozen() -> None:
+    config = json.loads(
+        (ROOT / "experiments/003-rl-pilot-v1/validation.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    selection = json.loads((ROOT / config["selection"]).read_text(encoding="utf-8"))
+    selected = selection["splits"][config["split"]]
+
+    assert len(selected) == 16
+    assert len({item["task_id"] for item in selected}) == 16
+    assert set(Counter(item["template_id"] for item in selected).values()) == {4}
+    assert len({item["template_id"] for item in selected}) == 4
+    assert config["rollout_seeds"] == [
+        2026083100,
+        2026083101,
+        2026083102,
+        2026083103,
+    ]
+    assert config["selection"] == "experiments/003-rl-pilot-v1/selection.json"
+    assert config["run_config"] == "configs/policy/run-v1.json"
 
 
 def test_pre_rl_gate_checks_inputs_model_and_reward_variance(

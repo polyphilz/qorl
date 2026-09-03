@@ -5,13 +5,8 @@ import hashlib
 import json
 import os
 import statistics
-import subprocess
-import time
-import urllib.error
-import urllib.request
 from collections import Counter
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,14 +17,15 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.types import InspectionExecutor, ToolName
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.db.worker import WorkerError
-from qorl.evaluation.types import RunStatus
+from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import Decision
+from qorl.measure.run import TaskRun
+from qorl.measure.schemas import Decision, RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.util.serving import ServedModel
 from qorl.workload.taskset import TaskSet
 
 BASE_MODEL = "qorl-base"
@@ -38,19 +34,6 @@ DATASET = Path("outputs/sft/protocol-sft-v1")
 TRAINING_RUN = Path("outputs/sft/protocol-sft-train-v1")
 CONCURRENCY = 4
 EXPECTED_VALIDATION_TASKS = 64
-
-
-def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"vLLM exited with status {process.returncode}")
-        try:
-            with urllib.request.urlopen(url, timeout=10):
-                return
-        except (OSError, urllib.error.URLError):
-            time.sleep(2)
-    raise RuntimeError(f"vLLM did not become ready within {timeout} seconds")
 
 
 def adapter_path(repository: Path) -> Path:
@@ -350,8 +333,7 @@ def evaluate_live_task(
 
 
 def evaluate_policy(
-    repository: Path,
-    pool: WorkerPool,
+    run: TaskRun,
     task_set: TaskSet,
     tasks: list[dict[str, Any]],
     base_config: QoAgentConfig,
@@ -360,65 +342,70 @@ def evaluate_policy(
     output_dir: Path,
     progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    if run.pool is None:
+        raise RuntimeError("live-validation worker pool is not started")
+    pool = run.pool
     policy_dir = output_dir / policy_name
     task_dir = policy_dir / "tasks"
     agent = QoAgentPolicy(replace(base_config, model=model_name))
     identity = agent.preflight()
     results: list[dict[str, Any]] = []
     for slot in pool.workers:
-        slot.worker.capture_environment(
+        slot.container.capture_environment(
             policy_dir / "environment" / f"worker-{slot.resources.index}",
             "pre",
         )
 
-    with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
-        futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
-            executor.submit(
-                evaluate_live_task,
-                pool,
-                task_set,
-                task,
-                agent,
-                base_config.maximum_model_turns,
-            ): task
-            for task in tasks
-        }
-        for index, future in enumerate(as_completed(futures), start=1):
-            task = futures[future]
-            slot, result = future.result()
+    def execute_task(
+        active_pool: WorkerPool, task: dict[str, Any]
+    ) -> tuple[WorkerSlot, dict[str, Any]]:
+        return evaluate_live_task(
+            active_pool,
+            task_set,
+            task,
+            agent,
+            base_config.maximum_model_turns,
+        )
+
+    for completion in run.map(tasks, execute_task, concurrency=CONCURRENCY):
+        task = completion.item
+        if completion.result is None:
+            raise RuntimeError("live-validation task returned no result")
+        slot, result = completion.result
+        print(
+            f"[{policy_name} {completion.ordinal}/{len(tasks)}] "
+            f"{task['task_id']} "
+            f"worker={slot.resources.index}",
+            flush=True,
+        )
+        if result["status"] == RunStatus.COMPLETED:
+            metrics = result["metrics"]
+            terminal = (
+                Decision.KEEP_DEFAULT.value
+                if metrics["keep_default_calls"]
+                else ToolName.FINISH.value
+                if metrics["finish_calls"]
+                else "none"
+            )
             print(
-                f"[{policy_name} {index}/{len(tasks)}] {task['task_id']} "
-                f"worker={slot.resources.index}",
+                "  "
+                f"valid={metrics['constraint_satisfied_candidates']}/"
+                f"{metrics['candidate_attempts']} "
+                f"novel={metrics['novel_candidates']} "
+                f"terminal={terminal}",
                 flush=True,
             )
-            if result["status"] == RunStatus.COMPLETED:
-                metrics = result["metrics"]
-                terminal = (
-                    Decision.KEEP_DEFAULT.value
-                    if metrics["keep_default_calls"]
-                    else ToolName.FINISH.value
-                    if metrics["finish_calls"]
-                    else "none"
-                )
-                print(
-                    "  "
-                    f"valid={metrics['constraint_satisfied_candidates']}/"
-                    f"{metrics['candidate_attempts']} "
-                    f"novel={metrics['novel_candidates']} "
-                    f"terminal={terminal}",
-                    flush=True,
-                )
-            else:
-                print(f"  failed: {result['error']}", flush=True)
-            results.append(result)
-            write_json(task_dir / f"{task['task_id']}.json", result)
-            summary = summarize(results)
-            write_json(policy_dir / "summary.json", summary)
-            if progress is not None:
-                progress(summary)
+        else:
+            print(f"  failed: {result['error']}", flush=True)
+        results.append(result)
+        write_json(task_dir / f"{task['task_id']}.json", result)
+        summary = summarize(results)
+        write_json(policy_dir / "summary.json", summary)
+        if progress is not None:
+            progress(summary)
 
     for slot in pool.workers:
-        slot.worker.capture_environment(
+        slot.container.capture_environment(
             policy_dir / "environment" / f"worker-{slot.resources.index}",
             "post",
         )
@@ -549,25 +536,28 @@ def main() -> None:
 
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
     pool: WorkerPool | None = None
-    with log_path.open("w") as log:
-        process = subprocess.Popen(
-            command,
-            cwd=repository,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=environment,
-        )
+    run = TaskRun(
+        fixture,
+        f"qorl-ceb-live-{os.getpid()}",
+        output_dir,
+        report_path,
+        report,
+        pool_field="database_pool",
+        capture_environment=False,
+    )
+    with ServedModel(
+        command,
+        repository=repository,
+        log_path=log_path,
+        health_url=f"http://127.0.0.1:{arguments.port}/health",
+        startup_timeout=arguments.startup_timeout,
+        environment=environment,
+    ):
         try:
-            wait_for_server(
-                f"http://127.0.0.1:{arguments.port}/health",
-                process,
-                arguments.startup_timeout,
-            )
             config = QoAgentConfig.from_dict(
                 {**run_policy, "base_url": base_url, "model": BASE_MODEL}
             )
-            pool = start_pool(fixture, f"qorl-ceb-live-{os.getpid()}")
-            report["database_pool"] = pool.manifest()
+            pool = run.start()
             report["status"] = RunStatus.RUNNING.value
             write_json(report_path, report)
             for policy_name, model_name in order:
@@ -586,8 +576,7 @@ def main() -> None:
                     write_json(report_path, report)
 
                 report["policies"][policy_name] = evaluate_policy(
-                    repository,
-                    pool,
+                    run,
                     task_set,
                     tasks,
                     config,
@@ -627,13 +616,7 @@ def main() -> None:
             raise
         finally:
             if pool is not None:
-                pool.close()
-            process.terminate()
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+                run.close()
 
 
 if __name__ == "__main__":

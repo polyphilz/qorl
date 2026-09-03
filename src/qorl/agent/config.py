@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.evaluation.types import PolicyType
+from qorl.agent.types import PolicyType
 
 
 @dataclass(frozen=True)

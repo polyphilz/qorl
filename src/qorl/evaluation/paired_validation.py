@@ -8,9 +8,6 @@ import os
 import platform
 import random
 import statistics
-import subprocess
-from collections import Counter
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,28 +18,24 @@ from qorl.adapters.model import model_snapshot
 from qorl.adapters.verify import verify_merged_model
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
-from qorl.db.worker import WorkerError
+from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.evaluation.live_validation import (
     adapter_path,
     trace_metrics,
-    wait_for_server,
 )
-from qorl.evaluation.types import RunStatus
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import FinalStatus
+from qorl.measure.run import TaskRun
+from qorl.measure.schemas import FinalStatus, RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.util.serving import ServedModel
 from qorl.workload.taskset import TaskSet
 
 CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
 CONCURRENCY = 4
-EXPECTED_TASKS = 16
-EXPECTED_TEMPLATES = 4
-TASKS_PER_TEMPLATE = 4
-EXPECTED_ROLLOUT_SEEDS = 4
 
 
 def load_tasks(
@@ -55,17 +48,8 @@ def load_tasks(
     selected = selection["splits"][config["split"]]
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     chosen = [tasks[item["task_id"]] for item in selected]
-    if (
-        len(chosen) != EXPECTED_TASKS
-        or len({task["task_id"] for task in chosen}) != EXPECTED_TASKS
-    ):
-        raise RuntimeError("paired validation requires 16 unique tasks")
-    counts = Counter(task["template_id"] for task in chosen)
-    if (
-        set(counts.values()) != {TASKS_PER_TEMPLATE}
-        or len(counts) != EXPECTED_TEMPLATES
-    ):
-        raise RuntimeError("paired validation requires four tasks from four templates")
+    if not chosen or len({task["task_id"] for task in chosen}) != len(chosen):
+        raise RuntimeError("paired validation requires unique tasks")
     if any(task["partition"] != "validation" for task in chosen):
         raise RuntimeError("paired validation selected a training task")
     return chosen, selection_path
@@ -310,10 +294,12 @@ def main() -> None:
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
     if (
-        len(seeds) != EXPECTED_ROLLOUT_SEEDS
-        or len(set(seeds)) != EXPECTED_ROLLOUT_SEEDS
+        not isinstance(seeds, list)
+        or not seeds
+        or any(type(seed) is not int for seed in seeds)
+        or len(set(seeds)) != len(seeds)
     ):
-        raise RuntimeError("paired validation requires four unique rollout seeds")
+        raise RuntimeError("paired validation requires unique integer rollout seeds")
 
     output_dir = repository / "outputs/rl" / config["evaluation_id"] / arguments.phase
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -357,20 +343,38 @@ def main() -> None:
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
     results: list[dict[str, Any]] = []
     pool: WorkerPool | None = None
-    with (output_dir / "vllm.log").open("w") as log:
-        process = subprocess.Popen(
-            command,
-            cwd=repository,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=environment,
+    run = TaskRun(
+        fixture,
+        f"qorl-rl-validation-{arguments.phase}-{os.getpid()}",
+        output_dir,
+        report_path,
+        report,
+        pool_field="database_pool",
+        environment_dir=output_dir / "environment",
+    )
+
+    def execute_job(
+        active_pool: WorkerPool, job: tuple[dict[str, Any], int]
+    ) -> tuple[WorkerSlot, dict[str, Any]]:
+        task, seed = job
+        return evaluate_rollout(
+            active_pool,
+            task_set,
+            task,
+            seed,
+            base_config,
+            config["evaluation_id"],
         )
+
+    with ServedModel(
+        command,
+        repository=repository,
+        log_path=output_dir / "vllm.log",
+        health_url=f"http://127.0.0.1:{arguments.port}/health",
+        startup_timeout=arguments.startup_timeout,
+        environment=environment,
+    ):
         try:
-            wait_for_server(
-                f"http://127.0.0.1:{arguments.port}/health",
-                process,
-                arguments.startup_timeout,
-            )
             base_config = QoAgentConfig.from_dict(
                 {
                     **policy,
@@ -381,69 +385,44 @@ def main() -> None:
             )
             identity = QoAgentPolicy(base_config).preflight()
             report["model_server"] = identity
-            pool = start_pool(
-                fixture,
-                f"qorl-rl-validation-{arguments.phase}-{os.getpid()}",
-            )
-            report["database_pool"] = pool.manifest()
+            pool = run.start()
             report["orchestrator"]["concurrency"] = CONCURRENCY
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / "environment" / f"worker-{slot.resources.index}",
-                    "pre",
-                )
             report["status"] = RunStatus.RUNNING.value
             write_json(report_path, report)
 
             jobs = [(task, seed) for task in tasks for seed in seeds]
-            with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
-                futures: dict[
-                    Future[tuple[WorkerSlot, dict[str, Any]]],
-                    tuple[dict[str, Any], int],
-                ] = {
-                    executor.submit(
-                        evaluate_rollout,
-                        pool,
-                        task_set,
-                        task,
-                        seed,
-                        base_config,
-                        config["evaluation_id"],
-                    ): (task, seed)
-                    for task, seed in jobs
-                }
-                for ordinal, future in enumerate(as_completed(futures), start=1):
-                    task, seed = futures[future]
-                    slot, result = future.result()
-                    print(
-                        f"[{ordinal}/{len(jobs)}] {task['task_id']} seed={seed} "
-                        f"worker={slot.resources.index}",
-                        flush=True,
-                    )
-                    if result["status"] == RunStatus.COMPLETED:
-                        final = result["final"]
-                        label = (
-                            f"{final['score']:.3f}x "
-                            f"reward={final['trajectory_reward']:.3f}"
-                            if final["status"] == FinalStatus.COMPLETED
-                            else "no valid candidate "
-                            f"reward={final['trajectory_reward']:.3f}"
-                        )
-                    else:
-                        label = f"failed: {result['error']}"
-                    print(f"  final={label}", flush=True)
-                    results.append(result)
-                    filename = f"{task['task_id']}--{seed}.json"
-                    write_json(rollout_dir / filename, result)
-                    report["summary"] = summarize(results)
-                    write_json(report_path, report)
-
-            for slot in pool.workers:
-                slot.worker.capture_environment(
-                    output_dir / "environment" / f"worker-{slot.resources.index}",
-                    "post",
+            for completion in run.map(
+                jobs,
+                execute_job,
+                concurrency=CONCURRENCY,
+            ):
+                task, seed = completion.item
+                if completion.result is None:
+                    raise RuntimeError("paired-validation task returned no result")
+                slot, result = completion.result
+                print(
+                    f"[{completion.ordinal}/{len(jobs)}] {task['task_id']} seed={seed} "
+                    f"worker={slot.resources.index}",
+                    flush=True,
                 )
-            pool.close()
+                if result["status"] == RunStatus.COMPLETED:
+                    final = result["final"]
+                    label = (
+                        f"{final['score']:.3f}x reward={final['trajectory_reward']:.3f}"
+                        if final["status"] == FinalStatus.COMPLETED
+                        else "no valid candidate "
+                        f"reward={final['trajectory_reward']:.3f}"
+                    )
+                else:
+                    label = f"failed: {result['error']}"
+                print(f"  final={label}", flush=True)
+                results.append(result)
+                filename = f"{task['task_id']}--{seed}.json"
+                write_json(rollout_dir / filename, result)
+                report["summary"] = summarize(results)
+                run.write()
+
+            run.finish()
             pool = None
 
             report["status"] = (
@@ -472,13 +451,7 @@ def main() -> None:
             raise
         finally:
             if pool is not None:
-                pool.close()
-            process.terminate()
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+                run.close()
 
 
 if __name__ == "__main__":

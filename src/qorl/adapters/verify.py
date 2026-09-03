@@ -4,16 +4,14 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
-import time
-import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import adapter_rank
 from qorl.util.hashing import sha256_file
+from qorl.util.serving import ServedModel
 
 BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
@@ -47,19 +45,6 @@ def request(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     with urllib.request.urlopen(call, timeout=30) as response:
         payload = response.read()
     return json.loads(payload) if payload else {}
-
-
-def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"vLLM exited with status {process.returncode}")
-        try:
-            request(url)
-            return
-        except (OSError, urllib.error.URLError, json.JSONDecodeError):
-            time.sleep(2)
-    raise RuntimeError(f"vLLM did not become ready within {timeout} seconds")
 
 
 def completion(base_url: str, model: str, prompt: list[int]) -> dict[str, Any]:
@@ -133,25 +118,17 @@ def main() -> None:
         "--disable-log-stats",
     ]
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
-    with log_path.open("w") as log:
-        process = subprocess.Popen(
-            command,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            env=environment,
-        )
-        try:
-            base_url = f"http://127.0.0.1:{arguments.port}"
-            wait_for_server(f"{base_url}/health", process, arguments.startup_timeout)
-            base = completion(base_url, BASE_MODEL, prompt)
-            adapted = completion(base_url, ADAPTER_MODEL, prompt)
-        finally:
-            process.terminate()
-            try:
-                process.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
+    base_url = f"http://127.0.0.1:{arguments.port}"
+    with ServedModel(
+        command,
+        repository=Path.cwd(),
+        log_path=log_path,
+        health_url=f"{base_url}/health",
+        startup_timeout=arguments.startup_timeout,
+        environment=environment,
+    ):
+        base = completion(base_url, BASE_MODEL, prompt)
+        adapted = completion(base_url, ADAPTER_MODEL, prompt)
 
     keys = set(base["top_logprobs"]) | set(adapted["top_logprobs"])
     shared = keys & set(base["top_logprobs"]) & set(adapted["top_logprobs"])

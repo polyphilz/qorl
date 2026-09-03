@@ -9,7 +9,7 @@ from typing import Any
 from qorl.agent.types import ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
-from qorl.evaluation.types import RunStatus
+from qorl.measure.schemas import RunStatus
 from qorl.plans.fingerprint import plan_sha256
 from qorl.sft.assemble import load_documents
 from qorl.sft.build_protocol_dataset import PlanValidationEvaluator

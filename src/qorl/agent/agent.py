@@ -14,10 +14,10 @@ from qorl.agent.types import (
     TERMINAL_STOP_REASON,
     TURN_BUDGET_FIELD,
     InspectionExecutor,
+    PolicyType,
     StopReason,
     ToolName,
 )
-from qorl.evaluation.types import PolicyType
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_json
 

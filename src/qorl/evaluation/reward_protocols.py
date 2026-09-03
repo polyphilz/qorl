@@ -16,9 +16,8 @@ from typing import Any
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
-from qorl.evaluation.types import RunStatus
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
-from qorl.measure.schemas import FinalStatus, MeasurementProtocolId
+from qorl.measure.schemas import FinalStatus, MeasurementProtocolId, RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
@@ -347,7 +346,7 @@ def run_audit(
             report["worker"] = slot.resources.manifest()
             write_json(report_path, report)
             worker = slot.worker
-            worker.capture_environment(output_dir, "pre")
+            slot.container.capture_environment(output_dir, "pre")
             for index, case in enumerate(case_manifest["cases"]):
                 task = tasks[case["task_id"]]
                 order = list(config["protocols"])
@@ -383,7 +382,7 @@ def run_audit(
                     print(f"  {protocol}: {label}", flush=True)
                 report["results"].append(result)
                 write_json(report_path, report)
-            worker.capture_environment(output_dir, "post")
+            slot.container.capture_environment(output_dir, "post")
 
     report["status"] = RunStatus.COMPLETED.value
     report["completed_at_utc"] = datetime.now(UTC).isoformat()

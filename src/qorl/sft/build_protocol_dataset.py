@@ -11,9 +11,10 @@ from typing import Any
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
+from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
-from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.db.worker import PostgresWorker
 from qorl.measure.rollout import (
     MAX_CANDIDATES,
     PlanTiming,

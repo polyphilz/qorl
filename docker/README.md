@@ -6,8 +6,9 @@ QORL separates three things that change for different reasons:
    immutable benchmark contract.
 2. [`scripts/job/`](../scripts/job/README.md) loads IMDb once, freezes it, and
    seals the stopped data directory as a physical snapshot.
-3. `src/qorl/db/worker.py` restores that snapshot into a fresh volume and starts
-   a disposable worker from the pinned image for calibration or measurement.
+3. `src/qorl/db/container.py` restores that snapshot into a fresh volume and
+   starts a disposable container; `src/qorl/db/worker.py` executes calibration
+   and measurement queries inside it.
 
 The snapshot's data identity is independent of its runtime identity. Rebuilding
 byte-identical image inputs changes the image ID, but it does not change the

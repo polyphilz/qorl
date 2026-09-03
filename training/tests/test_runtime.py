@@ -21,6 +21,11 @@ class FakeWorker:
     fixture = SimpleNamespace(runtime_identity={})
 
 
+class FakeContainer:
+    def close(self) -> None:
+        pass
+
+
 class WorkerPoolTest(unittest.TestCase):
     def test_resources_are_distinct_and_parameterized(self) -> None:
         resources = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE).workers
@@ -39,7 +44,11 @@ class WorkerPoolTest(unittest.TestCase):
     def test_claim_returns_workers_to_the_pool(self) -> None:
         profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
         slots = tuple(
-            WorkerSlot(resources, FakeWorker())  # type: ignore[arg-type]
+            WorkerSlot(  # type: ignore[arg-type]
+                resources,
+                FakeContainer(),
+                FakeWorker(),
+            )
             for resources in profile.workers
         )
         runtime = QorlRuntime(  # type: ignore[arg-type]

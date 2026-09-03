@@ -8,6 +8,11 @@ from qorl.measure.protocols import QueryExecutor
 TURN_BUDGET_FIELD = "_turn_budget"
 
 
+class PolicyType(StrEnum):
+    RANDOM_STRUCTURED_ACTION = "random_structured_action"
+    QO_AGENT = "qo_agent"
+
+
 class ToolName(StrEnum):
     DESCRIBE_TABLE = "describe_table"
     LIST_INDEXES = "list_indexes"

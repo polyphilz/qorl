@@ -5,11 +5,8 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.db.worker import (
-    ExplainResult,
-    QueryTimeout,
-    WorkerError,
-)
+from qorl.db.exceptions import QueryTimeout, WorkerError
+from qorl.db.worker import ExplainResult
 from qorl.measure.protocols import QueryExecutor
 from qorl.measure.schemas import (
     MIN_SCORE,

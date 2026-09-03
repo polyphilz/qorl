@@ -88,4 +88,4 @@ def stop() -> None:
     runtime, _runtime = _runtime, None
     if runtime is not None:
         for slot in reversed(runtime.workers):
-            slot.worker.close()
+            slot.container.close()

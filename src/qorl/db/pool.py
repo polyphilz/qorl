@@ -7,6 +7,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
@@ -24,6 +25,7 @@ EXPECTED_POOL_WORKERS = 4
 @dataclass(frozen=True)
 class WorkerSlot:
     resources: WorkerResources
+    container: PostgresContainer
     worker: PostgresWorker
 
 
@@ -58,7 +60,7 @@ class WorkerPool:
 
     def close(self) -> None:
         for slot in reversed(self.workers):
-            slot.worker.close()
+            slot.container.close()
 
 
 def load_pool(
@@ -83,17 +85,19 @@ def start_pool(
     slots: list[WorkerSlot] = []
     try:
         for resources in profile.workers:
-            worker = PostgresWorker(
+            container = PostgresContainer(
                 fixture,
                 f"{project_name}-{resources.index}",
-                runtime_profile=profile,
-                resources=resources,
+                profile,
+                resources,
             )
-            slots.append(WorkerSlot(resources, worker))
-            worker.start()
+            worker = PostgresWorker(container)
+            slots.append(WorkerSlot(resources, container, worker))
+            container.start()
+            worker.assert_snapshot()
     except BaseException:
         for slot in reversed(slots):
-            slot.worker.close()
+            slot.container.close()
         raise
     return WorkerPool(
         tuple(slots), profile.profile_id, profile.sha256, str(profile.path)
