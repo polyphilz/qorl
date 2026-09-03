@@ -10,6 +10,7 @@ dependencies = []
 dev = ["pytest>=9.0.0,<10"]
 
 [tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 testpaths = ["tests"]
 pythonpath = ["."]
 
