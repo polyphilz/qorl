@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from copy import deepcopy
 from pathlib import Path
@@ -17,6 +18,7 @@ from qorl.measure.rollout import (
     training_protocol,
 )
 from qorl.measure.schemas import (
+    TIMEOUT_ATTEMPT_PENALTY,
     Baseline,
     Candidate,
     CandidateOutcome,
@@ -146,6 +148,30 @@ class TimeoutWorker(CountingWorker):
         if analyze and hint:
             raise QueryTimeout(timeout_ms)
         return super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
+
+
+class CalibratedTimeoutWorker(CountingWorker):
+    def __init__(self, successful_candidate_executions: int) -> None:
+        super().__init__()
+        self.successful_candidate_executions = successful_candidate_executions
+        self.candidate_executions = 0
+
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult:
+        if analyze and hint:
+            self.candidate_executions += 1
+            if self.candidate_executions > self.successful_candidate_executions:
+                raise QueryTimeout(timeout_ms)
+        result = super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        if analyze:
+            result.document["Execution Time"] = 2_900.0 if hint else 1_000.0
+        return result
 
 
 class TestRollout:
@@ -358,7 +384,64 @@ class TestRollout:
         assert candidate.provisional_speedup == 0.1
         assert final.status == "no_valid_candidate"
         assert final.kind == OutcomeKind.NO_VALID_CANDIDATE
+        assert final.invalid_attempt_count == 0
         assert final.timeout_attempt_count == 1
+
+    def test_timeout_scores_use_the_consumed_budget(self) -> None:
+        default_plan = deepcopy(DEFAULT_PLAN)
+        default_plan["Plan Rows"] = 0
+        evaluator = RolloutEvaluator(
+            CalibratedTimeoutWorker(successful_candidate_executions=0),
+            Fixture(),
+            TASK,
+            measurement_protocol=training_protocol(
+                MeasurementProtocolId.RL_TRAINING_V2
+            ),
+            calibrated_timeout=TaskTimeout(
+                "job-test", 1_000.0, 3_000, (plan_sha256(default_plan),)
+            ),
+            timeout_manifest_id="test-timeouts",
+        )
+        evaluator.start()
+
+        candidate = evaluator.evaluate(
+            {"version": 1, "settings": {"seq_page_cost": 2.0}}
+        )
+
+        assert candidate.execution_timed_out
+        assert candidate.provisional_speedup == pytest.approx(1 / 3)
+
+    def test_final_timeout_adds_a_fixed_penalty(self) -> None:
+        default_plan = deepcopy(DEFAULT_PLAN)
+        default_plan["Plan Rows"] = 0
+        evaluator = RolloutEvaluator(
+            CalibratedTimeoutWorker(successful_candidate_executions=1),
+            Fixture(),
+            TASK,
+            measurement_protocol=training_protocol(
+                MeasurementProtocolId.RL_TRAINING_V2
+            ),
+            calibrated_timeout=TaskTimeout(
+                "job-test", 1_000.0, 3_000, (plan_sha256(default_plan),)
+            ),
+            timeout_manifest_id="test-timeouts",
+        )
+        evaluator.start()
+        candidate = evaluator.evaluate(
+            {"version": 1, "settings": {"seq_page_cost": 2.0}}
+        )
+
+        final = evaluator.finish(random.Random(0))
+
+        assert candidate.provisional_speedup == pytest.approx(1_000 / 2_900)
+        assert final.status == "candidate_timeout"
+        assert final.score == pytest.approx(1 / 3)
+        assert final.default_median_execution_time_ms == 1_000
+        assert final.invalid_attempt_count == 0
+        assert final.timeout_attempt_count == 1
+        assert final.trajectory_reward == pytest.approx(
+            math.log(1 / 3) - TIMEOUT_ATTEMPT_PENALTY
+        )
 
     def test_calibrated_default_plan_must_still_match(self) -> None:
         protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V2)

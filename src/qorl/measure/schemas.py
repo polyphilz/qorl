@@ -10,6 +10,7 @@ MIN_SCORE = 0.1
 MAX_SCORE = 10.0
 INVALID_ATTEMPT_PENALTY = 0.10
 DUPLICATE_ATTEMPT_PENALTY = 0.05
+TIMEOUT_ATTEMPT_PENALTY = 0.10
 NO_VALID_CANDIDATE_REWARD = -3.0
 
 
@@ -201,6 +202,7 @@ def measured_reward(
     score_value: float,
     invalid_attempts: int,
     duplicate_attempts: int,
+    timeout_attempts: int = 0,
     *,
     include_quality: bool = True,
 ) -> float:
@@ -209,4 +211,5 @@ def measured_reward(
         quality
         - INVALID_ATTEMPT_PENALTY * invalid_attempts
         - DUPLICATE_ATTEMPT_PENALTY * duplicate_attempts
+        - TIMEOUT_ATTEMPT_PENALTY * timeout_attempts
     )

@@ -2104,7 +2104,7 @@ wheels = [
 [[package]]
 name = "prime-pydantic-config"
 version = "0.4.3"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fpydantic-config&rev=c8078ab6f9c8567eb9007e762286058593fb7e70#c8078ab6f9c8567eb9007e762286058593fb7e70" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fpydantic-config&rev=2415a1e4c70e370082fc83d7aad4e974161f0689#2415a1e4c70e370082fc83d7aad4e974161f0689" }
 dependencies = [
     { name = "pydantic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -2117,7 +2117,7 @@ toml = [
 [[package]]
 name = "prime-rl"
 version = "0.9.0"
-source = { git = "https://github.com/polyphilz/prime-rl.git?rev=c8078ab6f9c8567eb9007e762286058593fb7e70#c8078ab6f9c8567eb9007e762286058593fb7e70" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?rev=2415a1e4c70e370082fc83d7aad4e974161f0689#2415a1e4c70e370082fc83d7aad4e974161f0689" }
 dependencies = [
     { name = "aiolimiter", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "beartype", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2171,7 +2171,7 @@ gpu = [
 [[package]]
 name = "prime-rl-configs"
 version = "0.4.0"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=packages%2Fprime-rl-configs&rev=c8078ab6f9c8567eb9007e762286058593fb7e70#c8078ab6f9c8567eb9007e762286058593fb7e70" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=packages%2Fprime-rl-configs&rev=2415a1e4c70e370082fc83d7aad4e974161f0689#2415a1e4c70e370082fc83d7aad4e974161f0689" }
 dependencies = [
     { name = "prime-pydantic-config", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pydantic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -2575,7 +2575,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "prime-rl", extras = ["gpu", "flash-attn"], git = "https://github.com/polyphilz/prime-rl.git?rev=c8078ab6f9c8567eb9007e762286058593fb7e70" },
+    { name = "prime-rl", extras = ["gpu", "flash-attn"], git = "https://github.com/polyphilz/prime-rl.git?rev=2415a1e4c70e370082fc83d7aad4e974161f0689" },
     { name = "qorl", editable = "../" },
     { name = "wandb", specifier = "==0.27.0" },
     { name = "wandb-workspaces", specifier = "==0.4.3" },
@@ -2638,7 +2638,7 @@ wheels = [
 [[package]]
 name = "renderers"
 version = "0.1.10"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Frenderers&rev=c8078ab6f9c8567eb9007e762286058593fb7e70#c8078ab6f9c8567eb9007e762286058593fb7e70" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Frenderers&rev=2415a1e4c70e370082fc83d7aad4e974161f0689#2415a1e4c70e370082fc83d7aad4e974161f0689" }
 dependencies = [
     { name = "jinja2", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -3431,7 +3431,7 @@ wheels = [
 [[package]]
 name = "verifiers"
 version = "0.3.1"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fverifiers&rev=c8078ab6f9c8567eb9007e762286058593fb7e70#c8078ab6f9c8567eb9007e762286058593fb7e70" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fverifiers&rev=2415a1e4c70e370082fc83d7aad4e974161f0689#2415a1e4c70e370082fc83d7aad4e974161f0689" }
 dependencies = [
     { name = "aiohttp", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "aiolimiter", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },

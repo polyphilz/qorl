@@ -9,7 +9,6 @@ from qorl.db.exceptions import QueryTimeout, WorkerError
 from qorl.db.worker import ExplainResult
 from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
-    MIN_SCORE,
     NO_VALID_CANDIDATE_REWARD,
     Baseline,
     Candidate,
@@ -231,6 +230,13 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         pg_hint_plan: dict[str, str] | None = None,
         execution_timed_out: bool = False,
     ) -> Candidate:
+        provisional_speedup = 0.0
+        if execution_timed_out:
+            if self.default is None or self.default.median_execution_time_ms is None:
+                raise RuntimeError("rollout baseline has not been measured")
+            provisional_speedup = score(
+                self.default.median_execution_time_ms, self.timeout_ms
+            )
         result = Candidate(
             candidate_id=candidate_id,
             action=action,
@@ -240,7 +246,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             duplicate_of=None,
             plan_sha256=None,
             provisional_measurements=[],
-            provisional_speedup=MIN_SCORE if execution_timed_out else 0.0,
+            provisional_speedup=provisional_speedup,
             execution_timed_out=execution_timed_out,
             timeout_ms=self.timeout_ms if execution_timed_out else None,
             errors_or_diagnostics=[error],
@@ -337,6 +343,8 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 for _ in range(self.measurement_protocol.candidate_measurement_runs)
             ]
         except QueryTimeout as error:
+            if self.default.median_execution_time_ms is None:
+                raise RuntimeError("rollout baseline has not been measured") from error
             result = Candidate(
                 candidate_id=candidate_id,
                 action=action,
@@ -348,7 +356,9 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 plain_explain=plain.document,
                 compact_plan=compact_plan(plain.document["Plan"]),
                 provisional_measurements=[],
-                provisional_speedup=MIN_SCORE,
+                provisional_speedup=score(
+                    self.default.median_execution_time_ms, error.timeout_ms
+                ),
                 execution_timed_out=True,
                 timeout_ms=error.timeout_ms,
                 errors_or_diagnostics=[str(error)],
@@ -449,9 +459,13 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             and candidate.constraints_satisfied
             and not candidate.execution_timed_out
         ]
-        invalid_count = len(self.candidates) - len(valid)
         timeout_count = sum(
             candidate.execution_timed_out for candidate in self.candidates
+        )
+        invalid_count = sum(
+            not candidate.execution_timed_out
+            and (not candidate.action_valid or not candidate.constraints_satisfied)
+            for candidate in self.candidates
         )
         duplicate_count = sum(candidate.duplicate_of is not None for candidate in valid)
         if not valid:
@@ -493,6 +507,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                     1.0,
                     invalid_count,
                     duplicate_count,
+                    timeout_count,
                     include_quality=False,
                 ),
                 invalid_attempt_count=invalid_count,
@@ -562,7 +577,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             default_median_execution_time_ms=default_median,
             score=final_score,
             trajectory_reward=measured_reward(
-                final_score, invalid_count, duplicate_count
+                final_score, invalid_count, duplicate_count, timeout_count
             ),
             invalid_attempt_count=invalid_count,
             duplicate_attempt_count=duplicate_count,
@@ -579,7 +594,10 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         candidate_measurements: list[Measurement] | None = None,
         default_measurements: list[Measurement] | None = None,
     ) -> Outcome:
-        final_score = MIN_SCORE
+        if self.default is None or self.default.median_execution_time_ms is None:
+            raise RuntimeError("rollout baseline has not been measured")
+        default_median = self.default.median_execution_time_ms
+        final_score = score(default_median, self.timeout_ms)
         return Outcome(
             measurement_protocol_id=self.measurement_protocol.protocol_id,
             status=FinalStatus.CANDIDATE_TIMEOUT,
@@ -588,10 +606,14 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             pair_orders=pair_orders or [],
             candidate_measurements=candidate_measurements or [],
             default_measurements=default_measurements or [],
+            default_median_execution_time_ms=default_median,
             timeout_ms=self.timeout_ms,
             score=final_score,
             trajectory_reward=measured_reward(
-                final_score, invalid_count, duplicate_count
+                final_score,
+                invalid_count,
+                duplicate_count,
+                timeout_count + 1,
             ),
             invalid_attempt_count=invalid_count,
             duplicate_attempt_count=duplicate_count,

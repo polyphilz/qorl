@@ -23,7 +23,7 @@ override-dependencies = [
 
 [tool.uv.sources]
 qorl = { path = "..", editable = true }
-prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "c8078ab6f9c8567eb9007e762286058593fb7e70" }
+prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "2415a1e4c70e370082fc83d7aad4e974161f0689" }
 torch = { index = "pytorch-cu128" }
 torchvision = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
