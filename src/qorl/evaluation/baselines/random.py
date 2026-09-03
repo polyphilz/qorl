@@ -4,20 +4,20 @@ import random
 from enum import StrEnum
 from typing import Any
 
-from qorl.plans.action import (
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.exceptions import ActionError
+from qorl.plans.random_tree import random_join_tree
+from qorl.plans.schemas import (
     ACTION_SCHEMA_VERSION,
     AUTO,
     MAX_PARALLEL_WORKERS,
-    ActionError,
     JoinMethod,
     MemoizeMode,
     ParallelMode,
+    PlanAction,
     RowMode,
     ScanMethod,
-    TaskCatalog,
-    normalize_action,
 )
-from qorl.plans.random_tree import random_join_tree
 
 SAMPLER_VERSION = 2
 
@@ -223,7 +223,7 @@ def sample_action(catalog: TaskCatalog, rng: random.Random) -> dict[str, Any]:
             elif family == ActionFamily.DISABLED_INDEX:
                 add_disabled_index(action, catalog, rng)
         try:
-            return normalize_action(action, catalog)
+            return PlanAction.from_raw(action, catalog).to_wire()
         except ActionError:
             continue
     raise RuntimeError("could not sample a schema-valid PlanAction")

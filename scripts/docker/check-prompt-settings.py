@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
-from qorl.plans.action import (  # noqa: E402
+from qorl.plans.schemas import (  # noqa: E402
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
     NUMERIC_SETTINGS,

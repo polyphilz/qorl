@@ -165,6 +165,10 @@ class RolloutTest(unittest.TestCase):
         evaluator.start()
         result = evaluator.evaluate({"version": 2})
         self.assertFalse(result["action_valid"])
+        self.assertEqual(
+            result["errors_or_diagnostics"],
+            ["version must equal 1"],
+        )
         self.assertEqual(result["attempts_remaining"], 4)
 
     def test_candidate_budget_can_be_reduced_for_training(self) -> None:

@@ -1,0 +1,275 @@
+{
+  "$defs": {
+    "DisabledIndexes": {
+      "additionalProperties": false,
+      "properties": {
+        "indexes": {
+          "items": {"type": "string"},
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "relation": {
+          "enum": ["a", "b", "c"],
+          "type": "string"
+        }
+      },
+      "required": ["relation", "indexes"],
+      "type": "object"
+    },
+    "JoinConstraint": {
+      "additionalProperties": false,
+      "anyOf": [
+        {"required": ["force"]},
+        {"required": ["forbid"]},
+        {"required": ["memoize"]}
+      ],
+      "properties": {
+        "forbid": {
+          "items": {
+            "enum": ["hash", "merge", "nestloop"],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "force": {
+          "enum": ["hash", "merge", "nestloop"],
+          "type": "string"
+        },
+        "memoize": {
+          "enum": ["force", "forbid"],
+          "type": "string"
+        },
+        "relations": {
+          "items": {
+            "enum": ["a", "b", "c"],
+            "type": "string"
+          },
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": ["relations"],
+      "type": "object"
+    },
+    "JoinNode": {
+      "additionalProperties": false,
+      "properties": {
+        "left": {
+          "anyOf": [
+            {"enum": ["a", "b", "c"], "type": "string"},
+            {"$ref": "#/$defs/JoinNode"}
+          ]
+        },
+        "right": {
+          "anyOf": [
+            {"enum": ["a", "b", "c"], "type": "string"},
+            {"$ref": "#/$defs/JoinNode"}
+          ]
+        }
+      },
+      "required": ["left", "right"],
+      "type": "object"
+    },
+    "ParallelRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": ["soft", "hard"],
+          "type": "string"
+        },
+        "relation": {
+          "enum": ["a", "b", "c"],
+          "type": "string"
+        },
+        "workers": {
+          "maximum": 2,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": ["relation", "workers"],
+      "type": "object"
+    },
+    "PlannerSettings": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_index_tuple_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "cpu_operator_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "cpu_tuple_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "effective_cache_size": {
+          "maximum": 4194304,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "enable_async_append": {"type": "boolean"},
+        "enable_bitmapscan": {"type": "boolean"},
+        "enable_distinct_reordering": {"type": "boolean"},
+        "enable_gathermerge": {"type": "boolean"},
+        "enable_group_by_reordering": {"type": "boolean"},
+        "enable_hashagg": {"type": "boolean"},
+        "enable_hashjoin": {"type": "boolean"},
+        "enable_incremental_sort": {"type": "boolean"},
+        "enable_indexonlyscan": {"type": "boolean"},
+        "enable_indexscan": {"type": "boolean"},
+        "enable_material": {"type": "boolean"},
+        "enable_memoize": {"type": "boolean"},
+        "enable_mergejoin": {"type": "boolean"},
+        "enable_nestloop": {"type": "boolean"},
+        "enable_parallel_append": {"type": "boolean"},
+        "enable_parallel_hash": {"type": "boolean"},
+        "enable_partitionwise_aggregate": {"type": "boolean"},
+        "enable_partitionwise_join": {"type": "boolean"},
+        "enable_presorted_aggregate": {"type": "boolean"},
+        "enable_self_join_elimination": {"type": "boolean"},
+        "enable_seqscan": {"type": "boolean"},
+        "enable_sort": {"type": "boolean"},
+        "enable_tidscan": {"type": "boolean"},
+        "from_collapse_limit": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "join_collapse_limit": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "parallel_setup_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "parallel_tuple_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "random_page_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "seq_page_cost": {
+          "maximum": 1000000.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "RowCorrection": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": ["absolute", "add", "subtract", "multiply"],
+          "type": "string"
+        },
+        "relations": {
+          "items": {
+            "enum": ["a", "b", "c"],
+            "type": "string"
+          },
+          "minItems": 2,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "value": {"type": "number"}
+      },
+      "required": ["relations", "mode", "value"],
+      "type": "object"
+    },
+    "ScanConstraint": {
+      "additionalProperties": false,
+      "anyOf": [
+        {"required": ["force"]},
+        {"required": ["forbid"]}
+      ],
+      "properties": {
+        "forbid": {
+          "items": {
+            "enum": ["bitmap", "index", "index_only", "seq", "tid"],
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "force": {
+          "enum": ["bitmap", "index", "index_only", "seq", "tid"],
+          "type": "string"
+        },
+        "indexes": {
+          "description": "Use only with force=index, index_only, or bitmap.",
+          "items": {"type": "string"},
+          "type": "array",
+          "uniqueItems": true
+        },
+        "relation": {
+          "enum": ["a", "b", "c"],
+          "type": "string"
+        }
+      },
+      "required": ["relation"],
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "disabled_indexes": {
+      "description": "Indexes PostgreSQL must not use by query alias.",
+      "items": {"$ref": "#/$defs/DisabledIndexes"},
+      "type": "array"
+    },
+    "joins": {
+      "description": "Join-method constraints. Each relations value must equal all leaf aliases beneath one internal node of the candidate plan. When leading is present, use only sets created by that tree.",
+      "items": {"$ref": "#/$defs/JoinConstraint"},
+      "type": "array"
+    },
+    "leading": {
+      "$ref": "#/$defs/JoinNode",
+      "description": "Binary join order containing every query alias once."
+    },
+    "parallel": {
+      "description": "Parallel worker requests by query alias.",
+      "items": {"$ref": "#/$defs/ParallelRequest"},
+      "type": "array"
+    },
+    "row_corrections": {
+      "description": "Planner row-estimate corrections for alias sets.",
+      "items": {"$ref": "#/$defs/RowCorrection"},
+      "type": "array"
+    },
+    "scans": {
+      "description": "Scan-method and index constraints by query alias.",
+      "items": {"$ref": "#/$defs/ScanConstraint"},
+      "type": "array"
+    },
+    "settings": {
+      "$ref": "#/$defs/PlannerSettings",
+      "description": "Safe per-query PostgreSQL planner settings."
+    },
+    "version": {
+      "const": 1,
+      "description": "PlanAction schema version.",
+      "type": "integer"
+    }
+  },
+  "required": ["version"],
+  "type": "object"
+}

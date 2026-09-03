@@ -12,8 +12,10 @@ from qorl.db.worker import (
     QueryTimeout,
     WorkerError,
 )
-from qorl.plans.action import ActionError, TaskCatalog, compile_action
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import plan_sha256
+from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
@@ -299,7 +301,9 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             raise RuntimeError("rollout candidate budget is exhausted")
         candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
         try:
-            action, hint = compile_action(raw_action, self.catalog)
+            plan_action = PlanAction.from_raw(raw_action, self.catalog)
+            action = plan_action.to_wire()
+            hint = plan_action.compile()
         except ActionError as error:
             return self.invalid_candidate(candidate_id, raw_action, str(error))
 

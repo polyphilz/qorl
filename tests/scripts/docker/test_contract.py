@@ -4,7 +4,7 @@ import json
 import unittest
 from pathlib import Path
 
-from qorl.plans.action import (
+from qorl.plans.schemas import (
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
     MAX_PARALLEL_WORKERS,

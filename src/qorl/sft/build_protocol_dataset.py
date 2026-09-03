@@ -21,18 +21,18 @@ from qorl.measure.rollout import (
     RolloutEvaluator,
     ToolResultStatus,
 )
-from qorl.plans.action import (
-    ACTION_SCHEMA_VERSION,
-    ActionError,
-    MemoizeMode,
-    ParallelMode,
-    RowMode,
-    ScanMethod,
-    TaskCatalog,
-    compile_action,
-)
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.random_tree import random_join_tree
+from qorl.plans.schemas import (
+    ACTION_SCHEMA_VERSION,
+    MemoizeMode,
+    ParallelMode,
+    PlanAction,
+    RowMode,
+    ScanMethod,
+)
 from qorl.plans.verify import (
     JOIN_METHODS,
     SCAN_METHODS,
@@ -94,7 +94,9 @@ class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
             raise RuntimeError("rollout candidate budget is exhausted")
         candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
         try:
-            action, hint = compile_action(raw_action, self.catalog)
+            plan_action = PlanAction.from_raw(raw_action, self.catalog)
+            action = plan_action.to_wire()
+            hint = plan_action.compile()
         except ActionError as error:
             return self.invalid_candidate(candidate_id, raw_action, str(error))
 
@@ -326,7 +328,7 @@ def default_derived_actions(
     seen: set[str] = set()
     for name, action in actions:
         try:
-            value, _ = compile_action(action, catalog)
+            value = PlanAction.from_raw(action, catalog).to_wire()
         except ActionError:
             continue
         encoded = canonical_json(value)
@@ -430,7 +432,7 @@ def evaluate_action(
     require_novel_plan: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]] | None:
     try:
-        normalized, _ = compile_action(action, evaluator.catalog)
+        normalized = PlanAction.from_raw(action, evaluator.catalog).to_wire()
     except ActionError:
         return None
     encoded = canonical_json(normalized)

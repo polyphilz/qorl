@@ -19,8 +19,9 @@ from qorl.measure.rollout import (
     MeasurementStatus,
     ToolResultStatus,
 )
-from qorl.plans.action import TaskCatalog, compile_action
+from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
+from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import verify_action
 from qorl.workload.taskset import TaskSet
 
@@ -203,7 +204,9 @@ def validate_protocol_demo(
                 f"turn {turn}: candidate ID mismatch",
             )
             raw_action = arguments.get("action")
-            action, hint = compile_action(raw_action, catalog)
+            plan_action = PlanAction.from_raw(raw_action, catalog)
+            action = plan_action.to_wire()
+            hint = plan_action.compile()
             encoded_action = json.dumps(action, sort_keys=True, separators=(",", ":"))
             require(
                 encoded_action not in normalized_actions,

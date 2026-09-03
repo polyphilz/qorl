@@ -5,7 +5,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.plans.action import AUTO, JoinMethod, MemoizeMode, ParallelMode, ScanMethod
+from qorl.plans.schemas import (
+    AUTO,
+    JoinMethod,
+    MemoizeMode,
+    ParallelMode,
+    ScanMethod,
+)
 
 
 @dataclass(frozen=True)

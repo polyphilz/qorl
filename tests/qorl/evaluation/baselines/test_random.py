@@ -4,7 +4,8 @@ import random
 import unittest
 
 from qorl.evaluation.baselines.random import FAMILY_WEIGHTS, sample_action
-from qorl.plans.action import TaskCatalog, normalize_action
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.schemas import PlanAction
 
 TASK = {
     "relations": [
@@ -34,7 +35,9 @@ class RandomPolicyTest(unittest.TestCase):
         for _ in range(1_000):
             action = sample_action(self.catalog, left)
             self.assertEqual(action, sample_action(self.catalog, right))
-            self.assertEqual(action, normalize_action(action, self.catalog))
+            self.assertEqual(
+                action, PlanAction.from_raw(action, self.catalog).to_wire()
+            )
             self.assertLessEqual(len(action) - 1, 3)
 
     def test_fixed_sample_reaches_every_family(self) -> None:

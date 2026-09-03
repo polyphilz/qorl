@@ -10,8 +10,9 @@ from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
 from qorl.agent.tools import agent_tools
 from qorl.measure.rollout import MAX_CANDIDATES
-from qorl.plans.action import TaskCatalog, compile_action
+from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
+from qorl.plans.schemas import PlanAction
 from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
 from qorl.workload.taskset import TaskSet
@@ -43,7 +44,8 @@ def synthetic_demo() -> dict[str, Any]:
             "right": {"left": "n", "right": {"left": "pi1", "right": "it1"}},
         },
     }
-    action, hint = compile_action({"version": 1, "leading": leading}, catalog)
+    plan_action = PlanAction.from_raw({"version": 1, "leading": leading}, catalog)
+    action, hint = plan_action.to_wire(), plan_action.compile()
     plan = {"Plan": raw_plan(leading)}
     tools = agent_tools(aliases)
     maximum_turns = 64

@@ -1,0 +1,335 @@
+[
+  {
+    "name": "action must be an object",
+    "action": [],
+    "error": "action must be an object"
+  },
+  {
+    "name": "version is required",
+    "action": {},
+    "error": "version is required"
+  },
+  {
+    "name": "boolean is not version one",
+    "action": {"version": true},
+    "error": "version must equal 1"
+  },
+  {
+    "name": "unsupported version",
+    "action": {"version": 2},
+    "error": "version must equal 1"
+  },
+  {
+    "name": "unknown action field",
+    "action": {"version": 1, "mystery": 1},
+    "error": "action has unknown fields: ['mystery']"
+  },
+  {
+    "name": "leading must be a tree",
+    "action": {"version": 1, "leading": "a"},
+    "error": "leading must contain at least two relations"
+  },
+  {
+    "name": "leading missing nested side",
+    "action": {"version": 1, "leading": {"left": "a"}},
+    "error": "leading.right is required"
+  },
+  {
+    "name": "leading unknown nested leaf",
+    "action": {
+      "version": 1,
+      "leading": {
+        "left": {"left": "a", "right": "x"},
+        "right": "b"
+      }
+    },
+    "error": "leading.left.right is not a relation in this query"
+  },
+  {
+    "name": "leading disconnected subtree",
+    "action": {
+      "version": 1,
+      "leading": {
+        "left": {"left": "a", "right": "c"},
+        "right": "b"
+      }
+    },
+    "error": "leading.left joins disconnected subtrees"
+  },
+  {
+    "name": "joins must be a list",
+    "action": {"version": 1, "joins": {}},
+    "error": "joins must be a list"
+  },
+  {
+    "name": "join must be an object",
+    "action": {"version": 1, "joins": [3]},
+    "error": "joins[0] must be an object"
+  },
+  {
+    "name": "join relations required",
+    "action": {"version": 1, "joins": [{"force": "hash"}]},
+    "error": "joins[0].relations is required"
+  },
+  {
+    "name": "join relations connected",
+    "action": {
+      "version": 1,
+      "joins": [{"relations": ["a", "c"], "force": "hash"}]
+    },
+    "error": "joins[0].relations is not connected in the query join graph"
+  },
+  {
+    "name": "join force enum",
+    "action": {
+      "version": 1,
+      "joins": [{"relations": ["a", "b"], "force": "loop"}]
+    },
+    "error": "joins[0].force must be one of ['hash', 'merge', 'nestloop']"
+  },
+  {
+    "name": "unknown join field",
+    "action": {
+      "version": 1,
+      "joins": [{"relations": ["a", "b"], "force": "hash", "mystery": 1}]
+    },
+    "error": "joins[0] has unknown fields: ['mystery']"
+  },
+  {
+    "name": "join forbid shape",
+    "action": {
+      "version": 1,
+      "joins": [{"relations": ["a", "b"], "forbid": {"method": "hash"}}]
+    },
+    "error": "joins[0].forbid must contain only ['hash', 'merge', 'nestloop']"
+  },
+  {
+    "name": "join methods cannot all be forbidden",
+    "action": {
+      "version": 1,
+      "joins": [
+        {
+          "relations": ["a", "b"],
+          "forbid": ["hash", "merge", "nestloop"]
+        }
+      ]
+    },
+    "error": "joins[0].forbid cannot disable every join method"
+  },
+  {
+    "name": "join force conflicts with forbid",
+    "action": {
+      "version": 1,
+      "joins": [
+        {"relations": ["a", "b"], "force": "hash", "forbid": ["hash"]}
+      ]
+    },
+    "error": "joins[0] both forces and forbids hash"
+  },
+  {
+    "name": "duplicate join target",
+    "action": {
+      "version": 1,
+      "joins": [
+        {"relations": ["a", "b"], "force": "hash"},
+        {"relations": ["b", "a"], "force": "merge"}
+      ]
+    },
+    "error": "joins[1] duplicates joins[0]"
+  },
+  {
+    "name": "scan relation",
+    "action": {"version": 1, "scans": [{"relation": "x", "force": "seq"}]},
+    "error": "scans[0].relation is not a relation in this query"
+  },
+  {
+    "name": "scan relation type",
+    "action": {"version": 1, "scans": [{"relation": 2, "force": "seq"}]},
+    "error": "scans[0].relation must be a string"
+  },
+  {
+    "name": "scan force enum",
+    "action": {"version": 1, "scans": [{"relation": "a", "force": "heap"}]},
+    "error": "scans[0].force must be one of ['bitmap', 'index', 'index_only', 'seq', 'tid']"
+  },
+  {
+    "name": "scan index list",
+    "action": {
+      "version": 1,
+      "scans": [{"relation": "a", "force": "index", "indexes": {}}]
+    },
+    "error": "scans[0].indexes must be a list"
+  },
+  {
+    "name": "scan unknown index",
+    "action": {
+      "version": 1,
+      "scans": [
+        {"relation": "a", "force": "index", "indexes": ["missing_idx"]}
+      ]
+    },
+    "error": "scans[0].indexes contains unknown indexes: ['missing_idx']"
+  },
+  {
+    "name": "indexes require index scan",
+    "action": {
+      "version": 1,
+      "scans": [
+        {"relation": "a", "force": "seq", "indexes": ["table_a_pkey"]}
+      ]
+    },
+    "error": "scans[0].indexes requires an index-based forced scan"
+  },
+  {
+    "name": "scan methods cannot all be forbidden",
+    "action": {
+      "version": 1,
+      "scans": [
+        {
+          "relation": "a",
+          "forbid": ["seq", "tid", "index", "index_only", "bitmap"]
+        }
+      ]
+    },
+    "error": "scans[0].forbid cannot disable every scan method"
+  },
+  {
+    "name": "duplicate scan target",
+    "action": {
+      "version": 1,
+      "scans": [
+        {"relation": "a", "force": "seq"},
+        {"relation": "a", "force": "index"}
+      ]
+    },
+    "error": "scans[1] duplicates scans[0]"
+  },
+  {
+    "name": "disabled indexes cannot be empty",
+    "action": {
+      "version": 1,
+      "disabled_indexes": [{"relation": "a", "indexes": []}]
+    },
+    "error": "disabled_indexes[0].indexes must contain at least 1 item"
+  },
+  {
+    "name": "row value is numeric",
+    "action": {
+      "version": 1,
+      "row_corrections": [
+        {"relations": ["a", "b"], "mode": "multiply", "value": true}
+      ]
+    },
+    "error": "row_corrections[0].value must be numeric"
+  },
+  {
+    "name": "row mode enum",
+    "action": {
+      "version": 1,
+      "row_corrections": [
+        {"relations": ["a", "b"], "mode": "divide", "value": 2}
+      ]
+    },
+    "error": "row_corrections[0].mode must be one of ['absolute', 'add', 'multiply', 'subtract']"
+  },
+  {
+    "name": "row multiplier bounded",
+    "action": {
+      "version": 1,
+      "row_corrections": [
+        {"relations": ["a", "b"], "mode": "multiply", "value": 1001}
+      ]
+    },
+    "error": "row_corrections[0].value is outside [0.001, 1000.0]"
+  },
+  {
+    "name": "row value must be finite",
+    "action": {
+      "version": 1,
+      "row_corrections": [
+        {"relations": ["a", "b"], "mode": "multiply", "value": 1e999}
+      ]
+    },
+    "error": "row_corrections[0].value must be finite and numeric"
+  },
+  {
+    "name": "parallel worker boolean",
+    "action": {"version": 1, "parallel": [{"relation": "a", "workers": true}]},
+    "error": "parallel[0].workers must be an integer from 0 through 2"
+  },
+  {
+    "name": "parallel workers bounded",
+    "action": {"version": 1, "parallel": [{"relation": "a", "workers": 3}]},
+    "error": "parallel[0].workers must be an integer from 0 through 2"
+  },
+  {
+    "name": "parallel workers must be integral",
+    "action": {"version": 1, "parallel": [{"relation": "a", "workers": 1.0}]},
+    "error": "parallel[0].workers must be an integer from 0 through 2"
+  },
+  {
+    "name": "parallel mode enum",
+    "action": {
+      "version": 1,
+      "parallel": [{"relation": "a", "workers": 2, "mode": "strict"}]
+    },
+    "error": "parallel[0].mode must be one of ['hard', 'soft']"
+  },
+  {
+    "name": "setting cannot be null",
+    "action": {"version": 1, "settings": {"enable_hashjoin": null}},
+    "error": "settings.enable_hashjoin must not be null"
+  },
+  {
+    "name": "settings must be an object",
+    "action": {"version": 1, "settings": []},
+    "error": "settings must be an object"
+  },
+  {
+    "name": "setting boolean type",
+    "action": {"version": 1, "settings": {"enable_hashjoin": "off"}},
+    "error": "settings.enable_hashjoin must be boolean"
+  },
+  {
+    "name": "setting cost bounded",
+    "action": {"version": 1, "settings": {"random_page_cost": -1}},
+    "error": "settings.random_page_cost must be at least 0"
+  },
+  {
+    "name": "setting cost upper bound",
+    "action": {"version": 1, "settings": {"random_page_cost": 1000001}},
+    "error": "settings.random_page_cost must be at most 1000000.0"
+  },
+  {
+    "name": "setting cost type",
+    "action": {"version": 1, "settings": {"random_page_cost": "cheap"}},
+    "error": "settings.random_page_cost must be numeric"
+  },
+  {
+    "name": "setting allowlist",
+    "action": {"version": 1, "settings": {"work_mem": 1}},
+    "error": "settings has unknown fields: ['work_mem']"
+  },
+  {
+    "name": "forced method cannot be disabled",
+    "action": {
+      "version": 1,
+      "joins": [{"relations": ["a", "b"], "force": "hash"}],
+      "settings": {"enable_hashjoin": false}
+    },
+    "error": "action both forces hash and disables enable_hashjoin"
+  },
+  {
+    "name": "forced index cannot be disabled",
+    "action": {
+      "version": 1,
+      "scans": [
+        {"relation": "a", "force": "index", "indexes": ["table_a_pkey"]}
+      ],
+      "disabled_indexes": [
+        {"relation": "a", "indexes": ["table_a_pkey"]}
+      ]
+    },
+    "error": "action both forces and disables an index on a"
+  }
+]

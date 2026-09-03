@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
+from typing import Any
 
-from qorl.plans.action import (
-    ActionError,
-    TaskCatalog,
-    compile_action,
-    plan_action_schema,
-)
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.exceptions import ActionError
+from qorl.plans.schemas import PlanAction
 
 TASK = {
     "relations": [
@@ -20,6 +20,12 @@ TASK = {
         "b:table_b.id=c:table_c.b_id",
     ],
 }
+FIXTURES = Path(__file__).with_name("fixtures")
+
+
+def compile_raw(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], str]:
+    action = PlanAction.from_raw(value, catalog)
+    return action.to_wire(), action.compile()
 
 
 class ActionTest(unittest.TestCase):
@@ -27,7 +33,7 @@ class ActionTest(unittest.TestCase):
         with self.assertRaisesRegex(
             ActionError, "scans\\[0\\]\\.forbid must contain only"
         ):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "scans": [{"relation": "a", "forbid": [{"method": "seq"}]}],
@@ -46,7 +52,7 @@ class ActionTest(unittest.TestCase):
         )
 
     def test_compiles_plan_example(self) -> None:
-        _, hint = compile_action(
+        _, hint = compile_raw(
             {
                 "version": 1,
                 "leading": {
@@ -66,7 +72,7 @@ class ActionTest(unittest.TestCase):
         self.assertEqual(hint, "/*+ Leading(((a b) c)) HashJoin(a b) */")
 
     def test_compiles_every_hint_family_deterministically(self) -> None:
-        normalized, hint = compile_action(
+        normalized, hint = compile_raw(
             {
                 "version": 1,
                 "scans": [
@@ -106,21 +112,21 @@ class ActionTest(unittest.TestCase):
 
     def test_rejects_disconnected_join_target(self) -> None:
         with self.assertRaisesRegex(ActionError, "not connected"):
-            compile_action(
+            compile_raw(
                 {"version": 1, "joins": [{"relations": ["a", "c"]}]},
                 self.catalog,
             )
 
     def test_rejects_leading_that_omits_a_relation(self) -> None:
         with self.assertRaisesRegex(ActionError, "every query relation"):
-            compile_action(
+            compile_raw(
                 {"version": 1, "leading": {"left": "a", "right": "b"}},
                 self.catalog,
             )
 
     def test_rejects_disconnected_leading_subtree(self) -> None:
         with self.assertRaisesRegex(ActionError, "disconnected subtrees"):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "leading": {
@@ -133,7 +139,7 @@ class ActionTest(unittest.TestCase):
 
     def test_rejects_scan_conflict(self) -> None:
         with self.assertRaisesRegex(ActionError, "both forces and forbids"):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "scans": [{"relation": "a", "force": "seq", "forbid": ["seq"]}],
@@ -143,7 +149,7 @@ class ActionTest(unittest.TestCase):
 
     def test_rejects_forced_disabled_index(self) -> None:
         with self.assertRaisesRegex(ActionError, "both forces and disables"):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "scans": [
@@ -162,11 +168,11 @@ class ActionTest(unittest.TestCase):
 
     def test_rejects_unallowlisted_setting(self) -> None:
         with self.assertRaisesRegex(ActionError, "unknown fields"):
-            compile_action({"version": 1, "settings": {"work_mem": 1024}}, self.catalog)
+            compile_raw({"version": 1, "settings": {"work_mem": 1024}}, self.catalog)
 
     def test_rejects_setting_that_disables_forced_method(self) -> None:
         with self.assertRaisesRegex(ActionError, "both forces hash"):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "joins": [{"relations": ["a", "b"], "force": "hash"}],
@@ -176,12 +182,31 @@ class ActionTest(unittest.TestCase):
             )
 
     def test_model_schema_matches_the_setting_allowlist(self) -> None:
-        settings = plan_action_schema()["properties"]["settings"]["properties"]
+        settings = PlanAction.tool_schema()["$defs"]["PlannerSettings"]["properties"]
         self.assertIn("enable_hashjoin", settings)
         self.assertNotIn("work_mem", settings)
 
+    def test_tool_schema_matches_golden(self) -> None:
+        expected = json.loads(
+            (FIXTURES / "plan_action_schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            PlanAction.tool_schema(["a", "b", "c"]),
+            expected,
+        )
+
+    def test_malformed_action_feedback_matches_golden(self) -> None:
+        cases = json.loads(
+            (FIXTURES / "malformed_actions.json").read_text(encoding="utf-8")
+        )
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                with self.assertRaises(ActionError) as raised:
+                    PlanAction.from_raw(case["action"], self.catalog)
+                self.assertEqual(str(raised.exception), case["error"])
+
     def test_removed_settings_are_not_exposed_or_accepted(self) -> None:
-        settings = plan_action_schema()["properties"]["settings"]["properties"]
+        settings = PlanAction.tool_schema()["$defs"]["PlannerSettings"]["properties"]
         for name in (
             "effective_io_concurrency",
             "max_parallel_workers_per_gather",
@@ -197,12 +222,12 @@ class ActionTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotIn(name, settings)
                 with self.assertRaisesRegex(ActionError, "unknown fields"):
-                    compile_action({"version": 1, "settings": {name: 1}}, self.catalog)
+                    compile_raw({"version": 1, "settings": {name: 1}}, self.catalog)
 
     def test_parallel_workers_are_capped_at_two(self) -> None:
-        parallel = plan_action_schema()["properties"]["parallel"]["items"]
+        parallel = PlanAction.tool_schema()["$defs"]["ParallelRequest"]
         self.assertEqual(parallel["properties"]["workers"]["maximum"], 2)
-        compile_action(
+        compile_raw(
             {
                 "version": 1,
                 "parallel": [{"relation": "a", "workers": 2, "mode": "hard"}],
@@ -210,7 +235,7 @@ class ActionTest(unittest.TestCase):
             self.catalog,
         )
         with self.assertRaisesRegex(ActionError, "from 0 through 2"):
-            compile_action(
+            compile_raw(
                 {
                     "version": 1,
                     "parallel": [{"relation": "a", "workers": 3, "mode": "hard"}],

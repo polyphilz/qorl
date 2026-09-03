@@ -10,7 +10,7 @@ from typing import Any
 
 from qorl.agent.types import ToolName
 from qorl.measure.rollout import MeasurementStatus
-from qorl.plans.action import AUTO, MemoizeMode
+from qorl.plans.schemas import AUTO, MemoizeMode
 from qorl.sft.validate import validate_protocol_demo
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet

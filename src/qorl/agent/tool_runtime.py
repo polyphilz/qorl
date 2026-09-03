@@ -6,7 +6,7 @@ from typing import Any
 from qorl.agent.tools import candidate_feedback
 from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.measure.rollout import RolloutEvaluator, ToolResultStatus
-from qorl.plans.action import IDENTIFIER
+from qorl.plans.catalog import IDENTIFIER
 from qorl.plans.verify import compact_plan
 
 

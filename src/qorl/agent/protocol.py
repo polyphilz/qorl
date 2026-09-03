@@ -8,7 +8,7 @@ from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
-from qorl.plans.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
+from qorl.plans.schemas import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
 RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
 INSPECTION_TURNS_PER_ALIAS = 3

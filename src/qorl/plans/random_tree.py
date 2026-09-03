@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from qorl.plans.action import TaskCatalog
+from qorl.plans.catalog import TaskCatalog
 
 SWAP_CHILDREN_PROBABILITY = 0.5
 

@@ -2548,8 +2548,12 @@ wheels = [
 name = "qorl"
 version = "0.1.0"
 source = { editable = "../" }
+dependencies = [
+    { name = "pydantic", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+]
 
 [package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.13.5,<3" }]
 
 [package.metadata.requires-dev]
 dev = [

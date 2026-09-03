@@ -15,11 +15,11 @@ from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.plans.action import (
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.schemas import (
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
     NUMERIC_SETTINGS,
-    TaskCatalog,
 )
 
 TASK = {
@@ -268,8 +268,8 @@ class QoAgentTest(unittest.TestCase):
         self.assertEqual(
             digests,
             [
-                "7bb5e0267eb6ad3f602c2e5c6d163f72ef4cc612e1d0ea99c5a97831a3d6b961",
-                "e3a41ca9fb08dd61d09a101a29e4e5846b6fc673aedb3d8cc3a18a4730370b4e",
+                "83a76ec61fc4670286a44649c040eaeb6ec3815e4d7d0f069004cd4363925517",
+                "dfed7b674193dfe6cc6def422cc8eae036ed3c0244b6fbad59483e11639d5e3d",
             ],
         )
 
@@ -453,10 +453,14 @@ class QoAgentTest(unittest.TestCase):
         )
         parameters = evaluate["function"]["parameters"]
         leading = parameters["properties"]["action"]["properties"]["leading"]
-        self.assertEqual(leading["$ref"], "#/$defs/join_node")
-        self.assertIn("join_node", parameters["$defs"])
-        self.assertIn("join_tree", parameters["$defs"])
-        leaves = parameters["$defs"]["join_tree"]["oneOf"][0]
-        self.assertEqual(leaves["enum"], ["a", "b"])
-        scans = parameters["properties"]["action"]["properties"]["scans"]
-        self.assertEqual(scans["items"]["properties"]["relation"]["enum"], ["a", "b"])
+        self.assertEqual(leading["$ref"], "#/$defs/JoinNode")
+        join_node = parameters["$defs"]["JoinNode"]
+        self.assertEqual(
+            join_node["properties"]["left"]["anyOf"][1]["$ref"],
+            "#/$defs/JoinNode",
+        )
+        self.assertEqual(
+            join_node["properties"]["left"]["anyOf"][0]["enum"], ["a", "b"]
+        )
+        scans = parameters["$defs"]["ScanConstraint"]
+        self.assertEqual(scans["properties"]["relation"]["enum"], ["a", "b"])

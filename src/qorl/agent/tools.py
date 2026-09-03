@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from qorl.agent.types import ToolName
-from qorl.plans.action import plan_action_schema
+from qorl.plans.schemas import PlanAction
 
 
 def function(
@@ -29,7 +29,7 @@ def function(
 
 def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
     relation = {"type": "string", "enum": relations}
-    action = plan_action_schema(relations)
+    action = PlanAction.tool_schema(relations)
     definitions = action.pop("$defs")
     evaluate = function(
         ToolName.EVALUATE_CANDIDATE.value,
