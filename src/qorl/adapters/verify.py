@@ -33,6 +33,18 @@ def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
     }
     if any(manifest.get(key) != value for key, value in expected.items()):
         raise RuntimeError("merged SFT model checksum mismatch")
+    if "artifacts" in manifest:
+        artifacts = [
+            {
+                "path": path.relative_to(merged).as_posix(),
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+            for path in sorted(merged.rglob("*"))
+            if path.is_file() and path.name != "qorl-merge.json"
+        ]
+        if manifest["artifacts"] != artifacts:
+            raise RuntimeError("merged SFT model artifact inventory differs")
 
 
 def request(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:

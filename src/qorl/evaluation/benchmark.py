@@ -33,7 +33,7 @@ from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
 
-DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
+DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run-v2.json"
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:

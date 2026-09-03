@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "dataset_id": "protocol-sft-v2",
+  "seed": 20260903,
+  "policy_config": "configs/policy/run-v2.json",
+  "selection": "experiments/005-protocol-sft-v2/selection.json",
+  "sampling": {
+    "concurrency": 4,
+    "initial_samples_per_task": 4,
+    "normal_maximum_samples_per_task": 6,
+    "default_best_search_maximum_samples_per_task": 30,
+    "fallback_check_task_count": 100,
+    "fallback_yield_floor": 0.11
+  },
+  "labels": {
+    "win_speedup": 1.15,
+    "remeasure_lower_speedup": 1.10,
+    "remeasure_upper_speedup": 1.20,
+    "default_best_maximum_speedup": 1.05,
+    "default_best_minimum_fingerprints": 6
+  },
+  "assembly": {
+    "maximum_examples_per_task": 2,
+    "maximum_syntax_examples_per_task": 2,
+    "maximum_steered_share_per_family": 0.3333333333333333
+  },
+  "measurement": {
+    "maximum_candidates_per_task": 6,
+    "concurrency": 4
+  },
+  "composition": {
+    "win_share": 0.2,
+    "keep_default_share": 0.15
+  },
+  "split_counts": {
+    "train": 256,
+    "validation": 64
+  },
+  "training": {
+    "validation_points": 4,
+    "maximum_validation_interval": 15
+  },
+  "gate": {
+    "samples_per_task": 4,
+    "concurrency": 4,
+    "constraint_satisfied_rate_floor": 0.9,
+    "default_duplicate_rate_ceiling": 0.05,
+    "novel_candidate_rate_improvement": 0.05,
+    "unlabeled_intervention_rate_floor": 0.5,
+    "fingerprints_per_intervened_task_floor": 2.0,
+    "action_family_rate_floor": 0.01,
+    "required_action_families": [
+      "leading",
+      "join",
+      "memoize",
+      "scan",
+      "index_selection",
+      "index_exclusion",
+      "rows",
+      "parallel",
+      "setting"
+    ]
+  }
+}

@@ -12,7 +12,7 @@ from qorl.db.pool import start_pool
 from qorl.measure.schemas import RunStatus
 from qorl.plans.fingerprint import plan_sha256
 from qorl.sft.assemble import load_documents
-from qorl.sft.build_protocol_dataset import PlanValidationEvaluator
+from qorl.sft.sample import PlanValidationEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
 
@@ -67,7 +67,13 @@ def main() -> None:
         worker = slot.worker
         for template, document in sorted(samples.items()):
             task_id = document["metadata"]["task_id"]
-            evaluator = PlanValidationEvaluator(worker, task_set, tasks[task_id])
+            actions = candidate_actions(document)
+            evaluator = PlanValidationEvaluator(
+                worker,
+                task_set,
+                tasks[task_id],
+                max_candidates=len(actions),
+            )
             baseline = evaluator.start()
             recorded_default = document["evidence"]["default_plan"]["Plan"]
 
@@ -75,7 +81,7 @@ def main() -> None:
                 raise RuntimeError(f"{task_id}: default plan fingerprint changed")
 
             candidate_ids = []
-            for action in candidate_actions(document):
+            for action in actions:
                 candidate = evaluator.evaluate(action)
                 candidate_id = candidate.candidate_id
                 recorded = document["evidence"]["candidates"][candidate_id]

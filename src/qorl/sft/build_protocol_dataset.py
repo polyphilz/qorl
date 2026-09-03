@@ -1,753 +1,664 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import hashlib
 import json
-import random
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from qorl.agent.interface import AgentInterface
-from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import start_pool
-from qorl.db.worker import PostgresWorker
-from qorl.measure.rollout import (
-    MAX_CANDIDATES,
-    PlanTiming,
-    RolloutEvaluator,
-)
-from qorl.measure.schemas import (
-    Baseline,
-    Candidate,
-    MeasurementStatus,
-    ToolResultStatus,
-)
-from qorl.plans.catalog import TaskCatalog
-from qorl.plans.exceptions import ActionError
-from qorl.plans.fingerprint import plan_sha256
-from qorl.plans.random_tree import random_join_tree
-from qorl.plans.schemas import (
-    ACTION_SCHEMA_VERSION,
-    MemoizeMode,
-    ParallelMode,
-    PlanAction,
-    RowMode,
-    ScanMethod,
-)
-from qorl.plans.verify import (
-    JOIN_METHODS,
-    SCAN_METHODS,
-    compact_plan,
-    contains_node,
-    hint_status,
-    index_names,
-    nodes,
-    plan_join_tree,
-    relation_set,
-    verify_action,
-)
-from qorl.sft.assemble import (
-    DATASET_ID,
-    SPLIT_COUNTS,
-    canonical_json,
-    finalize_dataset,
-    ranked_tasks,
-    select_tasks,
+from qorl.measure.schemas import ToolResultStatus
+from qorl.sft.assemble import canonical_json
+from qorl.sft.schemas import (
+    JSON_OBJECT_ADAPTER,
+    JSON_OBJECT_LIST_ADAPTER,
+    ActionFamily,
+    CandidateEvidence,
+    CandidateLabel,
+    CandidateMeasurement,
+    DatasetConfig,
+    DatasetInputs,
+    DatasetManifest,
+    DatasetSelection,
+    DatasetSelectionIdentity,
+    DefaultBestProvenance,
+    DemonstrationDocument,
+    DemonstrationEvidence,
+    DemonstrationIdentity,
+    DemonstrationMetadata,
+    DemonstrationProvenance,
+    ExampleKind,
+    FileIdentity,
+    FilterProvenance,
+    FilterRecord,
+    JsonObject,
+    MeasurementManifest,
+    MeasurementProvenance,
+    PrimeArtifact,
+    SampleRecord,
+    TaskLabel,
+    load_json_lines,
+    load_record,
+    require_list,
+    require_object,
+    require_string,
 )
 from qorl.sft.validate import validate_protocol_demo
+from qorl.util.hashing import sha256_file
+from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
 
-MAXIMUM_MODEL_TURNS = 64
-MAX_ACTION_ATTEMPTS = 4
-CALL_ID_WIDTH = 4
-RECIPES = (
-    "direct",
-    "default_plan",
-    "relation_size",
-    "indexes",
-    "column_stats",
-    "focused",
-    "schema",
-    "extended_stats",
-    "plan_aware",
-)
+DATASET_ID = "protocol-sft-v2"
+KEEP_DEFAULT_CALL_ID = "sft-v2-keep-default"
+TEACHER_ID = "iterated_rejection_sampling_v1"
+MEASUREMENT_MODE = "rejection_sampling_plan_validation"
 
 
-class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
-    """Exercise the live planning path without executing benchmark queries."""
-
-    def start(self) -> Baseline:
-        plain = self.worker.explain(self.sql, self.global_timeout_ms)
-        fingerprint = plan_sha256(plain.document["Plan"])
-        self.default = Baseline(
-            plan_sha256=fingerprint,
-            plain_explain=plain.document,
-            median_execution_time_ms=None,
-            compact_plan=compact_plan(plain.document["Plan"]),
-        )
-        self.by_fingerprint[fingerprint] = PlanTiming("default", [], None)
-        return self.default
-
-    def evaluate(self, raw_action: Any) -> Candidate:
-        if self.default is None:
-            raise RuntimeError("rollout baseline has not been started")
-        if len(self.candidates) >= MAX_CANDIDATES:
-            raise RuntimeError("rollout candidate budget is exhausted")
-        candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
-        try:
-            plan_action = PlanAction.from_raw(raw_action, self.catalog)
-            action = plan_action.to_wire()
-            hint = plan_action.compile()
-        except ActionError as error:
-            return self.invalid_candidate(candidate_id, raw_action, str(error))
-
-        try:
-            plain = self.worker.explain(self.sql, self.global_timeout_ms, hint=hint)
-        except WorkerError as error:
-            return self.invalid_candidate(
-                candidate_id, action, str(error), hint=hint, action_valid=True
-            )
-
-        verification = verify_action(
-            action, plain.document["Plan"], plain.hint_diagnostics
-        )
-        diagnostics = hint_status(plain.hint_diagnostics)
-        if not verification.valid:
-            return self.invalid_candidate(
-                candidate_id,
-                action,
-                "; ".join(verification.errors),
-                hint=hint,
-                action_valid=True,
-                pg_hint_plan=diagnostics,
-            )
-
-        fingerprint = plan_sha256(plain.document["Plan"])
-        duplicate = self.by_fingerprint.get(fingerprint)
-        result = Candidate(
-            candidate_id=candidate_id,
-            action=action,
-            action_valid=True,
-            constraints_satisfied=True,
-            compiled_hint=hint,
-            duplicate_of=duplicate.candidate_id if duplicate else None,
-            plan_sha256=fingerprint,
-            plain_explain=plain.document,
-            compact_plan=compact_plan(plain.document["Plan"]),
-            provisional_measurements=[],
-            provisional_speedup=None,
-            measurement_status=MeasurementStatus.NOT_MEASURED,
-            errors_or_diagnostics=[],
-            pg_hint_plan=diagnostics,
-            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
-        )
-        self.candidates.append(result)
-        if duplicate is None:
-            self.by_fingerprint[fingerprint] = PlanTiming(candidate_id, [], None)
-        return result
+@dataclass(frozen=True)
+class SelectedExample:
+    record: FilterRecord
+    kind: ExampleKind
+    measurement: CandidateMeasurement | DefaultBestProvenance | None
 
 
-def trace_seed(task_id: str, dataset_seed: int) -> int:
-    digest = hashlib.sha256(f"{dataset_seed}:{task_id}".encode()).digest()
-    return int.from_bytes(digest[:8], "big")
+def stable_rank(seed: int, label: str, record: FilterRecord) -> str:
+    identity = f"{seed}:{label}:{record.task_id}:{record.plan_sha256}:{record.sample}"
+    return hashlib.sha256(identity.encode()).hexdigest()
 
 
-def encode_tree(node: str | tuple[Any, Any]) -> str | dict[str, Any]:
-    if isinstance(node, str):
-        return node
-    return {"left": encode_tree(node[0]), "right": encode_tree(node[1])}
-
-
-def default_derived_actions(
-    plan: dict[str, Any], catalog: TaskCatalog, rng: random.Random
-) -> list[tuple[str, dict[str, Any]]]:
-    """Build valid-looking directives from facts visible in the default plan."""
-    actions: list[tuple[str, dict[str, Any]]] = []
-    tree = plan_join_tree(plan)
-    leading = (
-        {"version": ACTION_SCHEMA_VERSION, "leading": encode_tree(tree)}
-        if tree is not None and not isinstance(tree, str)
-        else None
-    )
-    if leading:
-        actions.append(("leading", leading))
-
-    joins = sorted(
-        (node for node in nodes(plan) if node.get("Node Type") in JOIN_METHODS),
-        key=lambda node: tuple(sorted(relation_set(node))),
-    )
-    join_action: dict[str, Any] | None = None
-    memoize_action: dict[str, Any] | None = None
-    if joins:
-        join = joins[rng.randrange(len(joins))]
-        relations = sorted(relation_set(join))
-        join_action = {
-            "version": ACTION_SCHEMA_VERSION,
-            "joins": [
-                {
-                    "relations": relations,
-                    "force": JOIN_METHODS[join["Node Type"]],
-                }
-            ],
-        }
-        actions.append(("join", join_action))
-        memoize_action = {
-            "version": ACTION_SCHEMA_VERSION,
-            "joins": [
-                {
-                    "relations": relations,
-                    "memoize": (
-                        MemoizeMode.FORCE.value
-                        if contains_node(join, "Memoize")
-                        else MemoizeMode.FORBID.value
-                    ),
-                }
-            ],
-        }
-        actions.append(("memoize", memoize_action))
-
-        rows = max(1, int(join.get("Plan Rows", 1)))
-        actions.append(
-            (
-                "rows",
-                {
-                    "version": ACTION_SCHEMA_VERSION,
-                    "row_corrections": [
-                        {
-                            "relations": relations,
-                            "mode": RowMode.ABSOLUTE.value,
-                            "value": rows,
-                        }
-                    ],
-                },
-            )
-        )
-
-    scans = sorted(
-        (
-            node
-            for node in nodes(plan)
-            if node.get("Node Type") in SCAN_METHODS
-            and isinstance(node.get("Alias"), str)
-        ),
-        key=lambda node: node["Alias"],
-    )
-    scan_action: dict[str, Any] | None = None
-    if scans:
-        scan = scans[rng.randrange(len(scans))]
-        method = SCAN_METHODS[scan["Node Type"]]
-        item: dict[str, Any] = {"relation": scan["Alias"], "force": method}
-        used_indexes = sorted(index_names(scan))
-        if (
-            method
-            in {
-                ScanMethod.INDEX,
-                ScanMethod.INDEX_ONLY,
-                ScanMethod.BITMAP,
-            }
-            and used_indexes
-        ):
-            item["indexes"] = used_indexes
-        scan_action = {"version": ACTION_SCHEMA_VERSION, "scans": [item]}
-        actions.append(("scan", scan_action))
-
-        nonparallel = next(
-            (node for node in scans if not node.get("Parallel Aware")), None
-        )
-        if nonparallel:
-            actions.append(
-                (
-                    "parallel",
-                    {
-                        "version": ACTION_SCHEMA_VERSION,
-                        "parallel": [
-                            {
-                                "relation": nonparallel["Alias"],
-                                "workers": 0,
-                                "mode": ParallelMode.SOFT.value,
-                            }
-                        ],
-                    },
-                )
-            )
-
-        for node in scans:
-            alias = node["Alias"]
-            unused = sorted(catalog.indexes.get(alias, frozenset()) - index_names(node))
-            if unused:
-                actions.append(
-                    (
-                        "index_exclusion",
-                        {
-                            "version": ACTION_SCHEMA_VERSION,
-                            "disabled_indexes": [
-                                {"relation": alias, "indexes": [unused[0]]}
-                            ],
-                        },
-                    )
-                )
-                break
-
-    settings = [
-        {"enable_memoize": True},
-        {"random_page_cost": 4.0},
-    ]
-    rng.shuffle(settings)
-    for values in settings:
-        actions.append(
-            ("setting", {"version": ACTION_SCHEMA_VERSION, "settings": values})
-        )
-    setting_action = {
-        "version": ACTION_SCHEMA_VERSION,
-        "settings": settings[0],
+def load_measurements(
+    dataset: Path,
+) -> tuple[dict[tuple[str, str], CandidateMeasurement], dict[str, TaskLabel]]:
+    manifest = load_record(dataset / "measurement.json", MeasurementManifest)
+    if manifest.task_labels is None:
+        raise RuntimeError("measurement manifest has no task labels")
+    measurements = {
+        (record.task_id, record.plan_sha256): record
+        for path in sorted((dataset / "measurements").glob("*/*.json"))
+        for record in [load_record(path, CandidateMeasurement)]
     }
+    return measurements, manifest.task_labels
 
-    if leading and join_action:
-        actions.append(
-            (
-                "leading_join",
-                {**leading, "joins": join_action["joins"]},
-            )
-        )
-    if leading and scan_action:
-        actions.append(
-            (
-                "leading_scan",
-                {**leading, "scans": scan_action["scans"]},
-            )
-        )
-    if leading:
-        actions.append(
-            (
-                "leading_setting",
-                {**leading, "settings": setting_action["settings"]},
-            )
-        )
 
-    normalized: list[tuple[str, dict[str, Any]]] = []
-    seen: set[str] = set()
-    for name, action in actions:
-        try:
-            value = PlanAction.from_raw(action, catalog).to_wire()
-        except ActionError:
+def tool_sequence(messages: list[JsonObject]) -> list[str]:
+    names: list[str] = []
+    for message in messages:
+        if message.get("role") != "assistant":
             continue
-        encoded = canonical_json(value)
-        if encoded not in seen:
-            normalized.append((name, value))
-            seen.add(encoded)
-    return normalized
+        calls = require_list(message.get("tool_calls"), "assistant.tool_calls")
+        call = require_object(calls[0], "assistant.tool_calls[0]")
+        function = require_object(call.get("function"), "assistant.tool_call.function")
+        names.append(require_string(function.get("name"), "assistant.tool_call.name"))
+    return names
 
 
-def inspection_calls(
-    recipe: str, task: dict[str, Any], catalog: TaskCatalog
-) -> list[tuple[str, dict[str, Any]]]:
-    aliases = sorted(catalog.relations)
-    indexed = next(
-        (alias for alias in aliases if catalog.indexes.get(alias)), aliases[0]
-    )
-    edge = task["join_edges"][0].split("=", 1)[0]
-    stats_alias = edge.split(":", 1)[0]
-    stats_column = edge.rsplit(".", 1)[1]
-    calls = {
-        "direct": [],
-        "default_plan": [(ToolName.GET_PLAN.value, {"candidate_id": "default"})],
-        "relation_size": [(ToolName.GET_RELATION_SIZE.value, {"relation": aliases[0]})],
-        "indexes": [(ToolName.LIST_INDEXES.value, {"relation": indexed})],
-        "column_stats": [
-            (
-                ToolName.GET_COLUMN_STATS.value,
-                {"relation": stats_alias, "column": stats_column},
-            )
-        ],
-        "focused": [
-            (ToolName.GET_RELATION_SIZE.value, {"relation": aliases[0]}),
-            (ToolName.LIST_INDEXES.value, {"relation": indexed}),
-        ],
-        "schema": [(ToolName.DESCRIBE_TABLE.value, {"relation": aliases[0]})],
-        "extended_stats": [
-            (ToolName.GET_EXTENDED_STATS.value, {"relation": aliases[0]})
-        ],
-        "plan_aware": [(ToolName.GET_PLAN.value, {"candidate_id": "default"})],
-    }
-    return calls[recipe]
-
-
-def record_tool(
-    messages: list[dict[str, Any]],
-    interface: AgentInterface,
-    turn: int,
-    name: str,
-    arguments: dict[str, Any],
-    result: dict[str, Any],
-) -> None:
-    call_id = f"call-{turn:0{CALL_ID_WIDTH}d}"
-    messages.extend(
-        [
+def keep_default_messages(messages: list[JsonObject]) -> list[JsonObject]:
+    decision_index: int | None = None
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        calls = message.get("tool_calls")
+        if not isinstance(calls, list) or not calls:
+            continue
+        call = require_object(calls[0], "assistant.tool_calls[0]")
+        function = require_object(call.get("function"), "assistant.tool_call.function")
+        if function.get("name") == ToolName.EVALUATE_CANDIDATE:
+            decision_index = index
+            break
+    if decision_index is None or decision_index + 1 >= len(messages):
+        raise RuntimeError("sample transcript has no candidate decision")
+    result_message = messages[decision_index + 1]
+    content = require_string(result_message.get("content"), "candidate tool result")
+    result = JSON_OBJECT_ADAPTER.validate_json(content)
+    budget = require_object(result.get(TURN_BUDGET_FIELD), "candidate turn budget")
+    keep_call: JsonObject = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
             {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(arguments, sort_keys=True),
-                        },
-                    }
-                ],
-            },
-            {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "name": name,
-                "content": json.dumps(
-                    {**result, TURN_BUDGET_FIELD: interface.budget(turn)},
-                    sort_keys=True,
-                ),
-            },
-        ]
-    )
-
-
-def execute_inspection(
-    messages: list[dict[str, Any]],
-    environment: AgentEnvironment,
-    interface: AgentInterface,
-    turn: int,
-    name: str,
-    arguments: dict[str, Any],
-) -> None:
-    result, finished = environment.execute(name, arguments)
-    if finished or not isinstance(result, dict) or "error" in result:
-        raise RuntimeError(f"inspection failed: {name} {result}")
-    record_tool(messages, interface, turn, name, arguments, result)
-
-
-def evaluate_action(
-    evaluator: RolloutEvaluator[PostgresWorker],
-    action: dict[str, Any],
-    seen_actions: set[str],
-    *,
-    require_novel_plan: bool,
-) -> tuple[dict[str, Any], Candidate] | None:
-    try:
-        normalized = PlanAction.from_raw(action, evaluator.catalog).to_wire()
-    except ActionError:
-        return None
-    encoded = canonical_json(normalized)
-    if encoded in seen_actions:
-        return None
-
-    candidate = evaluator.evaluate(normalized)
-    if not candidate.action_valid or not candidate.constraints_satisfied:
-        evaluator.candidates.pop()
-        return None
-    if require_novel_plan and candidate.duplicate_of is not None:
-        evaluator.candidates.pop()
-        return None
-    seen_actions.add(encoded)
-    feedback = candidate.feedback()
-    if candidate.measurement_status is None:
-        raise RuntimeError("plan-validation candidate is missing measurement status")
-    feedback["measurement_status"] = candidate.measurement_status.value
-    return feedback, candidate
-
-
-def choose_candidate(
-    evaluator: RolloutEvaluator[PostgresWorker],
-    derived: list[tuple[str, dict[str, Any]]],
-    seen_actions: set[str],
-    rng: random.Random,
-    ordinal: int,
-    slot: int,
-) -> tuple[str, dict[str, Any], Candidate, int]:
-    rejected = 0
-    if slot == 1:
-        for _ in range(MAX_ACTION_ATTEMPTS):
-            action = {
-                "version": ACTION_SCHEMA_VERSION,
-                "leading": random_join_tree(evaluator.catalog, rng),
+                "id": KEEP_DEFAULT_CALL_ID,
+                "type": "function",
+                "function": {"name": ToolName.KEEP_DEFAULT.value, "arguments": "{}"},
             }
-            evaluated = evaluate_action(
-                evaluator, action, seen_actions, require_novel_plan=True
-            )
-            if evaluated:
-                feedback, candidate = evaluated
-                return "novel_leading", feedback, candidate, rejected
-            rejected += 1
+        ],
+    }
+    keep_result: JsonObject = {
+        "role": "tool",
+        "tool_call_id": KEEP_DEFAULT_CALL_ID,
+        "name": ToolName.KEEP_DEFAULT.value,
+        "content": json.dumps(
+            {"status": ToolResultStatus.KEPT_DEFAULT.value, TURN_BUDGET_FIELD: budget},
+            sort_keys=True,
+        ),
+    }
+    return [*messages[:decision_index], keep_call, keep_result]
 
-    if not derived:
-        raise RuntimeError("default plan supplied no derivable actions")
-    offset = (ordinal * MAX_CANDIDATES + slot) % len(derived)
-    for name, action in derived[offset:] + derived[:offset]:
-        evaluated = evaluate_action(
-            evaluator, action, seen_actions, require_novel_plan=False
-        )
-        if evaluated:
-            feedback, candidate = evaluated
-            return name, feedback, candidate, rejected
-        rejected += 1
-    raise RuntimeError("could not produce another valid, distinct PlanAction")
+
+def measurement_provenance(
+    value: CandidateMeasurement | DefaultBestProvenance | None,
+) -> MeasurementProvenance | DefaultBestProvenance | None:
+    if value is None or isinstance(value, DefaultBestProvenance):
+        return value
+    if value.candidate_label is None or value.score_interval is None:
+        raise RuntimeError("selected measurement has not been labeled")
+    return MeasurementProvenance(
+        plan_sha256=value.plan_sha256,
+        candidate_label=value.candidate_label,
+        score_interval=value.score_interval,
+        attempt_count=len(value.attempts),
+    )
 
 
 def build_document(
-    worker: PostgresWorker,
+    repository: Path,
     task_set: TaskSet,
-    task: dict[str, Any],
+    sample: SampleRecord,
+    selected: SelectedExample,
     ordinal: int,
-    dataset_seed: int,
-) -> dict[str, Any]:
-    evaluator = PlanValidationEvaluator(worker, task_set, task)
-    evaluator.start()
-    interface = AgentInterface.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
-    environment = AgentEnvironment(evaluator)
-    messages = interface.initial_messages()
-    rng = random.Random(trace_seed(task["task_id"], dataset_seed))
-    recipe = RECIPES[ordinal % len(RECIPES)]
-    requested_candidates = ordinal % MAX_CANDIDATES + 1
-    call_sequence: list[str] = []
-    turn = 1
-
-    for name, arguments in inspection_calls(recipe, task, evaluator.catalog):
-        execute_inspection(messages, environment, interface, turn, name, arguments)
-        call_sequence.append(name)
-        turn += 1
-
-    if evaluator.default is None:
-        raise RuntimeError("rollout baseline has not been started")
-    plan = evaluator.default.plain_explain["Plan"]
-    derived = default_derived_actions(plan, evaluator.catalog, rng)
-    seen_actions: set[str] = set()
-    evidence: dict[str, dict[str, Any]] = {}
-    strategies: list[str] = []
-    rejected_actions = 0
-    for slot in range(requested_candidates):
-        strategy, feedback, candidate, rejected = choose_candidate(
-            evaluator, derived, seen_actions, rng, ordinal, slot
+) -> DemonstrationDocument:
+    trace = sample.policy_trace
+    messages = sample.training_transcript
+    if trace is None or messages is None or sample.default is None:
+        raise RuntimeError("selected sample is incomplete")
+    if selected.kind == ExampleKind.KEEP_DEFAULT:
+        messages = keep_default_messages(messages)
+    tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
+    task = next(item for item in tasks if item.get("task_id") == sample.task_id)
+    candidates: dict[str, CandidateEvidence] = {}
+    if selected.kind != ExampleKind.KEEP_DEFAULT:
+        if len(sample.candidates) != 1:
+            raise RuntimeError("selected sample has no single candidate")
+        candidate = sample.candidates[0]
+        if candidate.plain_explain is None:
+            raise RuntimeError("selected candidate has no plan")
+        candidates[candidate.candidate_id] = CandidateEvidence(
+            action=JSON_OBJECT_ADAPTER.validate_python(candidate.action),
+            plain_explain=JSON_OBJECT_ADAPTER.validate_python(candidate.plain_explain),
+            pg_hint_plan=candidate.pg_hint_plan,
         )
-        rejected_actions += rejected
-        candidate_id = feedback["candidate_id"]
-        record_tool(
-            messages,
-            interface,
-            turn,
-            ToolName.EVALUATE_CANDIDATE.value,
-            {"action": candidate.action},
-            feedback,
-        )
-        call_sequence.append(ToolName.EVALUATE_CANDIDATE.value)
-        strategies.append(strategy)
-        evidence[candidate_id] = {
-            "action": candidate.action,
-            "plain_explain": candidate.plain_explain,
-            "pg_hint_plan": candidate.pg_hint_plan,
-        }
-        turn += 1
-
-        if recipe == "plan_aware" and slot == 0:
-            arguments = {"candidate_id": candidate_id}
-            execute_inspection(
-                messages,
-                environment,
-                interface,
-                turn,
-                ToolName.GET_PLAN.value,
-                arguments,
-            )
-            call_sequence.append(ToolName.GET_PLAN.value)
-            turn += 1
-
-    result, finished = environment.execute(ToolName.FINISH.value, {})
-    if not finished or result != {"status": ToolResultStatus.FINISHED.value}:
-        raise RuntimeError("finish did not terminate the demonstration")
-    record_tool(messages, interface, turn, ToolName.FINISH.value, {}, result)
-    call_sequence.append(ToolName.FINISH.value)
-
-    document = {
-        "schema_version": 1,
-        "messages": messages,
-        "tools": interface.tools,
-        "metadata": {
-            "demonstration_id": f"{DATASET_ID}-{ordinal + 1:04d}",
-            "ordinal": ordinal,
-            "teacher": "validated_plan_action_generator_v1",
-            "task_set_id": task_set.task_set_id,
-            "task_id": task["task_id"],
-            "template_id": task["template_id"],
-            "partition": task["partition"],
-            "sql_sha256": task["sql_sha256"],
-            "data_identity": worker.fixture.data_identity,
-            "runtime_identity": worker.fixture.runtime_identity,
-            "in_author_unique_plans_subset": task["in_author_unique_plans_subset"],
-            "trace_seed": trace_seed(task["task_id"], dataset_seed),
-            "maximum_model_turns": MAXIMUM_MODEL_TURNS,
-            "inspection_recipe": recipe,
-            "candidate_count": requested_candidates,
-            "candidate_strategies": strategies,
-            "rejected_generator_actions": rejected_actions,
-            "measurement_mode": "plan_validation_only",
-            "selection_used_speed": False,
-            "call_sequence": call_sequence,
-        },
-        "evidence": {
-            "default_plan": evaluator.default.plain_explain,
-            "candidates": evidence,
-        },
-    }
-    validate_protocol_demo(document, worker.fixture.repository)
+    initial = require_object(
+        trace.get("initial_observation"), "trace.initial_observation"
+    )
+    budget = require_object(initial.get("turn_budget"), "initial turn budget")
+    document = DemonstrationDocument(
+        messages=messages,
+        tools=[
+            require_object(item, "trace.tools[]")
+            for item in require_list(trace.get("tools"), "trace.tools")
+        ],
+        metadata=DemonstrationMetadata(
+            demonstration_id=f"{DATASET_ID}-{ordinal + 1:04d}",
+            ordinal=ordinal,
+            teacher=TEACHER_ID,
+            task_set_id=task_set.task_set_id,
+            task_id=sample.task_id,
+            template_id=sample.template_id,
+            partition=require_string(task.get("partition"), "task.partition"),
+            sql_sha256=require_string(task.get("sql_sha256"), "task.sql_sha256"),
+            data_identity=sample.data_identity,
+            runtime_identity=sample.runtime_identity,
+            in_author_unique_plans_subset=task.get("in_author_unique_plans_subset")
+            is True,
+            trace_seed=sample.seed,
+            maximum_model_turns=require_positive_int(
+                budget.get("total_model_turns"), "turn budget"
+            ),
+            candidate_count=0 if selected.kind == ExampleKind.KEEP_DEFAULT else 1,
+            measurement_mode=MEASUREMENT_MODE,
+            selection_used_speed=selected.kind
+            in {ExampleKind.WIN, ExampleKind.KEEP_DEFAULT},
+            example_kind=selected.kind,
+            steered=sample.steered,
+            guidance=sample.guidance,
+            call_sequence=tool_sequence(messages),
+        ),
+        provenance=DemonstrationProvenance(
+            sample=sample.sample,
+            sampler=sample.sampler,
+            filter=FilterProvenance(
+                accepted=selected.record.accepted,
+                rejection_reason=selected.record.rejection_reason,
+                syntax_eligible=selected.record.syntax_eligible,
+                action_families=selected.record.action_families,
+            ),
+            budget=budget,
+            measurement=measurement_provenance(selected.measurement),
+        ),
+        evidence=DemonstrationEvidence(
+            default_plan=JSON_OBJECT_ADAPTER.validate_python(
+                sample.default.plain_explain
+            ),
+            candidates=candidates,
+        ),
+    )
+    validate_protocol_demo(document.to_wire(), repository)
     return document
 
 
-def existing_documents(
-    repository: Path, output_dir: Path
-) -> dict[int, tuple[Path, dict[str, Any]]]:
-    existing: dict[int, tuple[Path, dict[str, Any]]] = {}
-    for partition in SPLIT_COUNTS:
-        for path in (output_dir / "demonstrations" / partition).glob("*.json"):
-            document = json.loads(path.read_text(encoding="utf-8"))
-            validate_protocol_demo(document, repository)
-            ordinal = document["metadata"]["ordinal"]
-            if ordinal in existing:
-                raise RuntimeError(f"duplicate demonstration ordinal: {ordinal}")
-            existing[ordinal] = (path, document)
-    return existing
+def require_positive_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise RuntimeError(f"{label} must be a positive integer")
+    return value
+
+
+def candidate_measurement(
+    record: FilterRecord,
+    measurements: dict[tuple[str, str], CandidateMeasurement],
+) -> CandidateMeasurement | None:
+    return measurements.get((record.task_id, record.plan_sha256 or ""))
+
+
+def measured_lower(measurement: CandidateMeasurement) -> float:
+    if measurement.score_interval is None:
+        raise RuntimeError("candidate measurement has no score interval")
+    return measurement.score_interval.lower
+
+
+def select_training(
+    records: list[FilterRecord],
+    measurements: dict[tuple[str, str], CandidateMeasurement],
+    task_labels: dict[str, TaskLabel],
+    config: DatasetConfig,
+) -> list[SelectedExample]:
+    target = config.split_counts.train
+    desired_wins = round(target * config.composition.win_share)
+    desired_defaults = round(target * config.composition.keep_default_share)
+    wins = [
+        (record, measurement)
+        for record in records
+        if record.accepted
+        and (measurement := candidate_measurement(record, measurements)) is not None
+        and measurement.candidate_label == CandidateLabel.WIN
+        and measurement.score_interval is not None
+    ]
+    wins.sort(
+        key=lambda item: (
+            item[0].steered,
+            -measured_lower(item[1]),
+            stable_rank(config.seed, "win", item[0]),
+        )
+    )
+    default_samples: list[FilterRecord] = []
+    seen_default_tasks: set[str] = set()
+    for record in sorted(
+        records,
+        key=lambda item: (item.steered, stable_rank(config.seed, "default", item)),
+    ):
+        if (
+            record.accepted
+            and task_labels.get(record.task_id) == TaskLabel.DEFAULT_BEST
+            and record.task_id not in seen_default_tasks
+        ):
+            default_samples.append(record)
+            seen_default_tasks.add(record.task_id)
+
+    selected: list[SelectedExample] = []
+    selected_per_task: Counter[str] = Counter()
+    family_totals: Counter[ActionFamily] = Counter()
+    steered_totals: Counter[ActionFamily] = Counter()
+
+    def allowed(record: FilterRecord, kind: ExampleKind) -> bool:
+        if (
+            selected_per_task[record.task_id]
+            >= config.assembly.maximum_examples_per_task
+        ):
+            return False
+        if not record.steered or kind == ExampleKind.KEEP_DEFAULT:
+            return True
+        cap = config.assembly.maximum_steered_share_per_family
+        return all(
+            (steered_totals[family] + 1) / (family_totals[family] + 1) <= cap
+            for family in record.action_families
+        )
+
+    def add(
+        record: FilterRecord,
+        kind: ExampleKind,
+        measurement: CandidateMeasurement | DefaultBestProvenance | None,
+    ) -> bool:
+        if not allowed(record, kind):
+            return False
+        selected.append(SelectedExample(record, kind, measurement))
+        selected_per_task[record.task_id] += 1
+        if kind != ExampleKind.KEEP_DEFAULT:
+            family_totals.update(record.action_families)
+            if record.steered:
+                steered_totals.update(record.action_families)
+        return True
+
+    for record, measurement in wins:
+        if sum(item.kind == ExampleKind.WIN for item in selected) >= desired_wins:
+            break
+        add(record, ExampleKind.WIN, measurement)
+    for record in default_samples:
+        if (
+            sum(item.kind == ExampleKind.KEEP_DEFAULT for item in selected)
+            >= desired_defaults
+        ):
+            break
+        task_measurements = [
+            measurement
+            for (task_id, _), measurement in measurements.items()
+            if task_id == record.task_id and measurement.score_interval is not None
+        ]
+        if not task_measurements:
+            continue
+        add(
+            record,
+            ExampleKind.KEEP_DEFAULT,
+            DefaultBestProvenance(
+                task_label=TaskLabel.DEFAULT_BEST,
+                measured_fingerprint_count=len(task_measurements),
+                best_upper_speedup=max(
+                    measurement.score_interval.upper
+                    for measurement in task_measurements
+                    if measurement.score_interval is not None
+                ),
+            ),
+        )
+    used = {(item.record.task_id, item.record.sample) for item in selected}
+    syntax = [
+        record
+        for record in records
+        if record.accepted
+        and record.syntax_eligible
+        and (record.task_id, record.sample) not in used
+        and (
+            (measurement := candidate_measurement(record, measurements)) is None
+            or measurement.candidate_label != CandidateLabel.KNOWN_REGRESSION
+        )
+    ]
+    syntax.sort(
+        key=lambda record: (record.steered, stable_rank(config.seed, "syntax", record))
+    )
+    selected_families = {
+        family
+        for item in selected
+        if item.kind != ExampleKind.KEEP_DEFAULT
+        for family in item.record.action_families
+    }
+    available_families = {
+        family for record in syntax for family in record.action_families
+    }
+    for family in sorted(available_families - selected_families):
+        record = next(
+            (
+                item
+                for item in syntax
+                if family in item.action_families
+                and (item.task_id, item.sample) not in used
+                and allowed(item, ExampleKind.SYNTAX)
+            ),
+            None,
+        )
+        if record is None:
+            raise RuntimeError(
+                f"action family cannot be represented within steering cap: {family.value}"
+            )
+        add(record, ExampleKind.SYNTAX, candidate_measurement(record, measurements))
+        used.add((record.task_id, record.sample))
+    for record in syntax:
+        if len(selected) >= target:
+            break
+        identity = (record.task_id, record.sample)
+        if identity not in used and add(
+            record, ExampleKind.SYNTAX, candidate_measurement(record, measurements)
+        ):
+            used.add(identity)
+    if len(selected) != target:
+        raise RuntimeError(
+            f"only {len(selected)} of {target} training documents are available after applying the steering cap"
+        )
+    return selected
+
+
+def select_validation(
+    records: list[FilterRecord], config: DatasetConfig
+) -> list[SelectedExample]:
+    eligible: dict[str, list[FilterRecord]] = defaultdict(list)
+    for record in records:
+        if record.accepted and record.syntax_eligible:
+            eligible[record.task_id].append(record)
+    selected = [
+        min(
+            task_records,
+            key=lambda record: stable_rank(config.seed, "validation", record),
+        )
+        for _, task_records in sorted(eligible.items())
+    ]
+    selected.sort(key=lambda record: stable_rank(config.seed, "validation", record))
+    if len(selected) < config.split_counts.validation:
+        raise RuntimeError(
+            f"only {len(selected)} of {config.split_counts.validation} validation tasks produced a document"
+        )
+    return [
+        SelectedExample(record, ExampleKind.SYNTAX, None)
+        for record in selected[: config.split_counts.validation]
+    ]
+
+
+def write_prime(
+    dataset: Path, documents: dict[str, list[DemonstrationDocument]]
+) -> dict[str, PrimeArtifact]:
+    prime = dataset / "prime"
+    prime.mkdir(parents=True, exist_ok=True)
+    artifacts: dict[str, PrimeArtifact] = {}
+    for split, values in documents.items():
+        rows: list[JsonObject] = []
+        for document in values:
+            row = JSON_OBJECT_ADAPTER.validate_python(
+                {
+                    "messages": document.messages,
+                    "tools": json.dumps(document.tools, sort_keys=True),
+                }
+            )
+            rows.append(row)
+        encoded = "".join(canonical_json(row) + "\n" for row in rows).encode()
+        path = prime / f"{split}.jsonl"
+        path.write_bytes(encoded)
+        artifacts[split] = PrimeArtifact(
+            path=str(path.relative_to(dataset)),
+            rows=len(rows),
+            bytes=len(encoded),
+            sha256=hashlib.sha256(encoded).hexdigest(),
+        )
+    return artifacts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate the deterministic 256/64 CEB tool-use SFT dataset."
+        description="Assemble the protocol SFT v2 dataset from sampled traces."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
-    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument(
-        "--output",
+        "--config",
         type=Path,
-        default=Path("outputs/sft/protocol-sft-v1"),
+        default=Path("experiments/005-protocol-sft-v2/dataset.json"),
+    )
+    parser.add_argument(
+        "--dataset", type=Path, default=Path("outputs/sft/protocol-sft-v2")
     )
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
-    config_path = arguments.config
-    if not config_path.is_absolute():
-        config_path = repository / config_path
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    if (
-        config.get("schema_version") != 1
-        or config.get("dataset_id") != DATASET_ID
-        or config.get("split_counts") != SPLIT_COUNTS
-        or isinstance(config.get("seed"), bool)
-        or not isinstance(config.get("seed"), int)
-    ):
-        raise RuntimeError(f"invalid tool-use SFT dataset configuration: {config_path}")
-    dataset_seed = config["seed"]
-    output_dir = arguments.output
-    if not output_dir.is_absolute():
-        output_dir = repository / output_dir
-
-    fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
-    selected = {
-        partition: select_tasks(
-            task_set.inventory["tasks"], partition, count, dataset_seed
-        )
-        for partition, count in SPLIT_COUNTS.items()
-    }
-    planned = [
-        task for partition in ("train", "validation") for task in selected[partition]
-    ]
-    ranked = {
-        partition: ranked_tasks(task_set.inventory["tasks"], partition, dataset_seed)
-        for partition in SPLIT_COUNTS
-    }
-    existing = existing_documents(repository, output_dir)
-    used_task_ids = {
-        document["metadata"]["task_id"] for _, document in existing.values()
-    }
-    failure_path = output_dir / "generation-failures.jsonl"
-    failures = (
-        [json.loads(line) for line in failure_path.read_text().splitlines()]
-        if failure_path.is_file()
-        else []
+    dataset = (repository / arguments.dataset).resolve()
+    config_path = (repository / arguments.config).resolve()
+    config = load_record(config_path, DatasetConfig)
+    selection_path = (repository / config.selection).resolve()
+    selection = load_record(selection_path, DatasetSelection)
+    task_set = TaskSet.load(repository, "ceb-v1")
+    measurements, task_labels = load_measurements(dataset)
+    train_records = load_json_lines(
+        dataset / "filter/sampling/records.jsonl", FilterRecord
     )
-    attempted_task_ids = used_task_ids | {failure["task_id"] for failure in failures}
-    missing = [ordinal for ordinal in range(len(planned)) if ordinal not in existing]
+    validation_records = load_json_lines(
+        dataset / "filter/validation/records.jsonl", FilterRecord
+    )
+    sampling_ids = {record.task_id for record in selection.splits.sampling}
+    live_gate_ids = {record.task_id for record in selection.splits.live_gate}
+    validation_ids = {record.task_id for record in selection.splits.validation}
+    if sampling_ids & live_gate_ids:
+        raise RuntimeError("sampling and live-gate task selections overlap")
+    if any(record.task_id not in sampling_ids for record in train_records):
+        raise RuntimeError("training filter contains a task outside the sampling split")
+    if any(record.task_id not in validation_ids for record in validation_records):
+        raise RuntimeError("validation filter contains a task outside its frozen split")
+    selections = {
+        "train": select_training(train_records, measurements, task_labels, config),
+        "validation": select_validation(validation_records, config),
+    }
+    documents: dict[str, list[DemonstrationDocument]] = defaultdict(list)
+    ordinal = 0
+    for split in ("train", "validation"):
+        directory = dataset / "demonstrations" / split
+        directory.mkdir(parents=True, exist_ok=True)
+        for selected in selections[split]:
+            sample = load_record(dataset / selected.record.sample_path, SampleRecord)
+            document = build_document(repository, task_set, sample, selected, ordinal)
+            path = directory / f"{ordinal + 1:04d}-{sample.task_id}.json"
+            write_json(path, document.to_wire())
+            documents[split].append(document)
+            ordinal += 1
 
-    if missing:
-        with (
-            contextlib.closing(start_pool(fixture, "qorl-protocol-sft-data")) as pool,
-            pool.claim_worker() as slot,
-        ):
-            worker = slot.worker
-            for ordinal in missing:
-                requested = planned[ordinal]
-                partition = requested["partition"]
-                template = requested["template_id"]
-                candidates = [
-                    requested,
-                    *(
-                        task
-                        for task in ranked[partition][template]
-                        if task["task_id"] != requested["task_id"]
+    prime_artifacts = write_prime(dataset, documents)
+    composition = {
+        split: dict(
+            sorted(
+                Counter(document.metadata.example_kind for document in values).items()
+            )
+        )
+        for split, values in documents.items()
+    }
+    templates = {
+        split: dict(
+            sorted(
+                Counter(document.metadata.template_id for document in values).items()
+            )
+        )
+        for split, values in documents.items()
+    }
+    families = Counter(
+        family
+        for selected in selections["train"]
+        if selected.kind != ExampleKind.KEEP_DEFAULT
+        for family in selected.record.action_families
+    )
+    steered_families = Counter(
+        family
+        for selected in selections["train"]
+        if selected.kind != ExampleKind.KEEP_DEFAULT and selected.record.steered
+        for family in selected.record.action_families
+    )
+    frozen_validation_task_ids = [
+        document.metadata.task_id for document in documents["validation"]
+    ]
+    if (
+        len(frozen_validation_task_ids) != len(set(frozen_validation_task_ids))
+        or set(frozen_validation_task_ids) != validation_ids
+    ):
+        raise RuntimeError("validation documents do not cover the frozen task cohort")
+    identities: list[DemonstrationIdentity] = []
+    for split, values in documents.items():
+        for document in values:
+            validation = JSON_OBJECT_ADAPTER.validate_python(
+                validate_protocol_demo(document.to_wire(), repository)
+            )
+            identities.append(
+                DemonstrationIdentity(
+                    demonstration_id=document.metadata.demonstration_id,
+                    partition=split,
+                    task_id=document.metadata.task_id,
+                    template_id=document.metadata.template_id,
+                    path=f"demonstrations/{split}/{document.metadata.ordinal + 1:04d}-{document.metadata.task_id}.json",
+                    canonical_sha256=require_string(
+                        validation.get("canonical_sha256"), "canonical_sha256"
                     ),
-                ]
-                built = None
-                for task in candidates:
-                    if task["task_id"] in attempted_task_ids:
-                        continue
-                    attempted_task_ids.add(task["task_id"])
-                    try:
-                        built = build_document(
-                            worker, task_set, task, ordinal, dataset_seed
-                        )
-                    except Exception as error:
-                        failure = {
-                            "task_id": task["task_id"],
-                            "template_id": template,
-                            "error": str(error),
-                        }
-                        failures.append(failure)
-                        failure_path.parent.mkdir(parents=True, exist_ok=True)
-                        with failure_path.open("a", encoding="utf-8") as stream:
-                            stream.write(json.dumps(failure, sort_keys=True) + "\n")
-                        print(f"  rejected {task['task_id']}: {error}", flush=True)
-                        continue
-                    break
-                if built is None:
-                    raise RuntimeError(f"could not fill ordinal {ordinal} ({template})")
-                path = (
-                    output_dir
-                    / "demonstrations"
-                    / partition
-                    / f"{built['metadata']['task_id']}.json"
                 )
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(json.dumps(built, indent=2, sort_keys=True) + "\n")
-                used_task_ids.add(built["metadata"]["task_id"])
-                print(
-                    f"[{ordinal + 1}/{len(planned)}] "
-                    f"{built['metadata']['task_id']} "
-                    f"candidates={built['metadata']['candidate_count']} "
-                    f"recipe={built['metadata']['inspection_recipe']}",
-                    flush=True,
-                )
-
-    manifest = finalize_dataset(repository, output_dir, failures, dataset_seed)
+            )
+    manifest = DatasetManifest(
+        dataset_id=DATASET_ID,
+        seed=config.seed,
+        config=FileIdentity(
+            path=str(config_path.relative_to(repository)),
+            sha256=sha256_file(config_path),
+        ),
+        selection=DatasetSelectionIdentity(
+            path=str(selection_path.relative_to(repository)),
+            sha256=sha256_file(selection_path),
+            rl_v3_excluded_train_task_count=len(sampling_ids | live_gate_ids),
+            sampling_live_gate_disjoint=True,
+        ),
+        task_set_id=task_set.task_set_id,
+        counts={split: len(values) for split, values in documents.items()},
+        composition=composition,
+        templates=templates,
+        train_action_families=dict(sorted(families.items())),
+        train_steered_action_families=dict(sorted(steered_families.items())),
+        prime_artifacts=prime_artifacts,
+        inputs=DatasetInputs(
+            sampling_manifest_sha256=sha256_file(
+                dataset / "sampling/sampling-manifest.json"
+            ),
+            validation_sampling_manifest_sha256=sha256_file(
+                dataset / "sampling/validation-manifest.json"
+            ),
+            sampling_filter_manifest_sha256=sha256_file(
+                dataset / "filter/sampling/manifest.json"
+            ),
+            validation_filter_manifest_sha256=sha256_file(
+                dataset / "filter/validation/manifest.json"
+            ),
+            measurement_manifest_sha256=sha256_file(dataset / "measurement.json"),
+        ),
+        frozen_validation_task_ids=frozen_validation_task_ids,
+        demonstrations=identities,
+    )
+    write_json(dataset / "manifest.json", manifest.to_wire())
     print(
         json.dumps(
             {
-                "output": str(output_dir),
-                "counts": manifest["counts"],
-                "statistics": manifest["statistics"],
-                "generation_failures": len(failures),
+                "counts": manifest.counts,
+                "composition": JSON_OBJECT_ADAPTER.validate_python(
+                    manifest.to_wire()["composition"]
+                ),
+                "train_action_families": JSON_OBJECT_ADAPTER.validate_python(
+                    manifest.to_wire()["train_action_families"]
+                ),
             },
             indent=2,
             sort_keys=True,
         )
     )
+
+
+def validate_dataset(repository: Path, dataset: Path) -> JsonObject:
+    manifest_path = dataset / "manifest.json"
+    manifest = load_record(manifest_path, DatasetManifest)
+    if manifest.dataset_id != DATASET_ID:
+        raise RuntimeError("unexpected protocol SFT v2 dataset ID")
+    counts: Counter[str] = Counter()
+    for record in manifest.demonstrations:
+        document = load_record(dataset / record.path, DemonstrationDocument)
+        validation = JSON_OBJECT_ADAPTER.validate_python(
+            validate_protocol_demo(document.to_wire(), repository)
+        )
+        if validation.get("canonical_sha256") != record.canonical_sha256:
+            raise RuntimeError(f"demonstration checksum differs: {record.path}")
+        counts[record.partition] += 1
+    if dict(counts) != manifest.counts:
+        raise RuntimeError("dataset demonstration counts differ")
+    for split, artifact in manifest.prime_artifacts.items():
+        path = dataset / artifact.path
+        if sha256_file(path) != artifact.sha256:
+            raise RuntimeError(f"Prime {split} checksum differs")
+        if len(path.read_text(encoding="utf-8").splitlines()) != artifact.rows:
+            raise RuntimeError(f"Prime {split} row count differs")
+    return {
+        "dataset_id": DATASET_ID,
+        "demonstrations": len(manifest.demonstrations),
+        "counts": dict(sorted(counts.items())),
+        "manifest_sha256": sha256_file(manifest_path),
+    }
 
 
 if __name__ == "__main__":

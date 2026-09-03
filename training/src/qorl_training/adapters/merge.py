@@ -99,17 +99,29 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
                 metadata=base_file.metadata(),
             )
 
+        merged_model_sha256 = sha256(target / MODEL_FILE)
         manifest = {
             "schema_version": 1,
             "operation": "merge_lora_into_base",
             "base_model_sha256": sha256(base_model),
             "adapter_model_sha256": sha256(adapter_model),
             "adapter_config_sha256": sha256(adapter_config_path),
-            "merged_model_sha256": sha256(target / MODEL_FILE),
+            "merged_model_sha256": merged_model_sha256,
             "lora_rank": rank,
             "lora_alpha": float(config["lora_alpha"]),
             "lora_scale": scale,
             "merged_tensor_count": len(pairs),
+            "artifacts": [
+                {
+                    "path": path.relative_to(target).as_posix(),
+                    "bytes": path.stat().st_size,
+                    "sha256": (
+                        merged_model_sha256 if path.name == MODEL_FILE else sha256(path)
+                    ),
+                }
+                for path in sorted(target.rglob("*"))
+                if path.is_file()
+            ],
         }
         (target / MANIFEST_FILE).write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",

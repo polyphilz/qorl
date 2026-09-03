@@ -45,7 +45,7 @@ is tested by `tests/.../test_X.py`, and `tests/qorl/` mirrors `src/qorl/`.
 Run from the repository root.
 
 ```bash
-uv run pytest                      # 125 tests; must be green before any report
+uv run pytest                      # All tests must be green before any report
 uv run ruff check . && uv run ruff format --check .
 uv run pyright                     # strict; see the baseline rule under Types
 uv run python -m scripts.ceb.extract_sql_from_qreps --check

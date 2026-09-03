@@ -22,7 +22,7 @@ from qorl.plans.schemas import (
 SAMPLER_VERSION = 3
 
 
-class ActionFamily(StrEnum):
+class SamplerFamily(StrEnum):
     LEADING = "leading"
     JOIN = "join"
     SCAN = "scan"
@@ -51,14 +51,14 @@ NAMED_INDEX_PROBABILITY = 0.5
 ROW_MULTIPLIER_VALUES = (0.1, 0.25, 0.5, 2, 4, 10)
 ROW_ABSOLUTE_VALUES = (1, 10, 100, 1_000, 10_000, 100_000, 1_000_000)
 
-FAMILY_WEIGHTS = {
-    ActionFamily.LEADING.value: 30,
-    ActionFamily.JOIN.value: 25,
-    ActionFamily.SCAN.value: 25,
-    ActionFamily.ROWS.value: 10,
-    ActionFamily.PARALLEL.value: 4,
-    ActionFamily.SETTING.value: 4,
-    ActionFamily.DISABLED_INDEX.value: 2,
+FAMILY_WEIGHTS: dict[SamplerFamily, int] = {
+    SamplerFamily.LEADING: 30,
+    SamplerFamily.JOIN: 25,
+    SamplerFamily.SCAN: 25,
+    SamplerFamily.ROWS: 10,
+    SamplerFamily.PARALLEL: 4,
+    SamplerFamily.SETTING: 4,
+    SamplerFamily.DISABLED_INDEX: 2,
 }
 
 SETTING_VALUES: dict[str, list[bool | int | float]] = {
@@ -75,9 +75,9 @@ SETTING_VALUES: dict[str, list[bool | int | float]] = {
 }
 
 
-def weighted_families(rng: random.Random, count: int) -> list[str]:
+def weighted_families(rng: random.Random, count: int) -> list[SamplerFamily]:
     available = list(FAMILY_WEIGHTS)
-    selected: list[str] = []
+    selected: list[SamplerFamily] = []
     for _ in range(count):
         weights = [FAMILY_WEIGHTS[name] for name in available]
         name = rng.choices(available, weights=weights, k=1)[0]
@@ -207,19 +207,19 @@ def sample_action(catalog: TaskCatalog, rng: random.Random) -> dict[str, Any]:
         for family in weighted_families(
             rng, rng.randint(MIN_FAMILIES_PER_ACTION, MAX_FAMILIES_PER_ACTION)
         ):
-            if family == ActionFamily.LEADING:
+            if family == SamplerFamily.LEADING:
                 action["leading"] = tree
-            elif family == ActionFamily.JOIN:
+            elif family == SamplerFamily.JOIN:
                 add_join(action, targets, rng)
-            elif family == ActionFamily.SCAN:
+            elif family == SamplerFamily.SCAN:
                 add_scan(action, catalog, rng)
-            elif family == ActionFamily.ROWS:
+            elif family == SamplerFamily.ROWS:
                 add_rows(action, targets, rng)
-            elif family == ActionFamily.PARALLEL:
+            elif family == SamplerFamily.PARALLEL:
                 add_parallel(action, catalog, rng)
-            elif family == ActionFamily.SETTING:
+            elif family == SamplerFamily.SETTING:
                 add_setting(action, rng)
-            elif family == ActionFamily.DISABLED_INDEX:
+            elif family == SamplerFamily.DISABLED_INDEX:
                 add_disabled_index(action, catalog, rng)
         try:
             return PlanAction.from_raw(action, catalog).to_wire()
