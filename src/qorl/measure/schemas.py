@@ -127,7 +127,6 @@ class Candidate(Record):
     provisional_median_execution_time_ms: float | None = None
     execution_timed_out: bool = False
     timeout_ms: int | None = None
-    cold_read_repeat_count: int = 0
     measurement_status: MeasurementStatus | None = None
 
     @property
@@ -183,7 +182,6 @@ class Outcome(Record):
     candidate_median_execution_time_ms: float | None = None
     default_median_execution_time_ms: float | None = None
     timeout_ms: int | None = None
-    cold_read_repeat_count: int = 0
 
     @property
     def kind(self) -> OutcomeKind:

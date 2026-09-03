@@ -33,7 +33,6 @@ from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_
 DEFAULT_MEASUREMENTS = 3
 FINAL_PAIRS = 5
 MAX_CANDIDATES = 5
-MATERIAL_SHARED_READ_FRACTION = 0.10
 
 
 @dataclass(frozen=True)
@@ -45,13 +44,12 @@ class MeasurementProtocol:
     candidate_measurement_runs: int
     final_warmup_pairs: int
     final_randomized_pairs: int
-    cold_read_repeat_fraction: float | None = None
 
     @property
     def max_explain_analyze_executions(self) -> int:
         return self.max_explain_analyze_executions_for(MAX_CANDIDATES)
 
-    def nominal_explain_analyze_executions_for(self, candidate_attempts: int) -> int:
+    def max_explain_analyze_executions_for(self, candidate_attempts: int) -> int:
         return (
             self.default_warmup_runs
             + self.default_measurement_runs
@@ -61,19 +59,9 @@ class MeasurementProtocol:
             + 2 * self.final_randomized_pairs
         )
 
-    def max_explain_analyze_executions_for(self, candidate_attempts: int) -> int:
-        scheduled = self.nominal_explain_analyze_executions_for(candidate_attempts)
-        if self.cold_read_repeat_fraction is None:
-            return scheduled
-        return (
-            scheduled
-            + candidate_attempts * self.candidate_measurement_runs
-            + self.final_randomized_pairs
-        )
-
     def manifest(
         self, candidate_attempts: int = MAX_CANDIDATES
-    ) -> dict[str, float | int | str | None]:
+    ) -> dict[str, int | str]:
         return {
             "id": self.protocol_id.value,
             "candidate_attempts": candidate_attempts,
@@ -83,10 +71,6 @@ class MeasurementProtocol:
             "novel_candidate_measurement_runs": self.candidate_measurement_runs,
             "final_warmup_runs_per_plan": self.final_warmup_pairs,
             "final_randomized_pair_count": self.final_randomized_pairs,
-            "cold_read_repeat_fraction": self.cold_read_repeat_fraction,
-            "nominal_explain_analyze_executions": (
-                self.nominal_explain_analyze_executions_for(candidate_attempts)
-            ),
             "max_explain_analyze_executions": (
                 self.max_explain_analyze_executions_for(candidate_attempts)
             ),
@@ -114,11 +98,10 @@ def training_protocol(protocol_id: MeasurementProtocolId) -> MeasurementProtocol
         protocol_id=protocol_id,
         default_warmup_runs=1,
         default_measurement_runs=1,
-        candidate_warmup_runs=0,
+        candidate_warmup_runs=1,
         candidate_measurement_runs=1,
         final_warmup_pairs=0,
         final_randomized_pairs=3,
-        cold_read_repeat_fraction=MATERIAL_SHARED_READ_FRACTION,
     )
 
 
@@ -147,15 +130,6 @@ def measured(result: ExplainResult) -> Measurement:
         planning_time_ms=planning_time_ms,
         plan_sha256=fingerprint,
     )
-
-
-def has_material_shared_reads(
-    measurement: Measurement, threshold: float | None
-) -> bool:
-    if threshold is None:
-        return False
-    blocks = measurement.shared_hit_blocks + measurement.shared_read_blocks
-    return blocks > 0 and measurement.shared_read_blocks / blocks >= threshold
 
 
 class RolloutEvaluator[ExecutorT: QueryExecutor]:
@@ -370,26 +344,15 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             self.candidates.append(result)
             return result
 
-        cold_read_repeat_count = 0
         try:
             warmups = [
                 self.checked_execution(action, hint)
                 for _ in range(self.measurement_protocol.candidate_warmup_runs)
             ]
-            executions: list[ExplainResult] = []
-            observations: list[Measurement] = []
-            for _ in range(self.measurement_protocol.candidate_measurement_runs):
-                execution = self.checked_execution(action, hint)
-                observation = measured(execution)
-                if has_material_shared_reads(
-                    observation,
-                    self.measurement_protocol.cold_read_repeat_fraction,
-                ):
-                    cold_read_repeat_count += 1
-                    execution = self.checked_execution(action, hint)
-                    observation = measured(execution)
-                executions.append(execution)
-                observations.append(observation)
+            executions = [
+                self.checked_execution(action, hint)
+                for _ in range(self.measurement_protocol.candidate_measurement_runs)
+            ]
         except QueryTimeout as error:
             if self.default.median_execution_time_ms is None:
                 raise RuntimeError("rollout baseline has not been measured") from error
@@ -413,10 +376,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 pg_hint_plan=pg_hint_plan,
                 attempts_remaining=self.max_candidates - len(self.candidates) - 1,
             )
-            if cold_read_repeat_count:
-                result = result.model_copy(
-                    update={"cold_read_repeat_count": cold_read_repeat_count}
-                )
             self.candidates.append(result)
             return result
         except WorkerError as error:
@@ -424,6 +383,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 candidate_id, action, str(error), hint=hint, action_valid=True
             )
 
+        observations = [measured(execution) for execution in executions]
         median_ms = statistics.median(
             observation.execution_time_ms for observation in observations
         )
@@ -450,10 +410,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             pg_hint_plan=pg_hint_plan,
             attempts_remaining=self.max_candidates - len(self.candidates) - 1,
         )
-        if cold_read_repeat_count:
-            result = result.model_copy(
-                update={"cold_read_repeat_count": cold_read_repeat_count}
-            )
         self.candidates.append(result)
         self.by_fingerprint[fingerprint] = PlanTiming(
             candidate_id=candidate_id,
@@ -584,7 +540,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         pair_orders: list[list[str]] = []
         candidate_measurements: list[Measurement] = []
         default_measurements: list[Measurement] = []
-        cold_read_repeat_count = 0
         for _ in range(self.measurement_protocol.final_randomized_pairs):
             order = [Decision.CANDIDATE.value, "default"]
             rng.shuffle(order)
@@ -592,16 +547,9 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             for label in order:
                 if label == Decision.CANDIDATE:
                     try:
-                        execution = self.checked_execution(action, hint)
-                        observation = measured(execution)
-                        if has_material_shared_reads(
-                            observation,
-                            self.measurement_protocol.cold_read_repeat_fraction,
-                        ):
-                            cold_read_repeat_count += 1
-                            execution = self.checked_execution(action, hint)
-                            observation = measured(execution)
-                        candidate_measurements.append(observation)
+                        candidate_measurements.append(
+                            measured(self.checked_execution(action, hint))
+                        )
                     except QueryTimeout:
                         return self.final_timeout(
                             winner,
@@ -611,7 +559,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                             pair_orders,
                             candidate_measurements,
                             default_measurements,
-                            cold_read_repeat_count=cold_read_repeat_count,
                         )
                 else:
                     default_measurements.append(
@@ -627,7 +574,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             item.execution_time_ms for item in default_measurements
         )
         final_score = score(default_median, candidate_median)
-        outcome = Outcome(
+        return Outcome(
             measurement_protocol_id=self.measurement_protocol.protocol_id,
             status=FinalStatus.COMPLETED,
             decision=Decision.CANDIDATE,
@@ -647,11 +594,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             duplicate_attempt_count=duplicate_count,
             timeout_attempt_count=timeout_count,
         )
-        if cold_read_repeat_count:
-            return outcome.model_copy(
-                update={"cold_read_repeat_count": cold_read_repeat_count}
-            )
-        return outcome
 
     def final_timeout(
         self,
@@ -662,14 +604,12 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         pair_orders: list[list[str]] | None = None,
         candidate_measurements: list[Measurement] | None = None,
         default_measurements: list[Measurement] | None = None,
-        *,
-        cold_read_repeat_count: int = 0,
     ) -> Outcome:
         if self.default is None or self.default.median_execution_time_ms is None:
             raise RuntimeError("rollout baseline has not been measured")
         default_median = self.default.median_execution_time_ms
         final_score = score(default_median, self.timeout_ms)
-        outcome = Outcome(
+        return Outcome(
             measurement_protocol_id=self.measurement_protocol.protocol_id,
             status=FinalStatus.CANDIDATE_TIMEOUT,
             winning_candidate_id=winner.candidate_id,
@@ -690,8 +630,3 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             duplicate_attempt_count=duplicate_count,
             timeout_attempt_count=timeout_count + 1,
         )
-        if cold_read_repeat_count:
-            return outcome.model_copy(
-                update={"cold_read_repeat_count": cold_read_repeat_count}
-            )
-        return outcome

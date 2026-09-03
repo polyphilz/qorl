@@ -4,13 +4,7 @@ from qorl.evaluation.reward_protocols import direction, summarize
 
 
 def result(cheap: float, full: float) -> dict:
-    def protocol(
-        score: float,
-        *,
-        repeat_count: int,
-        retained_material_count: int,
-        winner: str = "candidate-01",
-    ) -> dict:
+    def protocol(score: float, winner: str = "candidate-01") -> dict:
         return {
             "final": {
                 "status": "completed",
@@ -19,25 +13,11 @@ def result(cheap: float, full: float) -> dict:
                 "winning_candidate_id": winner,
             },
             "database_calls": {"explain_analyze": 1},
-            "cold_read_guard": {
-                "repeat_count": repeat_count,
-                "initial_candidate_measurement_count": 1,
-                "retained_candidate_measurement_count": 1,
-                "retained_material_shared_read_count": retained_material_count,
-            },
         }
 
     return {
-        "rl-training-v1": protocol(
-            cheap,
-            repeat_count=1,
-            retained_material_count=0,
-        ),
-        "rigorous-evaluation-v1": protocol(
-            full,
-            repeat_count=0,
-            retained_material_count=1,
-        ),
+        "rl-training-v1": protocol(cheap),
+        "rigorous-evaluation-v1": protocol(full),
     }
 
 
@@ -54,22 +34,3 @@ class TestRewardProtocolAudit:
         assert summary["strict_speedup_direction_agreement_count"] == 1
         assert summary["material_direction_agreement_count"] == 2
         assert summary["opposite_material_direction_count"] == 0
-        assert summary["cold_read_audit"] == {
-            "material_shared_read_fraction": 0.10,
-            "rl-training-v1": {
-                "guard_repeat_count": 2,
-                "guard_repeat_rate": 1.0,
-                "initial_candidate_measurement_count": 2,
-                "retained_candidate_measurement_count": 2,
-                "retained_material_shared_read_count": 0,
-                "retained_material_shared_read_rate": 0.0,
-            },
-            "rigorous-evaluation-v1": {
-                "guard_repeat_count": 0,
-                "guard_repeat_rate": 0.0,
-                "initial_candidate_measurement_count": 2,
-                "retained_candidate_measurement_count": 2,
-                "retained_material_shared_read_count": 2,
-                "retained_material_shared_read_rate": 1.0,
-            },
-        }
