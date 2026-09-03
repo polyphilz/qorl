@@ -269,8 +269,8 @@ class TestQoAgent:
             for request in client.requests
         ]
         assert digests == [
-            "8f72f35008607b0bc9652a4e7725816efbaeb2a2affe72fb964c60c684435c52",
-            "5b9ba92a0143879b01ead2e238f3cb59a0e7c0264712d799d4f51e811751f0a1",
+            "ace720366597c57187b65fb79cb141b61b98c2e71743f6dd9cfb755ecc8e6221",
+            "d81683bfe25034d7279d70efcab6b66c32e6ef696d93776516b2dc3bf477e3c6",
         ]
 
     def test_protocol_exposes_a_one_candidate_training_budget(
@@ -284,6 +284,8 @@ class TestQoAgent:
         assert interface.observation["candidate_attempts"] == 1
         assert interface.observation["turn_budget"]["reserved_final_turns"] == 2
         assert interface.available_tool_names(1, 1) == {"finish"}
+        prompt = interface.initial_messages()[0]["content"]
+        assert "up to 1 candidate evaluation plus one terminal decision" in prompt
 
     def test_get_default_plan_returns_only_compact_fields(self, tmp_path: Path) -> None:
         evaluator = FakeEvaluator(tmp_path)

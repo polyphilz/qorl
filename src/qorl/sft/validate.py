@@ -7,10 +7,9 @@ from typing import Any
 
 from qorl.agent.interface import (
     INSPECTION_TURNS_PER_ALIAS,
-    RESERVED_DECISION_TURNS,
     AgentInterface,
 )
-from qorl.agent.prompts import SYSTEM_PROMPT
+from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.fixture import data_identity
@@ -95,13 +94,20 @@ def validate_protocol_demo(
     sql = task_set.load_sql(task)
 
     require(len(messages) >= MIN_DEMONSTRATION_MESSAGES, "demo has no tool interaction")
-    require(
-        messages[0] == {"role": "system", "content": SYSTEM_PROMPT},
-        "system message differs from the live agent prompt",
-    )
     require(messages[1].get("role") == "user", "second message must be user")
     observation = parse_json(messages[1].get("content"), "initial observation")
     require(isinstance(observation, dict), "initial observation must be an object")
+    candidate_attempts = observation.get("candidate_attempts")
+    require(
+        not isinstance(candidate_attempts, bool)
+        and isinstance(candidate_attempts, int)
+        and 1 <= candidate_attempts <= MAX_CANDIDATES,
+        f"candidate_attempts must be between 1 and {MAX_CANDIDATES}",
+    )
+    require(
+        messages[0] == {"role": "system", "content": system_prompt(candidate_attempts)},
+        "system message differs from the live agent prompt",
+    )
     require(observation.get("task_id") == task["task_id"], "task ID mismatch")
     require(observation.get("sql") == sql, "task SQL mismatch")
     require(observation.get("relations") == task["relations"], "relations mismatch")
@@ -114,9 +120,10 @@ def validate_protocol_demo(
         isinstance(maximum_turns, int) and maximum_turns > 0,
         "maximum_model_turns must be positive",
     )
+    reserved_decision_turns = candidate_attempts + 1
     inspection_limit = min(
         len(aliases) * INSPECTION_TURNS_PER_ALIAS,
-        max(0, maximum_turns - RESERVED_DECISION_TURNS),
+        max(0, maximum_turns - reserved_decision_turns),
     )
     interface = AgentInterface(
         maximum_model_turns=maximum_turns,
@@ -129,9 +136,9 @@ def validate_protocol_demo(
         == {
             "total_model_turns": maximum_turns,
             "maximum_inspection_turns": inspection_limit,
-            "reserved_final_turns": RESERVED_DECISION_TURNS,
+            "reserved_final_turns": reserved_decision_turns,
             "reserved_for": {
-                "candidate_evaluations": MAX_CANDIDATES,
+                "candidate_evaluations": candidate_attempts,
                 "finish_or_keep_default": 1,
             },
         },
@@ -311,8 +318,8 @@ def validate_protocol_demo(
         )
     else:
         require(
-            1 <= len(issued_candidates) <= MAX_CANDIDATES,
-            f"demo must submit between 1 and {MAX_CANDIDATES} candidates",
+            1 <= len(issued_candidates) <= candidate_attempts,
+            f"demo must submit between 1 and {candidate_attempts} candidates",
         )
     if "candidate_count" in metadata:
         require(

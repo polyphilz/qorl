@@ -8,7 +8,7 @@
     "use_flashinfer_sampler": false,
     "enable_prefix_caching": true,
     "base_url": "http://127.0.0.1:8000/v1",
-    "context_length": 262144,
+    "context_length": 20480,
     "maximum_model_turns": 64,
     "request_timeout_seconds": 300,
     "seed": 20260827,

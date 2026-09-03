@@ -62,3 +62,16 @@ class TestDockerContract:
             int(contract["settings"]["max_parallel_workers_per_gather"])
             == MAX_PARALLEL_WORKERS
         )
+
+    def test_policy_and_model_server_share_the_training_context_length(
+        self, repository_root: Path
+    ) -> None:
+        policy = json.loads(
+            (repository_root / "configs/policy/run-v2.json").read_text(encoding="utf-8")
+        )["policy"]
+        server = (repository_root / "scripts/serve-qwen38-4b-distill.sh").read_text(
+            encoding="utf-8"
+        )
+
+        assert policy["context_length"] == 20_480
+        assert "--max-model-len 20480" in server

@@ -7,8 +7,7 @@ from typing import Any
 
 import pytest
 
-from qorl.agent.interface import RESERVED_DECISION_TURNS, AgentInterface
-from qorl.agent.prompts import SYSTEM_PROMPT
+from qorl.agent.interface import AgentInterface
 from qorl.agent.tools import agent_tools
 from qorl.measure.rollout import MAX_CANDIDATES
 from qorl.plans.catalog import TaskCatalog
@@ -28,7 +27,9 @@ def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def synthetic_demo(repository: Path) -> dict[str, Any]:
+def synthetic_demo(
+    repository: Path, candidate_attempts: int = MAX_CANDIDATES
+) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb-v1")
     task = next(
         item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID
@@ -48,28 +49,27 @@ def synthetic_demo(repository: Path) -> dict[str, Any]:
     plan = {"Plan": raw_plan(leading)}
     tools = agent_tools(aliases)
     maximum_turns = 64
-    inspection_limit = min(len(aliases) * 3, maximum_turns - RESERVED_DECISION_TURNS)
+    reserved_decision_turns = candidate_attempts + 1
+    inspection_limit = min(len(aliases) * 3, maximum_turns - reserved_decision_turns)
     observation = {
         "task_id": task["task_id"],
         "sql": task_set.load_sql(task),
         "relations": task["relations"],
         "join_edges": task["join_edges"],
         "indexes": indexes,
+        "candidate_attempts": candidate_attempts,
         "turn_budget": {
             "total_model_turns": maximum_turns,
             "maximum_inspection_turns": inspection_limit,
-            "reserved_final_turns": RESERVED_DECISION_TURNS,
+            "reserved_final_turns": reserved_decision_turns,
             "reserved_for": {
-                "candidate_evaluations": MAX_CANDIDATES,
+                "candidate_evaluations": candidate_attempts,
                 "finish_or_keep_default": 1,
             },
         },
     }
     interface = AgentInterface(maximum_turns, inspection_limit, observation, tools)
-    messages: list[dict[str, Any]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(observation, sort_keys=True)},
-    ]
+    messages: list[dict[str, Any]] = interface.initial_messages()
 
     def add(
         turn: int, name: str, arguments: dict[str, Any], result: dict[str, Any]
@@ -116,8 +116,14 @@ def synthetic_demo(repository: Path) -> dict[str, Any]:
             "plan_sha256": plan_sha256(plan["Plan"]),
         },
     )
-    add(3, "get_plan", {"candidate_id": "candidate-01"}, plan)
-    add(4, "finish", {}, {"status": "finished"})
+    call_sequence = ["get_plan", "evaluate_candidate"]
+    if candidate_attempts > 1:
+        add(3, "get_plan", {"candidate_id": "candidate-01"}, plan)
+        add(4, "finish", {}, {"status": "finished"})
+        call_sequence.extend(["get_plan", "finish"])
+    else:
+        add(3, "finish", {}, {"status": "finished"})
+        call_sequence.append("finish")
     return {
         "schema_version": 1,
         "messages": messages,
@@ -131,7 +137,7 @@ def synthetic_demo(repository: Path) -> dict[str, Any]:
                 "benchmark_config_id": "benchmark-v2",
             },
             "maximum_model_turns": maximum_turns,
-            "call_sequence": CALL_SEQUENCE,
+            "call_sequence": call_sequence,
         },
         "evidence": {
             "default_plan": plan,
@@ -159,6 +165,14 @@ class TestProtocolDemo:
         assert summary["candidate_ids"] == ["candidate-01"]
         assert summary["terminal_decision"] == "finish"
         assert summary["call_sequence"] == CALL_SEQUENCE
+
+    def test_validates_a_one_candidate_budget(self, repository_root: Path) -> None:
+        demo = synthetic_demo(repository_root, candidate_attempts=1)
+
+        summary = validate_protocol_demo(demo, repository_root)
+
+        assert summary["candidate_ids"] == ["candidate-01"]
+        assert "up to 1 candidate evaluation" in demo["messages"][0]["content"]
 
     def test_validates_keep_default_as_a_terminal_decision(
         self, repository_root: Path

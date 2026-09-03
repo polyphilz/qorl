@@ -225,7 +225,10 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                 "sampler": sampler_manifest(),
             }
             if policy["type"] == PolicyType.RANDOM_STRUCTURED_ACTION
-            else {**agent.manifest(), "candidate_count": MAX_CANDIDATES}
+            else {
+                **agent.manifest(MAX_CANDIDATES),
+                "candidate_count": MAX_CANDIDATES,
+            }
         ),
         "protocol": {
             "id": RIGOROUS_EVALUATION_PROTOCOL_V1.protocol_id,

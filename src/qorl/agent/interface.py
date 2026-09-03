@@ -4,13 +4,12 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.agent.prompts import SYSTEM_PROMPT
+from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
 from qorl.plans.schemas import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
-RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
 INSPECTION_TURNS_PER_ALIAS = 3
 
 
@@ -86,7 +85,7 @@ class AgentInterface:
 
     def initial_messages(self) -> list[dict[str, Any]]:
         return [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt(self.candidate_attempts)},
             {
                 "role": "user",
                 "content": json.dumps(self.observation, sort_keys=True),

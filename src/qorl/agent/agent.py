@@ -8,7 +8,7 @@ from typing import Any
 from qorl.agent.client import ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
 from qorl.agent.interface import AgentInterface
-from qorl.agent.prompts import SYSTEM_PROMPT
+from qorl.agent.prompts import system_prompt
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import (
     TERMINAL_STOP_REASON,
@@ -80,12 +80,13 @@ class QoAgentPolicy:
         }
         return self.server_identity
 
-    def manifest(self) -> dict[str, Any]:
+    def manifest(self, candidate_attempts: int) -> dict[str, Any]:
+        prompt = system_prompt(candidate_attempts)
         return {
             "type": PolicyType.QO_AGENT.value,
             **asdict(self.config),
-            "system_prompt": SYSTEM_PROMPT,
-            "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
+            "system_prompt": prompt,
+            "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
             "server_identity": self.server_identity,
         }
 
