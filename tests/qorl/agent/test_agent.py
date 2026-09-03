@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
-from qorl.agent.protocol import AgentProtocol
+from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor
@@ -279,11 +279,11 @@ class TestQoAgent:
         evaluator = FakeEvaluator(tmp_path)
         evaluator.max_candidates = 1
 
-        protocol = AgentProtocol.from_evaluator(evaluator, 64)
+        interface = AgentInterface.from_evaluator(evaluator, 64)
 
-        assert protocol.observation["candidate_attempts"] == 1
-        assert protocol.observation["turn_budget"]["reserved_final_turns"] == 2
-        assert protocol.available_tool_names(1, 1) == {"finish"}
+        assert interface.observation["candidate_attempts"] == 1
+        assert interface.observation["turn_budget"]["reserved_final_turns"] == 2
+        assert interface.available_tool_names(1, 1) == {"finish"}
 
     def test_get_default_plan_returns_only_compact_fields(self, tmp_path: Path) -> None:
         evaluator = FakeEvaluator(tmp_path)

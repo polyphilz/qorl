@@ -1,1 +1,1 @@
-"""Protocol-SFT data assembly and validation."""
+"""Tool-use SFT data assembly and validation."""

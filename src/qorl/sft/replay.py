@@ -30,7 +30,7 @@ def candidate_actions(document: dict[str, Any]) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Replay one protocol-SFT example per CEB template."
+        description="Replay one tool-use SFT example per CEB template."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument(

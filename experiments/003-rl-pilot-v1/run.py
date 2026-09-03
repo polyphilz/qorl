@@ -105,20 +105,20 @@ def rl(repository: Path) -> Path:
     base, _ = pinned_policy(repository)
     report_path = repository / SFT_RUN / "training-report.json"
     if not report_path.is_file():
-        raise RuntimeError("protocol-SFT training report is missing")
+        raise RuntimeError("tool-use SFT training report is missing")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("status") != RunStatus.PASSED:
-        raise RuntimeError("protocol-SFT training did not pass")
+        raise RuntimeError("tool-use SFT training did not pass")
     adapter = repository / SFT_RUN / report["adapter"]
     verification_path = repository / SFT_RUN / report["adapter_verification"]
     if not verification_path.is_file():
-        raise RuntimeError("protocol-SFT adapter verification is missing")
+        raise RuntimeError("tool-use SFT adapter verification is missing")
     verification = json.loads(verification_path.read_text(encoding="utf-8"))
     if not (
         verification.get("adapter_reloaded")
         and verification.get("probabilities_changed")
     ):
-        raise RuntimeError("protocol-SFT adapter verification did not pass")
+        raise RuntimeError("tool-use SFT adapter verification did not pass")
 
     merged = repository / MERGED_MODEL
     if not merged.exists():

@@ -15,7 +15,7 @@ from typing import Any
 from qorl.adapters.model import adapter_rank, model_snapshot
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
-from qorl.agent.protocol import AgentProtocol
+from qorl.agent.interface import AgentInterface
 from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
@@ -107,7 +107,7 @@ def trace_metrics(
     trace: dict[str, Any],
     maximum_turns: int,
 ) -> dict[str, Any]:
-    protocol = AgentProtocol.from_evaluator(evaluator, maximum_turns)
+    interface = AgentInterface.from_evaluator(evaluator, maximum_turns)
     events_by_turn: dict[int, list[dict[str, Any]]] = {}
     for event in trace["tool_events"]:
         events_by_turn.setdefault(event["turn"], []).append(event)
@@ -124,7 +124,7 @@ def trace_metrics(
     first_candidate_turn: int | None = None
 
     for turn, events in sorted(events_by_turn.items()):
-        available = protocol.available_tool_names(turn, candidate_count)
+        available = interface.available_tool_names(turn, candidate_count)
         for event in events:
             name = event.get("name")
             if name is None:
@@ -431,7 +431,7 @@ def selected_policies(mode: str, order: str) -> list[tuple[str, str]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare base and protocol-SFT policies on held-out CEB tasks."
+        description="Compare base and tool-use SFT policies on held-out CEB tasks."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--port", type=int, default=8000)

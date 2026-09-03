@@ -84,7 +84,7 @@ def training_report(
 
 def sft(repository: Path) -> Path:
     if platform.system() != "Linux" or platform.machine() != "x86_64":
-        raise RuntimeError("protocol-SFT v1 requires a Linux x86_64 CUDA training host")
+        raise RuntimeError("tool-use SFT v1 requires a Linux x86_64 CUDA training host")
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is not installed")
@@ -199,7 +199,7 @@ def sft(repository: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run the frozen protocol-SFT v1 experiment."
+        description="Run the frozen tool-use SFT v1 experiment."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     arguments = parser.parse_args()

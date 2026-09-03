@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
+from qorl.agent.interface import RESERVED_DECISION_TURNS, AgentInterface
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
 from qorl.agent.tools import agent_tools
 from qorl.measure.rollout import MAX_CANDIDATES
 from qorl.plans.catalog import TaskCatalog
@@ -65,7 +65,7 @@ def synthetic_demo(repository: Path) -> dict[str, Any]:
             },
         },
     }
-    protocol = AgentProtocol(maximum_turns, inspection_limit, observation, tools)
+    interface = AgentInterface(maximum_turns, inspection_limit, observation, tools)
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(observation, sort_keys=True)},
@@ -96,7 +96,7 @@ def synthetic_demo(repository: Path) -> dict[str, Any]:
                     "tool_call_id": call_id,
                     "name": name,
                     "content": json.dumps(
-                        {**result, "_turn_budget": protocol.budget(turn)},
+                        {**result, "_turn_budget": interface.budget(turn)},
                         sort_keys=True,
                     ),
                 },
@@ -165,7 +165,7 @@ class TestProtocolDemo:
     ) -> None:
         demo = synthetic_demo(repository_root)
         observation = json.loads(demo["messages"][1]["content"])
-        protocol = AgentProtocol(
+        interface = AgentInterface(
             maximum_model_turns=demo["metadata"]["maximum_model_turns"],
             inspection_turn_limit=observation["turn_budget"][
                 "maximum_inspection_turns"
@@ -197,7 +197,7 @@ class TestProtocolDemo:
                     "content": json.dumps(
                         {
                             "status": "kept_default",
-                            "_turn_budget": protocol.budget(2),
+                            "_turn_budget": interface.budget(2),
                         },
                         sort_keys=True,
                     ),

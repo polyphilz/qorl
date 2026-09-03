@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from qorl.agent.protocol import AgentProtocol
+from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import ToolName
 from qorl.db.fixture import DatabaseFixture
@@ -44,12 +44,12 @@ def leading_action(plan: dict[str, Any]) -> dict[str, Any]:
 def call_tool(
     messages: list[dict[str, Any]],
     environment: AgentEnvironment,
-    protocol: AgentProtocol,
+    interface: AgentInterface,
     turn: int,
     name: str,
     arguments: dict[str, Any],
 ) -> tuple[dict[str, Any], bool]:
-    if name not in protocol.available_tool_names(
+    if name not in interface.available_tool_names(
         turn, len(environment.evaluator.candidates)
     ):
         raise RuntimeError(f"{name} is unavailable on turn {turn}")
@@ -73,7 +73,7 @@ def call_tool(
     result, finished = environment.execute(name, arguments)
     if not isinstance(result, dict):
         result = {"result": result}
-    result = {**result, "_turn_budget": protocol.budget(turn)}
+    result = {**result, "_turn_budget": interface.budget(turn)}
     messages.append(
         {
             "role": "tool",
@@ -102,14 +102,14 @@ def build_demo(repository: Path) -> dict[str, Any]:
         worker = slot.worker
         evaluator = RolloutEvaluator(worker, task_set, task)
         evaluator.start()
-        protocol = AgentProtocol.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
+        interface = AgentInterface.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
         environment = AgentEnvironment(evaluator)
-        messages = protocol.initial_messages()
+        messages = interface.initial_messages()
 
         call_tool(
             messages,
             environment,
-            protocol,
+            interface,
             1,
             ToolName.GET_PLAN.value,
             {"candidate_id": "default"},
@@ -120,7 +120,7 @@ def build_demo(repository: Path) -> dict[str, Any]:
         candidate, _ = call_tool(
             messages,
             environment,
-            protocol,
+            interface,
             2,
             ToolName.EVALUATE_CANDIDATE.value,
             {"action": action},
@@ -133,13 +133,13 @@ def build_demo(repository: Path) -> dict[str, Any]:
         call_tool(
             messages,
             environment,
-            protocol,
+            interface,
             3,
             ToolName.GET_PLAN.value,
             {"candidate_id": candidate_id},
         )
         _, finished = call_tool(
-            messages, environment, protocol, 4, ToolName.FINISH.value, {}
+            messages, environment, interface, 4, ToolName.FINISH.value, {}
         )
         if not finished:
             raise RuntimeError("finish did not end the demonstration")
@@ -148,7 +148,7 @@ def build_demo(repository: Path) -> dict[str, Any]:
         return {
             "schema_version": 1,
             "messages": messages,
-            "tools": protocol.tools,
+            "tools": interface.tools,
             "metadata": {
                 "demonstration_id": DEMONSTRATION_ID,
                 "teacher": "postgres_default_join_tree",
@@ -177,7 +177,7 @@ def build_demo(repository: Path) -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build one live, deterministic CEB protocol demonstration."
+        description="Build one live, deterministic CEB demonstration."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument(

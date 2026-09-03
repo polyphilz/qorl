@@ -15,7 +15,7 @@ INSPECTION_TURNS_PER_ALIAS = 3
 
 
 @dataclass(frozen=True)
-class AgentProtocol:
+class AgentInterface:
     """The exact observation, tools, and turn rules shown to the model."""
 
     maximum_model_turns: int
@@ -30,7 +30,7 @@ class AgentProtocol:
         maximum_model_turns: int,
         context_length: int | None = None,
         completion_reserve: int | None = None,
-    ) -> AgentProtocol:
+    ) -> AgentInterface:
         aliases = sorted(evaluator.catalog.relations)
         tools = agent_tools(aliases)
         candidate_attempts = getattr(evaluator, "max_candidates", MAX_CANDIDATES)

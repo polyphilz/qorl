@@ -7,8 +7,8 @@ from typing import Any
 
 from qorl.agent.client import ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
+from qorl.agent.interface import AgentInterface
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import (
     TERMINAL_STOP_REASON,
@@ -117,13 +117,13 @@ class QoAgentPolicy:
             MIN_COMPLETION_RESERVE_TOKENS,
             int(self.config.sampling.get("max_tokens", 0)),
         )
-        protocol = AgentProtocol.from_evaluator(
+        interface = AgentInterface.from_evaluator(
             evaluator,
             self.config.maximum_model_turns,
             self.config.context_length,
             completion_reserve,
         )
-        messages = protocol.initial_messages()
+        messages = interface.initial_messages()
         responses: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         environment = AgentEnvironment(evaluator)
@@ -131,7 +131,7 @@ class QoAgentPolicy:
         context_estimate_tokens: int | None = None
 
         for turn in range(1, self.config.maximum_model_turns + 1):
-            available_tools = protocol.available_tools(turn, len(evaluator.candidates))
+            available_tools = interface.available_tools(turn, len(evaluator.candidates))
             response = self.client.chat(
                 self.request_body(
                     messages, available_tools, evaluator.task["task_id"], turn
@@ -178,7 +178,7 @@ class QoAgentPolicy:
                     if index == 0
                     else ({"error": "call one tool at a time"}, False)
                 )
-                budget = protocol.budget(turn)
+                budget = interface.budget(turn)
                 result = (
                     {**result, TURN_BUDGET_FIELD: budget}
                     if isinstance(result, dict)
@@ -252,9 +252,9 @@ class QoAgentPolicy:
                     usage[name] = usage.get(name, 0) + value
         return {
             "stop_reason": stop_reason.value,
-            "initial_observation": protocol.observation,
-            "tools": protocol.tools,
-            "tools_sha256": sha256_json(protocol.tools),
+            "initial_observation": interface.observation,
+            "tools": interface.tools,
+            "tools_sha256": sha256_json(interface.tools),
             "transcript": messages,
             "model_responses": responses,
             "tool_events": events,

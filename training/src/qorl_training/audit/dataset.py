@@ -50,7 +50,7 @@ def packed_rows(lengths: list[int], sequence_length: int, seed: int) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Audit every rendered protocol-SFT example and loss mask."
+        description="Audit every rendered tool-use SFT example and loss mask."
     )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--dataset", type=Path, required=True)

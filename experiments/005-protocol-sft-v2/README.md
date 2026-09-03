@@ -1,4 +1,4 @@
-# 005 — Protocol SFT v2
+# 005 — Tool-use SFT v2
 
 **Status:** planned
 

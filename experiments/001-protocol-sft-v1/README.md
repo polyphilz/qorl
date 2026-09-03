@@ -1,4 +1,4 @@
-# 001 — Protocol SFT v1
+# 001 — Tool-use SFT v1
 
 **Status:** completed
 

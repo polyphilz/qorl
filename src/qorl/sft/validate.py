@@ -5,12 +5,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import (
+from qorl.agent.interface import (
     INSPECTION_TURNS_PER_ALIAS,
     RESERVED_DECISION_TURNS,
-    AgentProtocol,
+    AgentInterface,
 )
+from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.fixture import data_identity
@@ -118,7 +118,7 @@ def validate_protocol_demo(
         len(aliases) * INSPECTION_TURNS_PER_ALIAS,
         max(0, maximum_turns - RESERVED_DECISION_TURNS),
     )
-    protocol = AgentProtocol(
+    interface = AgentInterface(
         maximum_model_turns=maximum_turns,
         inspection_turn_limit=inspection_limit,
         observation=observation,
@@ -135,7 +135,7 @@ def validate_protocol_demo(
                 "finish_or_keep_default": 1,
             },
         },
-        "turn budget differs from the live agent protocol",
+        "turn budget differs from the live agent interface",
     )
     indexes = observation.get("indexes")
     require(isinstance(indexes, dict), "initial observation has invalid indexes")
@@ -176,7 +176,7 @@ def validate_protocol_demo(
             isinstance(arguments, dict), f"turn {turn}: arguments must be an object"
         )
         require(
-            name in protocol.available_tool_names(turn, len(issued_candidates)),
+            name in interface.available_tool_names(turn, len(issued_candidates)),
             f"turn {turn}: {name} was not available",
         )
         call_sequence.append(name)
@@ -189,7 +189,7 @@ def validate_protocol_demo(
         result = parse_json(tool_result.get("content"), f"turn {turn} result")
         require(isinstance(result, dict), f"turn {turn}: result must be an object")
         require(
-            result.get(TURN_BUDGET_FIELD) == protocol.budget(turn),
+            result.get(TURN_BUDGET_FIELD) == interface.budget(turn),
             f"turn {turn}: budget mismatch",
         )
         require("error" not in result, f"turn {turn}: tool returned an error")

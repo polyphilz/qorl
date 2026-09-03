@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 from typing import Any
 
-from qorl.agent.protocol import AgentProtocol
+from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.exceptions import WorkerError
@@ -379,7 +379,7 @@ def inspection_calls(
 
 def record_tool(
     messages: list[dict[str, Any]],
-    protocol: AgentProtocol,
+    interface: AgentInterface,
     turn: int,
     name: str,
     arguments: dict[str, Any],
@@ -407,7 +407,7 @@ def record_tool(
                 "tool_call_id": call_id,
                 "name": name,
                 "content": json.dumps(
-                    {**result, TURN_BUDGET_FIELD: protocol.budget(turn)},
+                    {**result, TURN_BUDGET_FIELD: interface.budget(turn)},
                     sort_keys=True,
                 ),
             },
@@ -418,7 +418,7 @@ def record_tool(
 def execute_inspection(
     messages: list[dict[str, Any]],
     environment: AgentEnvironment,
-    protocol: AgentProtocol,
+    interface: AgentInterface,
     turn: int,
     name: str,
     arguments: dict[str, Any],
@@ -426,7 +426,7 @@ def execute_inspection(
     result, finished = environment.execute(name, arguments)
     if finished or not isinstance(result, dict) or "error" in result:
         raise RuntimeError(f"inspection failed: {name} {result}")
-    record_tool(messages, protocol, turn, name, arguments, result)
+    record_tool(messages, interface, turn, name, arguments, result)
 
 
 def evaluate_action(
@@ -505,9 +505,9 @@ def build_document(
 ) -> dict[str, Any]:
     evaluator = PlanValidationEvaluator(worker, task_set, task)
     evaluator.start()
-    protocol = AgentProtocol.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
+    interface = AgentInterface.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
     environment = AgentEnvironment(evaluator)
-    messages = protocol.initial_messages()
+    messages = interface.initial_messages()
     rng = random.Random(trace_seed(task["task_id"], dataset_seed))
     recipe = RECIPES[ordinal % len(RECIPES)]
     requested_candidates = ordinal % MAX_CANDIDATES + 1
@@ -515,7 +515,7 @@ def build_document(
     turn = 1
 
     for name, arguments in inspection_calls(recipe, task, evaluator.catalog):
-        execute_inspection(messages, environment, protocol, turn, name, arguments)
+        execute_inspection(messages, environment, interface, turn, name, arguments)
         call_sequence.append(name)
         turn += 1
 
@@ -535,7 +535,7 @@ def build_document(
         candidate_id = feedback["candidate_id"]
         record_tool(
             messages,
-            protocol,
+            interface,
             turn,
             ToolName.EVALUATE_CANDIDATE.value,
             {"action": candidate.action},
@@ -555,7 +555,7 @@ def build_document(
             execute_inspection(
                 messages,
                 environment,
-                protocol,
+                interface,
                 turn,
                 ToolName.GET_PLAN.value,
                 arguments,
@@ -566,13 +566,13 @@ def build_document(
     result, finished = environment.execute(ToolName.FINISH.value, {})
     if not finished or result != {"status": ToolResultStatus.FINISHED.value}:
         raise RuntimeError("finish did not terminate the demonstration")
-    record_tool(messages, protocol, turn, ToolName.FINISH.value, {}, result)
+    record_tool(messages, interface, turn, ToolName.FINISH.value, {}, result)
     call_sequence.append(ToolName.FINISH.value)
 
     document = {
         "schema_version": 1,
         "messages": messages,
-        "tools": protocol.tools,
+        "tools": interface.tools,
         "metadata": {
             "demonstration_id": f"{DATASET_ID}-{ordinal + 1:04d}",
             "ordinal": ordinal,
@@ -621,7 +621,7 @@ def existing_documents(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate the deterministic 256/64 CEB protocol-SFT dataset."
+        description="Generate the deterministic 256/64 CEB tool-use SFT dataset."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--config", type=Path, required=True)
@@ -643,7 +643,7 @@ def main() -> None:
         or isinstance(config.get("seed"), bool)
         or not isinstance(config.get("seed"), int)
     ):
-        raise RuntimeError(f"invalid protocol-SFT dataset configuration: {config_path}")
+        raise RuntimeError(f"invalid tool-use SFT dataset configuration: {config_path}")
     dataset_seed = config["seed"]
     output_dir = arguments.output
     if not output_dir.is_absolute():

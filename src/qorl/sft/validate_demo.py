@@ -9,7 +9,7 @@ from qorl.sft.validate import validate_protocol_demo
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Mechanically validate one QORL protocol demonstration."
+        description="Mechanically validate one QORL demonstration."
     )
     parser.add_argument(
         "path",
