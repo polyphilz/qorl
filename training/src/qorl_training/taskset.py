@@ -7,7 +7,7 @@ from typing import Literal
 
 import verifiers.v1 as vf
 
-from qorl.measure.rollout import Decision, FinalStatus
+from qorl.measure.schemas import Decision, FinalStatus
 from qorl.workload.taskset import TaskSet
 
 SELECTION_SPLITS = {

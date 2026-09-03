@@ -17,12 +17,8 @@ from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
 from qorl.evaluation.types import RunStatus
-from qorl.measure.rollout import (
-    FinalStatus,
-    MeasurementProtocolId,
-    RolloutEvaluator,
-    TrainingRolloutEvaluatorV1,
-)
+from qorl.measure.rollout import RolloutEvaluator, training_protocol
+from qorl.measure.schemas import FinalStatus, MeasurementProtocolId
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
@@ -160,7 +156,14 @@ def replay(
 ) -> dict[str, Any]:
     counted = CountingWorker(worker)
     if protocol == MeasurementProtocolId.RL_TRAINING_V1:
-        evaluator = TrainingRolloutEvaluatorV1(counted, task_set, task)
+        evaluator = RolloutEvaluator(
+            counted,
+            task_set,
+            task,
+            measurement_protocol=training_protocol(
+                MeasurementProtocolId.RL_TRAINING_V1
+            ),
+        )
     else:
         evaluator = RolloutEvaluator(counted, task_set, task)
     baseline = evaluator.start()
@@ -168,19 +171,19 @@ def replay(
     final = evaluator.finish(random.Random(seed))
     return {
         "measurement_protocol": evaluator.measurement_protocol.manifest(),
-        "default_median_execution_time_ms": baseline["median_execution_time_ms"],
+        "default_median_execution_time_ms": baseline.median_execution_time_ms,
         "candidates": [
             {
-                "candidate_id": candidate["candidate_id"],
-                "action_valid": candidate["action_valid"],
-                "constraints_satisfied": candidate["constraints_satisfied"],
-                "duplicate_of": candidate["duplicate_of"],
-                "plan_sha256": candidate["plan_sha256"],
-                "provisional_speedup": candidate["provisional_speedup"],
+                "candidate_id": candidate.candidate_id,
+                "action_valid": candidate.action_valid,
+                "constraints_satisfied": candidate.constraints_satisfied,
+                "duplicate_of": candidate.duplicate_of,
+                "plan_sha256": candidate.plan_sha256,
+                "provisional_speedup": candidate.provisional_speedup,
             }
             for candidate in candidates
         ],
-        "final": final,
+        "final": final.to_wire(),
         "database_calls": {
             "explain": counted.explain_calls,
             "explain_analyze": counted.explain_analyze_calls,

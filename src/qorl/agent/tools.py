@@ -90,23 +90,3 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
             {},
         ),
     ]
-
-
-def candidate_feedback(candidate: dict[str, Any]) -> dict[str, Any]:
-    measurements = candidate.get("provisional_measurements", [])
-    return {
-        "candidate_id": candidate["candidate_id"],
-        "action_valid": candidate["action_valid"],
-        "constraints_satisfied": candidate["constraints_satisfied"],
-        "compiled_hint": candidate["compiled_hint"],
-        "duplicate_of": candidate["duplicate_of"],
-        "plan_sha256": candidate["plan_sha256"],
-        "compact_plan": candidate.get("compact_plan"),
-        "planning_time_ms": [item["planning_time_ms"] for item in measurements],
-        "execution_time_ms": [item["execution_time_ms"] for item in measurements],
-        "provisional_speedup": candidate["provisional_speedup"],
-        "execution_timed_out": candidate.get("execution_timed_out", False),
-        "timeout_ms": candidate.get("timeout_ms"),
-        "errors_or_diagnostics": candidate["errors_or_diagnostics"],
-        "attempts_remaining": candidate["attempts_remaining"],
-    }

@@ -24,9 +24,9 @@ from qorl.measure.rollout import (
     GLOBAL_TIMEOUT_MS,
     MAX_CANDIDATES,
     RIGOROUS_EVALUATION_PROTOCOL_V1,
-    FinalStatus,
     RolloutEvaluator,
 )
+from qorl.measure.schemas import FinalStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
@@ -95,13 +95,12 @@ def run_task(
         action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
         for _ in range(MAX_CANDIDATES):
             candidate = evaluator.evaluate(sample_action(evaluator.catalog, action_rng))
-            if candidate["constraints_satisfied"]:
+            if candidate.constraints_satisfied:
                 print(
-                    f"  {candidate['candidate_id']}: "
-                    f"{candidate['provisional_speedup']:.3f}x"
+                    f"  {candidate.candidate_id}: {candidate.provisional_speedup:.3f}x"
                 )
             else:
-                print(f"  {candidate['candidate_id']}: invalid")
+                print(f"  {candidate.candidate_id}: invalid")
         trace = {"random_seed": policy["seed"]}
     else:
         if agent is None:
@@ -113,12 +112,12 @@ def run_task(
         "schema_version": 1,
         "task_id": task["task_id"],
         "template_id": task["template_id"],
-        "status": final["status"],
+        "status": final.status,
         "completed_at_utc": utc_now(),
         "policy_trace": trace,
-        "default": baseline,
-        "candidates": evaluator.candidates,
-        "final": final,
+        "default": baseline.to_wire(),
+        "candidates": [candidate.to_wire() for candidate in evaluator.candidates],
+        "final": final.to_wire(),
     }
 
 

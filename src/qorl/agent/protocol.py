@@ -40,6 +40,8 @@ class AgentProtocol:
             max(0, maximum_model_turns - reserved_decision_turns),
         )
         settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
+        if evaluator.default is None:
+            raise RuntimeError("rollout baseline has not been started")
         observation = {
             "task_id": evaluator.task["task_id"],
             "objective": "minimize measured warm-cache execution time",
@@ -54,10 +56,10 @@ class AgentProtocol:
                 "postgresql"
             ]["server_version_num"],
             "planner_settings": evaluator.worker.settings(settings),
-            "default_plan": evaluator.default["compact_plan"],
-            "default_median_execution_time_ms": evaluator.default[
-                "median_execution_time_ms"
-            ],
+            "default_plan": evaluator.default.compact_plan,
+            "default_median_execution_time_ms": (
+                evaluator.default.median_execution_time_ms
+            ),
             "candidate_attempts": candidate_attempts,
             "candidate_timeout_ms": evaluator.timeout_ms,
             "turn_budget": {

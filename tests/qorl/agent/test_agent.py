@@ -15,6 +15,7 @@ from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor
 from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import Baseline, Candidate, Measurement
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.schemas import (
     BOOLEAN_SETTINGS,
@@ -187,39 +188,46 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
                 repository=repository,
             ),
         )
-        self.default = {
-            "compact_plan": {"Node Type": "Result"},
-            "plain_explain": {
+        self.default = Baseline(
+            plan_sha256="default",
+            compact_plan={"Node Type": "Result"},
+            plain_explain={
                 "Plan": {
                     "Node Type": "Result",
                     "Plan Rows": 1,
                     "Total Cost": 99.0,
                 }
             },
-            "median_execution_time_ms": 1.0,
-        }
+            median_execution_time_ms=1.0,
+        )
         self.timeout_ms = 5_000
         self.candidates = []
         self.actions = []
         self.kept_default = False
 
-    def evaluate(self, action: object) -> dict:
+    def evaluate(self, action: object) -> Candidate:
         self.actions.append(action)
-        candidate = {
-            "candidate_id": "candidate-01",
-            "action_valid": True,
-            "constraints_satisfied": True,
-            "compiled_hint": "",
-            "duplicate_of": "default",
-            "plan_sha256": "abc",
-            "compact_plan": {"Node Type": "Result"},
-            "provisional_measurements": [
-                {"planning_time_ms": 0.1, "execution_time_ms": 1.0}
+        candidate = Candidate(
+            candidate_id="candidate-01",
+            action=action,
+            action_valid=True,
+            constraints_satisfied=True,
+            compiled_hint="",
+            duplicate_of="default",
+            plan_sha256="abc",
+            compact_plan={"Node Type": "Result"},
+            provisional_measurements=[
+                Measurement(
+                    planning_time_ms=0.1,
+                    execution_time_ms=1.0,
+                    plan_sha256="abc",
+                )
             ],
-            "provisional_speedup": 1.0,
-            "errors_or_diagnostics": [],
-            "attempts_remaining": 4,
-        }
+            provisional_speedup=1.0,
+            errors_or_diagnostics=[],
+            pg_hint_plan=None,
+            attempts_remaining=4,
+        )
         self.candidates.append(candidate)
         return candidate
 

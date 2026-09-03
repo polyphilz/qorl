@@ -8,20 +8,24 @@ from pathlib import Path
 from typing import Any
 
 from qorl.db.worker import ExplainResult, QueryTimeout
+from qorl.measure.protocols import QueryExecutor
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
-    RL_TRAINING_PROTOCOL_V1,
-    RL_TRAINING_PROTOCOL_V2,
-    QueryExecutor,
     RolloutEvaluator,
-    TrainingRolloutEvaluatorV1,
-    TrainingRolloutEvaluatorV2,
+    training_protocol,
+)
+from qorl.measure.schemas import (
+    Baseline,
+    Candidate,
+    CandidateOutcome,
+    MeasurementProtocolId,
+    Outcome,
+    OutcomeKind,
     score,
-    task_timeout_ms,
 )
 from qorl.plans.fingerprint import plan_sha256
 from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import TaskTimeout
+from qorl.workload.timeouts import TaskTimeout, task_timeout_ms
 
 TASK: dict[str, Any] = {
     "task_id": "job-test",
@@ -164,12 +168,13 @@ class RolloutTest(unittest.TestCase):
         )
         evaluator.start()
         result = evaluator.evaluate({"version": 2})
-        self.assertFalse(result["action_valid"])
+        self.assertFalse(result.action_valid)
+        self.assertEqual(result.outcome, CandidateOutcome.MALFORMED)
         self.assertEqual(
-            result["errors_or_diagnostics"],
+            result.errors_or_diagnostics,
             ["version must equal 1"],
         )
-        self.assertEqual(result["attempts_remaining"], 4)
+        self.assertEqual(result.attempts_remaining, 4)
 
     def test_candidate_budget_can_be_reduced_for_training(self) -> None:
         evaluator = RolloutEvaluator(
@@ -182,7 +187,7 @@ class RolloutTest(unittest.TestCase):
 
         result = evaluator.evaluate({"version": 2})
 
-        self.assertEqual(result["attempts_remaining"], 0)
+        self.assertEqual(result.attempts_remaining, 0)
         with self.assertRaisesRegex(RuntimeError, "budget is exhausted"):
             evaluator.evaluate({"version": 2})
         self.assertEqual(
@@ -202,9 +207,10 @@ class RolloutTest(unittest.TestCase):
         result = evaluator.evaluate(
             {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
         )
-        self.assertTrue(result["action_valid"])
-        self.assertEqual(result["duplicate_of"], "default")
-        self.assertEqual(result["provisional_speedup"], 1.0)
+        self.assertTrue(result.action_valid)
+        self.assertEqual(result.outcome, CandidateOutcome.DUPLICATE)
+        self.assertEqual(result.duplicate_of, "default")
+        self.assertEqual(result.provisional_speedup, 1.0)
 
     def test_default_fingerprint_winner_is_exactly_one_without_remeasurement(
         self,
@@ -222,12 +228,13 @@ class RolloutTest(unittest.TestCase):
         final = evaluator.finish(random.Random(0))
 
         self.assertEqual(worker.analyze_calls, analyze_calls_before_finish)
-        self.assertEqual(final["score"], 1.0)
-        self.assertEqual(final["score_source"], "default_fingerprint")
-        self.assertEqual(final["pair_orders"], [])
+        self.assertEqual(final.score, 1.0)
+        self.assertEqual(final.kind, OutcomeKind.DEFAULT_DUPLICATE)
+        self.assertEqual(final.score_source, "default_fingerprint")
+        self.assertEqual(final.pair_orders, [])
         self.assertEqual(
-            final["candidate_median_execution_time_ms"],
-            final["default_median_execution_time_ms"],
+            final.candidate_median_execution_time_ms,
+            final.default_median_execution_time_ms,
         )
 
     def test_keep_default_is_a_zero_reward_terminal_decision(self) -> None:
@@ -245,13 +252,14 @@ class RolloutTest(unittest.TestCase):
 
         self.assertEqual(worker.analyze_calls, analyze_calls_before_decision)
         self.assertEqual(evaluator.candidates, [])
-        self.assertEqual(final["status"], "completed")
-        self.assertEqual(final["decision"], "keep_default")
-        self.assertEqual(final["winning_candidate_id"], "default")
-        self.assertEqual(final["winning_plan_sha256"], baseline["plan_sha256"])
-        self.assertEqual(final["score"], 1.0)
-        self.assertEqual(final["trajectory_reward"], 0.0)
-        self.assertEqual(final["pair_orders"], [])
+        self.assertEqual(final.status, "completed")
+        self.assertEqual(final.kind, OutcomeKind.KEPT_DEFAULT)
+        self.assertEqual(final.decision, "keep_default")
+        self.assertEqual(final.winning_candidate_id, "default")
+        self.assertEqual(final.winning_plan_sha256, baseline.plan_sha256)
+        self.assertEqual(final.score, 1.0)
+        self.assertEqual(final.trajectory_reward, 0.0)
+        self.assertEqual(final.pair_orders, [])
 
     def test_keep_default_is_rejected_after_a_candidate(self) -> None:
         evaluator = RolloutEvaluator(
@@ -277,10 +285,10 @@ class RolloutTest(unittest.TestCase):
 
         self.assertEqual(worker.analyze_calls, 26)
         self.assertEqual(worker.plain_calls, 6)
-        self.assertEqual(len(default["measurements"]), 3)
-        self.assertIsNotNone(candidates[0]["warmup"])
-        self.assertEqual(len(final["pair_orders"]), 5)
-        self.assertEqual(final["measurement_protocol_id"], "rigorous-evaluation-v1")
+        self.assertEqual(len(default.measurements), 3)
+        self.assertIsNotNone(candidates[0].warmup)
+        self.assertEqual(len(final.pair_orders), 5)
+        self.assertEqual(final.measurement_protocol_id, "rigorous-evaluation-v1")
         self.assertEqual(
             RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions,
             26,
@@ -288,21 +296,23 @@ class RolloutTest(unittest.TestCase):
 
     def test_training_protocol_uses_13_executions(self) -> None:
         worker = CountingWorker()
-        evaluator = TrainingRolloutEvaluatorV1(
+        protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V1)
+        evaluator = RolloutEvaluator(
             worker,
             Fixture(),
             TASK,
+            measurement_protocol=protocol,
         )
 
         default, candidates, final = self.run_full_rollout(evaluator)
 
         self.assertEqual(worker.analyze_calls, 13)
         self.assertEqual(worker.plain_calls, 6)
-        self.assertEqual(len(default["measurements"]), 1)
-        self.assertIsNone(candidates[0]["warmup"])
-        self.assertEqual(len(final["pair_orders"]), 3)
-        self.assertEqual(final["measurement_protocol_id"], "rl-training-v1")
-        self.assertEqual(RL_TRAINING_PROTOCOL_V1.max_explain_analyze_executions, 13)
+        self.assertEqual(len(default.measurements), 1)
+        self.assertIsNone(candidates[0].warmup)
+        self.assertEqual(len(final.pair_orders), 3)
+        self.assertEqual(final.measurement_protocol_id, "rl-training-v1")
+        self.assertEqual(protocol.max_explain_analyze_executions, 13)
 
     def test_serialized_rollout_record_is_unchanged(self) -> None:
         evaluator = RolloutEvaluator(
@@ -316,9 +326,9 @@ class RolloutTest(unittest.TestCase):
             "schema_version": 1,
             "task_id": TASK["task_id"],
             "template_id": "test",
-            "default": default,
-            "candidates": candidates,
-            "final": final,
+            "default": default.to_wire(),
+            "candidates": [candidate.to_wire() for candidate in candidates],
+            "final": final.to_wire(),
         }
 
         golden_path = Path(__file__).with_name("golden_rollout.json")
@@ -329,12 +339,17 @@ class RolloutTest(unittest.TestCase):
         default_plan = deepcopy(DEFAULT_PLAN)
         default_plan["Plan Rows"] = 0
         default_plan_sha256 = plan_sha256(default_plan)
-        evaluator = TrainingRolloutEvaluatorV2(
+        evaluator = RolloutEvaluator(
             TimeoutWorker(),
             Fixture(),
             TASK,
-            TaskTimeout("job-test", 1_500.0, 5_000, (default_plan_sha256,)),
-            "test-timeouts",
+            measurement_protocol=training_protocol(
+                MeasurementProtocolId.RL_TRAINING_V2
+            ),
+            calibrated_timeout=TaskTimeout(
+                "job-test", 1_500.0, 5_000, (default_plan_sha256,)
+            ),
+            timeout_manifest_id="test-timeouts",
         )
         baseline = evaluator.start()
 
@@ -344,32 +359,37 @@ class RolloutTest(unittest.TestCase):
         final = evaluator.finish(random.Random(0))
 
         self.assertEqual(evaluator.timeout_ms, 5_000)
-        self.assertEqual(baseline["candidate_timeout"]["source"], "calibrated")
-        self.assertTrue(candidate["action_valid"])
-        self.assertTrue(candidate["constraints_satisfied"])
-        self.assertTrue(candidate["execution_timed_out"])
-        self.assertEqual(candidate["provisional_speedup"], 0.1)
-        self.assertEqual(final["status"], "no_valid_candidate")
-        self.assertEqual(final["timeout_attempt_count"], 1)
+        self.assertIsNotNone(baseline.candidate_timeout)
+        self.assertEqual(baseline.candidate_timeout.source, "calibrated")
+        self.assertTrue(candidate.action_valid)
+        self.assertTrue(candidate.constraints_satisfied)
+        self.assertTrue(candidate.execution_timed_out)
+        self.assertEqual(candidate.outcome, CandidateOutcome.TIMED_OUT)
+        self.assertEqual(candidate.provisional_speedup, 0.1)
+        self.assertEqual(final.status, "no_valid_candidate")
+        self.assertEqual(final.kind, OutcomeKind.NO_VALID_CANDIDATE)
+        self.assertEqual(final.timeout_attempt_count, 1)
 
     def test_calibrated_default_plan_must_still_match(self) -> None:
-        evaluator = TrainingRolloutEvaluatorV2(
+        protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V2)
+        evaluator = RolloutEvaluator(
             CountingWorker(),
             Fixture(),
             TASK,
-            TaskTimeout("job-test", 1_500.0, 5_000, ("stale-plan",)),
-            "test-timeouts",
+            measurement_protocol=protocol,
+            calibrated_timeout=TaskTimeout("job-test", 1_500.0, 5_000, ("stale-plan",)),
+            timeout_manifest_id="test-timeouts",
         )
 
         with self.assertRaisesRegex(RuntimeError, "default plan differs"):
             evaluator.start()
         self.assertEqual(evaluator.measurement_protocol.protocol_id, "rl-training-v2")
-        self.assertEqual(RL_TRAINING_PROTOCOL_V2.max_explain_analyze_executions, 13)
+        self.assertEqual(protocol.max_explain_analyze_executions, 13)
 
     @staticmethod
     def run_full_rollout(
         evaluator: RolloutEvaluator[QueryExecutor],
-    ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    ) -> tuple[Baseline, list[Candidate], Outcome]:
         default = evaluator.start()
         candidates = [
             evaluator.evaluate(
@@ -380,6 +400,6 @@ class RolloutTest(unittest.TestCase):
             )
             for value in range(1, 6)
         ]
-        if not all(candidate["constraints_satisfied"] for candidate in candidates):
+        if not all(candidate.constraints_satisfied for candidate in candidates):
             raise AssertionError("test candidates must all be valid")
         return default, candidates, evaluator.finish(random.Random(0))

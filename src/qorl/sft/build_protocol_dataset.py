@@ -10,15 +10,19 @@ from typing import Any
 
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
-from qorl.agent.tools import candidate_feedback
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
 from qorl.measure.rollout import (
     MAX_CANDIDATES,
-    MeasurementStatus,
+    PlanTiming,
     RolloutEvaluator,
+)
+from qorl.measure.schemas import (
+    Baseline,
+    Candidate,
+    MeasurementStatus,
     ToolResultStatus,
 )
 from qorl.plans.catalog import TaskCatalog
@@ -75,20 +79,20 @@ RECIPES = (
 class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
     """Exercise the live planning path without executing benchmark queries."""
 
-    def start(self) -> dict[str, Any]:
+    def start(self) -> Baseline:
         plain = self.worker.explain(self.sql, self.global_timeout_ms)
         fingerprint = plan_sha256(plain.document["Plan"])
-        self.default = {
-            "plan_sha256": fingerprint,
-            "plain_explain": plain.document,
-            "compact_plan": compact_plan(plain.document["Plan"]),
-            "median_execution_time_ms": None,
-        }
-        self.by_fingerprint[fingerprint] = {"candidate_id": "default"}
+        self.default = Baseline(
+            plan_sha256=fingerprint,
+            plain_explain=plain.document,
+            median_execution_time_ms=None,
+            compact_plan=compact_plan(plain.document["Plan"]),
+        )
+        self.by_fingerprint[fingerprint] = PlanTiming("default", [], None)
         return self.default
 
-    def evaluate(self, raw_action: Any) -> dict[str, Any]:
-        if not self.default:
+    def evaluate(self, raw_action: Any) -> Candidate:
+        if self.default is None:
             raise RuntimeError("rollout baseline has not been started")
         if len(self.candidates) >= MAX_CANDIDATES:
             raise RuntimeError("rollout candidate budget is exhausted")
@@ -123,26 +127,26 @@ class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
 
         fingerprint = plan_sha256(plain.document["Plan"])
         duplicate = self.by_fingerprint.get(fingerprint)
-        result: dict[str, Any] = {
-            "candidate_id": candidate_id,
-            "action": action,
-            "action_valid": True,
-            "constraints_satisfied": True,
-            "compiled_hint": hint,
-            "duplicate_of": duplicate["candidate_id"] if duplicate else None,
-            "plan_sha256": fingerprint,
-            "plain_explain": plain.document,
-            "compact_plan": compact_plan(plain.document["Plan"]),
-            "provisional_measurements": [],
-            "provisional_speedup": None,
-            "measurement_status": MeasurementStatus.NOT_MEASURED.value,
-            "errors_or_diagnostics": [],
-            "pg_hint_plan": diagnostics,
-            "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
-        }
+        result = Candidate(
+            candidate_id=candidate_id,
+            action=action,
+            action_valid=True,
+            constraints_satisfied=True,
+            compiled_hint=hint,
+            duplicate_of=duplicate.candidate_id if duplicate else None,
+            plan_sha256=fingerprint,
+            plain_explain=plain.document,
+            compact_plan=compact_plan(plain.document["Plan"]),
+            provisional_measurements=[],
+            provisional_speedup=None,
+            measurement_status=MeasurementStatus.NOT_MEASURED,
+            errors_or_diagnostics=[],
+            pg_hint_plan=diagnostics,
+            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
+        )
         self.candidates.append(result)
         if duplicate is None:
-            self.by_fingerprint[fingerprint] = {"candidate_id": candidate_id}
+            self.by_fingerprint[fingerprint] = PlanTiming(candidate_id, [], None)
         return result
 
 
@@ -430,7 +434,7 @@ def evaluate_action(
     seen_actions: set[str],
     *,
     require_novel_plan: bool,
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
+) -> tuple[dict[str, Any], Candidate] | None:
     try:
         normalized = PlanAction.from_raw(action, evaluator.catalog).to_wire()
     except ActionError:
@@ -440,15 +444,17 @@ def evaluate_action(
         return None
 
     candidate = evaluator.evaluate(normalized)
-    if not candidate["action_valid"] or not candidate["constraints_satisfied"]:
+    if not candidate.action_valid or not candidate.constraints_satisfied:
         evaluator.candidates.pop()
         return None
-    if require_novel_plan and candidate.get("duplicate_of") is not None:
+    if require_novel_plan and candidate.duplicate_of is not None:
         evaluator.candidates.pop()
         return None
     seen_actions.add(encoded)
-    feedback = candidate_feedback(candidate)
-    feedback["measurement_status"] = candidate["measurement_status"]
+    feedback = candidate.feedback()
+    if candidate.measurement_status is None:
+        raise RuntimeError("plan-validation candidate is missing measurement status")
+    feedback["measurement_status"] = candidate.measurement_status.value
     return feedback, candidate
 
 
@@ -459,7 +465,7 @@ def choose_candidate(
     rng: random.Random,
     ordinal: int,
     slot: int,
-) -> tuple[str, dict[str, Any], dict[str, Any], int]:
+) -> tuple[str, dict[str, Any], Candidate, int]:
     rejected = 0
     if slot == 1:
         for _ in range(MAX_ACTION_ATTEMPTS):
@@ -512,7 +518,9 @@ def build_document(
         call_sequence.append(name)
         turn += 1
 
-    plan = evaluator.default["plain_explain"]["Plan"]
+    if evaluator.default is None:
+        raise RuntimeError("rollout baseline has not been started")
+    plan = evaluator.default.plain_explain["Plan"]
     derived = default_derived_actions(plan, evaluator.catalog, rng)
     seen_actions: set[str] = set()
     evidence: dict[str, dict[str, Any]] = {}
@@ -529,15 +537,15 @@ def build_document(
             protocol,
             turn,
             ToolName.EVALUATE_CANDIDATE.value,
-            {"action": candidate["action"]},
+            {"action": candidate.action},
             feedback,
         )
         call_sequence.append(ToolName.EVALUATE_CANDIDATE.value)
         strategies.append(strategy)
         evidence[candidate_id] = {
-            "action": candidate["action"],
-            "plain_explain": candidate["plain_explain"],
-            "pg_hint_plan": candidate["pg_hint_plan"],
+            "action": candidate.action,
+            "plain_explain": candidate.plain_explain,
+            "pg_hint_plan": candidate.pg_hint_plan,
         }
         turn += 1
 
@@ -587,7 +595,7 @@ def build_document(
             "call_sequence": call_sequence,
         },
         "evidence": {
-            "default_plan": evaluator.default["plain_explain"],
+            "default_plan": evaluator.default.plain_explain,
             "candidates": evidence,
         },
     }

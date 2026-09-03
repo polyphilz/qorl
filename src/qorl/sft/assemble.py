@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.agent.types import ToolName
-from qorl.measure.rollout import MeasurementStatus
+from qorl.measure.schemas import MeasurementStatus
 from qorl.plans.schemas import AUTO, MemoizeMode
 from qorl.sft.validate import validate_protocol_demo
 from qorl.util.hashing import sha256_file

@@ -2,7 +2,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from qorl.db.fixture import DatabaseFixture
-from qorl.measure.rollout import QueryExecutor
+from qorl.measure.protocols import QueryExecutor
 
 # This internal-looking key is already model-visible and therefore wire-stable.
 TURN_BUDGET_FIELD = "_turn_budget"

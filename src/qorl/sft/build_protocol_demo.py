@@ -114,7 +114,9 @@ def build_demo(repository: Path) -> dict[str, Any]:
             ToolName.GET_PLAN.value,
             {"candidate_id": "default"},
         )
-        action = leading_action(evaluator.default["plain_explain"]["Plan"])
+        if evaluator.default is None:
+            raise RuntimeError("rollout baseline has not been started")
+        action = leading_action(evaluator.default.plain_explain["Plan"])
         candidate, _ = call_tool(
             messages,
             environment,
@@ -161,12 +163,12 @@ def build_demo(repository: Path) -> dict[str, Any]:
                 "call_sequence": CALL_SEQUENCE,
             },
             "evidence": {
-                "default_plan": evaluator.default["plain_explain"],
+                "default_plan": evaluator.default.plain_explain,
                 "candidates": {
                     candidate_id: {
-                        "action": measured_candidate["action"],
-                        "plain_explain": measured_candidate["plain_explain"],
-                        "pg_hint_plan": measured_candidate["pg_hint_plan"],
+                        "action": measured_candidate.action,
+                        "plain_explain": measured_candidate.plain_explain,
+                        "pg_hint_plan": measured_candidate.pg_hint_plan,
                     }
                 },
             },

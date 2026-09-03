@@ -11,11 +11,8 @@ from pydantic import Field
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
-from qorl.agent.tools import candidate_feedback
-from qorl.measure.rollout import (
-    TrainingRolloutEvaluatorV1,
-    TrainingRolloutEvaluatorV2,
-)
+from qorl.measure.rollout import RolloutEvaluator, training_protocol
+from qorl.measure.schemas import MeasurementProtocolId
 from qorl_training import runtime
 
 
@@ -78,22 +75,28 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
 
         with active.claim_worker() as slot:
-            if active.calibrated_timeouts is None:
-                evaluator = TrainingRolloutEvaluatorV1(
-                    slot.worker,
-                    active.task_set,
-                    task,
-                    max_candidates=self.config.candidate_attempts,
-                )
-            else:
-                evaluator = TrainingRolloutEvaluatorV2(
-                    slot.worker,
-                    active.task_set,
-                    task,
-                    active.calibrated_timeouts.task(task["task_id"]),
-                    active.calibrated_timeouts.manifest["manifest_id"],
-                    max_candidates=self.config.candidate_attempts,
-                )
+            protocol_id = (
+                MeasurementProtocolId.RL_TRAINING_V1
+                if active.calibrated_timeouts is None
+                else MeasurementProtocolId.RL_TRAINING_V2
+            )
+            evaluator = RolloutEvaluator(
+                slot.worker,
+                active.task_set,
+                task,
+                measurement_protocol=training_protocol(protocol_id),
+                calibrated_timeout=(
+                    active.calibrated_timeouts.task(task["task_id"])
+                    if active.calibrated_timeouts is not None
+                    else None
+                ),
+                timeout_manifest_id=(
+                    active.calibrated_timeouts.manifest["manifest_id"]
+                    if active.calibrated_timeouts is not None
+                    else None
+                ),
+                max_candidates=self.config.candidate_attempts,
+            )
             baseline = evaluator.start()
             policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
             final = evaluator.finish(
@@ -116,15 +119,19 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 evaluator.max_candidates
             ),
             "default": {
-                "plan_sha256": baseline["plan_sha256"],
-                "median_execution_time_ms": baseline["median_execution_time_ms"],
-                "candidate_timeout": baseline["candidate_timeout"],
+                "plan_sha256": baseline.plan_sha256,
+                "median_execution_time_ms": baseline.median_execution_time_ms,
+                "candidate_timeout": (
+                    baseline.candidate_timeout.to_wire()
+                    if baseline.candidate_timeout is not None
+                    else None
+                ),
             },
             "candidates": [
-                {**candidate_feedback(candidate), "action": candidate["action"]}
+                {**candidate.feedback(), "action": candidate.action}
                 for candidate in evaluator.candidates
             ],
-            "final": final,
+            "final": final.to_wire(),
             "policy": {
                 "stop_reason": policy_trace["stop_reason"],
                 "tools_sha256": policy_trace["tools_sha256"],

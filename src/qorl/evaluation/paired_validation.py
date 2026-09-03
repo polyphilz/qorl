@@ -30,7 +30,8 @@ from qorl.evaluation.live_validation import (
     wait_for_server,
 )
 from qorl.evaluation.types import RunStatus
-from qorl.measure.rollout import FinalStatus, RolloutEvaluator
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import FinalStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -235,9 +236,11 @@ def evaluate_rollout(
                 "template_id": task["template_id"],
                 "rollout_seed": seed,
                 "worker_slot": slot.resources.index,
-                "default": baseline,
-                "candidates": evaluator.candidates,
-                "final": final,
+                "default": baseline.to_wire(),
+                "candidates": [
+                    candidate.to_wire() for candidate in evaluator.candidates
+                ],
+                "final": final.to_wire(),
                 "policy_trace": trace,
                 "protocol_metrics": metrics,
             }

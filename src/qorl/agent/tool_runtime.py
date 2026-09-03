@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from qorl.agent.tools import candidate_feedback
 from qorl.agent.types import InspectionExecutor, ToolName
-from qorl.measure.rollout import RolloutEvaluator, ToolResultStatus
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import ToolResultStatus
 from qorl.plans.catalog import IDENTIFIER
 from qorl.plans.verify import compact_plan
 
@@ -108,21 +108,21 @@ class AgentEnvironment:
     def get_plan(self, arguments: dict[str, Any]) -> Any:
         candidate_id = arguments.get("candidate_id")
         if candidate_id == "default":
-            plan = self.evaluator.default["plain_explain"]
+            if self.evaluator.default is None:
+                raise RuntimeError("rollout baseline has not been started")
+            plan = self.evaluator.default.plain_explain
             return {"Plan": compact_plan(plan["Plan"])}
         candidate = next(
             (
                 item
                 for item in self.evaluator.candidates
-                if item["candidate_id"] == candidate_id
+                if item.candidate_id == candidate_id
             ),
             None,
         )
         if candidate is None:
             raise ValueError("candidate_id was not issued by the server")
-        plan = candidate.get("plain_explain") or candidate.get(
-            "measured_explain_analyze"
-        )
+        plan = candidate.plain_explain or candidate.measured_explain_analyze
         if plan is None:
             raise ValueError("candidate has no PostgreSQL plan")
         return {"Plan": compact_plan(plan["Plan"])}
@@ -130,16 +130,13 @@ class AgentEnvironment:
     def execute(self, name: str, arguments: Any) -> tuple[Any, bool]:
         if not isinstance(arguments, dict):
             if name == ToolName.EVALUATE_CANDIDATE:
-                return (
-                    candidate_feedback(self.evaluator.evaluate(arguments)),
-                    False,
-                )
+                return self.evaluator.evaluate(arguments).feedback(), False
             return {"error": "tool arguments must be an object"}, False
         try:
             if name == ToolName.EVALUATE_CANDIDATE:
-                return candidate_feedback(
-                    self.evaluator.evaluate(arguments.get("action"))
-                ), False
+                return self.evaluator.evaluate(
+                    arguments.get("action")
+                ).feedback(), False
             if name == ToolName.KEEP_DEFAULT:
                 return self.evaluator.keep_default(), True
             if name == ToolName.FINISH:

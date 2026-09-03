@@ -71,23 +71,23 @@ def main() -> None:
             baseline = evaluator.start()
             recorded_default = document["evidence"]["default_plan"]["Plan"]
 
-            if baseline["plan_sha256"] != plan_sha256(recorded_default):
+            if baseline.plan_sha256 != plan_sha256(recorded_default):
                 raise RuntimeError(f"{task_id}: default plan fingerprint changed")
 
             candidate_ids = []
             for action in candidate_actions(document):
                 candidate = evaluator.evaluate(action)
-                candidate_id = candidate["candidate_id"]
+                candidate_id = candidate.candidate_id
                 recorded = document["evidence"]["candidates"][candidate_id]
-                if not candidate["action_valid"]:
+                if not candidate.action_valid:
                     raise RuntimeError(f"{task_id}/{candidate_id}: action rejected")
-                if not candidate["constraints_satisfied"]:
+                if not candidate.constraints_satisfied:
                     raise RuntimeError(
                         f"{task_id}/{candidate_id}: constraints not satisfied"
                     )
-                if candidate["action"] != recorded["action"]:
+                if candidate.action != recorded["action"]:
                     raise RuntimeError(f"{task_id}/{candidate_id}: action changed")
-                if candidate["plan_sha256"] != plan_sha256(
+                if candidate.plan_sha256 != plan_sha256(
                     recorded["plain_explain"]["Plan"]
                 ):
                     raise RuntimeError(

@@ -26,7 +26,8 @@ from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
 from qorl.evaluation.types import RunStatus
-from qorl.measure.rollout import Decision, RolloutEvaluator
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import Decision
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -179,8 +180,8 @@ def trace_metrics(
         )
 
     candidates = evaluator.candidates
-    valid = [item for item in candidates if item["constraints_satisfied"]]
-    novel = [item for item in valid if item.get("duplicate_of") is None]
+    valid = [item for item in candidates if item.constraints_satisfied]
+    novel = [item for item in valid if item.duplicate_of is None]
     tool_calls = sum(
         event.get("name") is not None
         for events in events_by_turn.values()
@@ -201,7 +202,7 @@ def trace_metrics(
         "keep_default_calls": keep_default_calls,
         "first_candidate_turn": first_candidate_turn,
         "candidate_attempts": len(candidates),
-        "action_valid_candidates": sum(item["action_valid"] for item in candidates),
+        "action_valid_candidates": sum(item.action_valid for item in candidates),
         "constraint_satisfied_candidates": len(valid),
         "duplicate_candidates": len(valid) - len(novel),
         "novel_candidates": len(novel),
@@ -211,15 +212,15 @@ def trace_metrics(
             {
                 hashlib.sha256(
                     json.dumps(
-                        item["action"], sort_keys=True, separators=(",", ":")
+                        item.action, sort_keys=True, separators=(",", ":")
                     ).encode()
                 ).hexdigest()
                 for item in candidates
-                if item["action_valid"]
+                if item.action_valid
             }
         ),
         "novel_plan_sha256s": sorted(
-            {item["plan_sha256"] for item in novel if item.get("plan_sha256")}
+            {item.plan_sha256 for item in novel if item.plan_sha256}
         ),
     }
 
@@ -325,8 +326,10 @@ def evaluate_live_task(
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
                 "worker_slot": slot.resources.index,
-                "default": baseline,
-                "candidates": evaluator.candidates,
+                "default": baseline.to_wire(),
+                "candidates": [
+                    candidate.to_wire() for candidate in evaluator.candidates
+                ],
                 "policy_trace": trace,
                 "metrics": metrics,
             }
@@ -339,7 +342,9 @@ def evaluate_live_task(
                 "template_id": task["template_id"],
                 "worker_slot": slot.resources.index,
                 "error": str(error),
-                "candidates": evaluator.candidates,
+                "candidates": [
+                    candidate.to_wire() for candidate in evaluator.candidates
+                ],
             }
         return slot, result
 

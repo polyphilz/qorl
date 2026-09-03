@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from qorl.measure.rollout import (
+from qorl.measure.schemas import (
     DUPLICATE_ATTEMPT_PENALTY,
     INVALID_ATTEMPT_PENALTY,
     FinalStatus,
