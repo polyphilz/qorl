@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from qorl.agent.types import ToolName
 from qorl.plans.action import plan_action_schema
 
 
@@ -31,7 +32,7 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
     action = plan_action_schema(relations)
     definitions = action.pop("$defs")
     evaluate = function(
-        "evaluate_candidate",
+        ToolName.EVALUATE_CANDIDATE.value,
         "Validate, execute, and measure one self-contained PlanAction.",
         {"action": action},
         ["action"],
@@ -39,44 +40,44 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
     evaluate["function"]["parameters"]["$defs"] = definitions
     return [
         function(
-            "describe_table",
+            ToolName.DESCRIBE_TABLE.value,
             "Return columns and PostgreSQL types for one query relation.",
             {"relation": relation},
             ["relation"],
         ),
         function(
-            "list_indexes",
+            ToolName.LIST_INDEXES.value,
             "Return index names and definitions for one query relation.",
             {"relation": relation},
             ["relation"],
         ),
         function(
-            "get_column_stats",
+            ToolName.GET_COLUMN_STATS.value,
             "Return pg_stats values for one column.",
             {"relation": relation, "column": {"type": "string"}},
             ["relation", "column"],
         ),
         function(
-            "get_relation_size",
+            ToolName.GET_RELATION_SIZE.value,
             "Return table, index, and total bytes plus estimated rows.",
             {"relation": relation},
             ["relation"],
         ),
         function(
-            "get_extended_stats",
+            ToolName.GET_EXTENDED_STATS.value,
             "Return extended-statistics objects for one query relation.",
             {"relation": relation},
             ["relation"],
         ),
         function(
-            "get_plan",
+            ToolName.GET_PLAN.value,
             "Return the compact physical plan for default or a server-issued candidate ID.",
             {"candidate_id": {"type": "string"}},
             ["candidate_id"],
         ),
         evaluate,
         function(
-            "keep_default",
+            ToolName.KEEP_DEFAULT.value,
             (
                 "End the rollout immediately and keep PostgreSQL's default "
                 "plan. Available only before submitting a candidate."
@@ -84,7 +85,7 @@ def agent_tools(relations: list[str]) -> list[dict[str, Any]]:
             {},
         ),
         function(
-            "finish",
+            ToolName.FINISH.value,
             "End the search and benchmark the best valid candidate.",
             {},
         ),

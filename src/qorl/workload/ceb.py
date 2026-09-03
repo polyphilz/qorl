@@ -10,18 +10,29 @@ import re
 SQL_START = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
 SQL_FROM = re.compile(r"\bFROM\b", re.IGNORECASE)
 SPLIT_SALT = "ceb-v1-template-split-v1"
+SHORT_BINUNICODE_OPCODE = 0x8C
+BINUNICODE_OPCODE = 0x58
+SHORT_BINUNICODE_HEADER_BYTES = 2
+BINUNICODE_HEADER_BYTES = 5
 
 
 def extract_sql_bytes(qrep: bytes) -> bytes:
     """Extract the single SQL string without interpreting pickle opcodes."""
     candidates: list[str] = []
     for offset, opcode in enumerate(qrep):
-        if opcode == 0x8C and offset + 2 <= len(qrep):
-            start = offset + 2
+        if (
+            opcode == SHORT_BINUNICODE_OPCODE
+            and offset + SHORT_BINUNICODE_HEADER_BYTES <= len(qrep)
+        ):
+            start = offset + SHORT_BINUNICODE_HEADER_BYTES
             length = qrep[offset + 1]
-        elif opcode == 0x58 and offset + 5 <= len(qrep):
-            start = offset + 5
-            length = int.from_bytes(qrep[offset + 1 : offset + 5], "little")
+        elif opcode == BINUNICODE_OPCODE and offset + BINUNICODE_HEADER_BYTES <= len(
+            qrep
+        ):
+            start = offset + BINUNICODE_HEADER_BYTES
+            length = int.from_bytes(
+                qrep[offset + 1 : offset + BINUNICODE_HEADER_BYTES], "little"
+            )
         else:
             continue
 

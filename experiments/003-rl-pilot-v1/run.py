@@ -11,6 +11,7 @@ from pathlib import Path
 
 from qorl.adapters.model import model_snapshot
 from qorl.adapters.verify import verify_merged_model
+from qorl.evaluation.types import RunStatus
 from qorl.util.hashing import sha256_file
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
@@ -21,6 +22,8 @@ MERGED_MODEL = Path("outputs/rl/protocol-sft-v1-merged")
 PRE_RL_REPORT = Path("outputs/rl/qorl-rl-pilot-validation-v1/pre/report.json")
 RUN = Path("outputs/rl/rl-pilot-v1")
 FINAL_STEP = 12
+EXPECTED_VALIDATION_ROLLOUTS = 64
+EXPECTED_VALIDATION_GROUPS = 16
 
 
 def run(command: list[str], repository: Path) -> None:
@@ -59,12 +62,13 @@ def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None
     if report.get("model", {}).get("model_safetensors_sha256") != merged_model_sha256:
         raise RuntimeError("frozen pre-RL validation used a different model")
     if not (
-        report.get("status") == "completed"
+        report.get("status") == RunStatus.COMPLETED
         and report.get("phase") == "pre"
-        and summary.get("completed_rollout_count") == 64
+        and summary.get("completed_rollout_count") == EXPECTED_VALIDATION_ROLLOUTS
         and summary.get("orchestration_failure_count") == 0
-        and summary.get("task_group_count") == 16
-        and summary.get("nonzero_reward_variance_group_count") == 16
+        and summary.get("task_group_count") == EXPECTED_VALIDATION_GROUPS
+        and summary.get("nonzero_reward_variance_group_count")
+        == EXPECTED_VALIDATION_GROUPS
     ):
         raise RuntimeError("frozen pre-RL validation did not pass its gates")
 
@@ -104,7 +108,7 @@ def rl(repository: Path) -> Path:
     if not report_path.is_file():
         raise RuntimeError("protocol-SFT training report is missing")
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("status") != "passed":
+    if report.get("status") != RunStatus.PASSED:
         raise RuntimeError("protocol-SFT training did not pass")
     adapter = repository / SFT_RUN / report["adapter"]
     verification_path = repository / SFT_RUN / report["adapter_verification"]

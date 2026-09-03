@@ -5,6 +5,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from qorl.plans.action import AUTO, JoinMethod, MemoizeMode, ParallelMode, ScanMethod
+
 
 @dataclass(frozen=True)
 class HintDiagnostics:
@@ -28,19 +30,20 @@ HINT_DUMP = re.compile(
 )
 
 JOIN_METHODS = {
-    "Hash Join": "hash",
-    "Merge Join": "merge",
-    "Nested Loop": "nestloop",
+    "Hash Join": JoinMethod.HASH.value,
+    "Merge Join": JoinMethod.MERGE.value,
+    "Nested Loop": JoinMethod.NESTLOOP.value,
 }
 
 SCAN_METHODS = {
-    "Seq Scan": "seq",
-    "Tid Scan": "tid",
-    "Tid Range Scan": "tid",
-    "Index Scan": "index",
-    "Index Only Scan": "index_only",
-    "Bitmap Heap Scan": "bitmap",
+    "Seq Scan": ScanMethod.SEQ.value,
+    "Tid Scan": ScanMethod.TID.value,
+    "Tid Range Scan": ScanMethod.TID.value,
+    "Index Scan": ScanMethod.INDEX.value,
+    "Index Only Scan": ScanMethod.INDEX_ONLY.value,
+    "Bitmap Heap Scan": ScanMethod.BITMAP.value,
 }
+MIN_JOIN_CHILDREN = 2
 
 
 def parse_hint_diagnostics(stderr: str) -> HintDiagnostics | None:
@@ -101,7 +104,7 @@ def matching_scan(plan: dict[str, Any], relation: str) -> dict[str, Any] | None:
 def plan_join_tree(plan: dict[str, Any]) -> str | tuple[Any, Any] | None:
     if plan.get("Node Type") in JOIN_METHODS:
         children = plan.get("Plans", [])
-        if len(children) >= 2:
+        if len(children) >= MIN_JOIN_CHILDREN:
             return plan_join_tree(children[0]), plan_join_tree(children[1])
     if plan.get("Node Type") in SCAN_METHODS and isinstance(plan.get("Alias"), str):
         return plan["Alias"]
@@ -183,14 +186,14 @@ def verify_action(
             errors.append(f"join target does not exist in the plan: {label}")
             continue
         method = JOIN_METHODS[join["Node Type"]]
-        if item["force"] != "auto" and method != item["force"]:
+        if item["force"] != AUTO and method != item["force"]:
             errors.append(f"join {label} uses {method}, not {item['force']}")
         if method in item["forbid"]:
             errors.append(f"join {label} uses forbidden method {method}")
         memoized = contains_node(join, "Memoize")
-        if item["memoize"] == "force" and not memoized:
+        if item["memoize"] == MemoizeMode.FORCE and not memoized:
             errors.append(f"join {label} is not memoized")
-        if item["memoize"] == "forbid" and memoized:
+        if item["memoize"] == MemoizeMode.FORBID and memoized:
             errors.append(f"join {label} uses forbidden memoization")
 
     for item in action.get("scans", []):
@@ -199,7 +202,7 @@ def verify_action(
             errors.append(f"scan target does not exist in the plan: {item['relation']}")
             continue
         method = SCAN_METHODS[scan["Node Type"]]
-        if item["force"] != "auto" and method != item["force"]:
+        if item["force"] != AUTO and method != item["force"]:
             errors.append(f"scan {item['relation']} uses {method}, not {item['force']}")
         if method in item["forbid"]:
             errors.append(f"scan {item['relation']} uses forbidden method {method}")
@@ -234,9 +237,9 @@ def verify_action(
         parallel = bool(scan.get("Parallel Aware"))
         if item["workers"] == 0 and parallel:
             errors.append(f"scan {item['relation']} is unexpectedly parallel")
-        if item["workers"] > 0 and item["mode"] == "hard" and not parallel:
+        if item["workers"] > 0 and item["mode"] == ParallelMode.HARD and not parallel:
             errors.append(f"scan {item['relation']} is not parallel")
-        if item["workers"] > 0 and item["mode"] == "hard" and parallel:
+        if item["workers"] > 0 and item["mode"] == ParallelMode.HARD and parallel:
             worker_counts = {
                 node["Workers Planned"]
                 for node in nodes(plan)

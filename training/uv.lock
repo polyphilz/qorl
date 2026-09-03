@@ -2549,6 +2549,15 @@ name = "qorl"
 version = "0.1.0"
 source = { editable = "../" }
 
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pyright", specifier = ">=1.1.405,<2" },
+    { name = "pytest", specifier = ">=9.0.0,<10" },
+    { name = "ruff", specifier = ">=0.13.0,<1" },
+]
+
 [[package]]
 name = "qorl-training"
 version = "0.1.0"

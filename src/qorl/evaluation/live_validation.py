@@ -17,14 +17,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from qorl.adapters.model import model_snapshot
+from qorl.adapters.model import adapter_rank, model_snapshot
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.protocol import AgentProtocol
+from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.evaluation.types import RunStatus
+from qorl.measure.rollout import Decision, RolloutEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -34,6 +36,7 @@ ADAPTER_MODEL = "qorl-protocol-adapter"
 DATASET = Path("outputs/sft/protocol-sft-v1")
 TRAINING_RUN = Path("outputs/sft/protocol-sft-train-v1")
 CONCURRENCY = 4
+EXPECTED_VALIDATION_TASKS = 64
 
 
 def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
@@ -53,7 +56,7 @@ def adapter_path(repository: Path) -> Path:
     run_dir = (repository / TRAINING_RUN).resolve()
     report_path = run_dir / "training-report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("status") != "passed":
+    if report.get("status") != RunStatus.PASSED:
         raise RuntimeError(f"training report has not passed: {report_path}")
     relative = Path(report["adapter"])
     if relative.is_absolute() or ".." in relative.parts:
@@ -82,7 +85,7 @@ def validation_tasks(
         if item["partition"] == "validation"
     ]
     by_id = {task["task_id"]: task for task in task_set.inventory["tasks"]}
-    if len(ids) != 64 or len(ids) != len(set(ids)):
+    if len(ids) != EXPECTED_VALIDATION_TASKS or len(ids) != len(set(ids)):
         raise RuntimeError("protocol dataset does not identify 64 validation tasks")
     if missing := sorted(set(ids) - set(by_id)):
         raise RuntimeError(f"validation tasks are absent from CEB inventory: {missing}")
@@ -100,7 +103,11 @@ def repeated_inspections(trace: dict[str, Any]) -> int:
         for call in message.get("tool_calls") or []:
             function = call.get("function", {})
             name = function.get("name", "")
-            if name in {"evaluate_candidate", "finish", "keep_default"}:
+            if name in {
+                ToolName.EVALUATE_CANDIDATE,
+                ToolName.FINISH,
+                ToolName.KEEP_DEFAULT,
+            }:
                 continue
             arguments = function.get("arguments", "{}")
             if not isinstance(arguments, str):
@@ -112,7 +119,9 @@ def repeated_inspections(trace: dict[str, Any]) -> int:
 
 
 def trace_metrics(
-    evaluator: RolloutEvaluator, trace: dict[str, Any], maximum_turns: int
+    evaluator: RolloutEvaluator[InspectionExecutor],
+    trace: dict[str, Any],
+    maximum_turns: int,
 ) -> dict[str, Any]:
     protocol = AgentProtocol.from_evaluator(evaluator, maximum_turns)
     events_by_turn: dict[int, list[dict[str, Any]]] = {}
@@ -146,24 +155,24 @@ def trace_metrics(
             call_available = name in available
             available_calls += call_available
             valid_tool_calls += call_available and top_level_error is None
-            if name == "finish":
+            if name == ToolName.FINISH:
                 finish_calls += 1
-            elif name == "keep_default":
+            elif name == ToolName.KEEP_DEFAULT:
                 keep_default_calls += 1
-            elif name == "evaluate_candidate":
+            elif name == ToolName.EVALUATE_CANDIDATE:
                 if first_candidate_turn is None:
                     first_candidate_turn = turn
             else:
                 inspection_calls += 1
                 valid_inspection_calls += call_available and top_level_error is None
             if (
-                name == "get_plan"
+                name == ToolName.GET_PLAN
                 and top_level_error
                 and "not issued" in top_level_error
             ):
                 fake_candidate_ids += 1
         candidate_count += sum(
-            event.get("name") == "evaluate_candidate"
+            event.get("name") == ToolName.EVALUATE_CANDIDATE
             and isinstance(event.get("result"), dict)
             and "candidate_id" in event["result"]
             for event in events
@@ -220,7 +229,7 @@ def ratio(numerator: int, denominator: int) -> float | None:
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
-    completed = [item for item in results if item["status"] == "completed"]
+    completed = [item for item in results if item["status"] == RunStatus.COMPLETED]
     metrics = [item["metrics"] for item in completed]
     totals: Counter[str] = Counter()
     additive = (
@@ -311,7 +320,7 @@ def evaluate_live_task(
             metrics = trace_metrics(evaluator, trace, maximum_model_turns)
             result = {
                 "schema_version": 1,
-                "status": "completed",
+                "status": RunStatus.COMPLETED.value,
                 "completed_at_utc": utc_now(),
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
@@ -324,7 +333,7 @@ def evaluate_live_task(
         except (ModelError, WorkerError) as error:
             result = {
                 "schema_version": 1,
-                "status": "failed",
+                "status": RunStatus.FAILED.value,
                 "completed_at_utc": utc_now(),
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
@@ -377,12 +386,12 @@ def evaluate_policy(
                 f"worker={slot.resources.index}",
                 flush=True,
             )
-            if result["status"] == "completed":
+            if result["status"] == RunStatus.COMPLETED:
                 metrics = result["metrics"]
                 terminal = (
-                    "keep_default"
+                    Decision.KEEP_DEFAULT.value
                     if metrics["keep_default_calls"]
-                    else "finish"
+                    else ToolName.FINISH.value
                     if metrics["finish_calls"]
                     else "none"
                 )
@@ -410,7 +419,7 @@ def evaluate_policy(
         )
 
     return {
-        "status": "completed",
+        "status": RunStatus.COMPLETED.value,
         "model": model_name,
         "server_identity": identity,
         "summary": summarize(results),
@@ -499,7 +508,7 @@ def main() -> None:
             [
                 "--enable-lora",
                 "--max-lora-rank",
-                "16",
+                str(adapter_rank(adapter)),
                 "--lora-modules",
                 f"{ADAPTER_MODEL}={adapter}",
             ]
@@ -510,7 +519,7 @@ def main() -> None:
     tasks, dataset = validation_tasks(repository, task_set)
     report: dict[str, Any] = {
         "schema_version": 1,
-        "status": "starting",
+        "status": RunStatus.STARTING.value,
         "started_at_utc": started.isoformat(),
         "completed_at_utc": None,
         "active_policy": None,
@@ -554,12 +563,12 @@ def main() -> None:
             )
             pool = start_pool(fixture, f"qorl-ceb-live-{os.getpid()}")
             report["database_pool"] = pool.manifest()
-            report["status"] = "running"
+            report["status"] = RunStatus.RUNNING.value
             write_json(report_path, report)
             for policy_name, model_name in order:
                 report["active_policy"] = policy_name
                 report["policies"][policy_name] = {
-                    "status": "running",
+                    "status": RunStatus.RUNNING.value,
                     "model": model_name,
                     "summary": None,
                 }
@@ -584,13 +593,17 @@ def main() -> None:
                 )
                 report["active_policy"] = None
                 write_json(report_path, report)
-            report["status"] = "completed"
+            report["status"] = RunStatus.COMPLETED.value
             report["completed_at_utc"] = utc_now()
             write_json(report_path, report)
             print(json.dumps(report["policies"], indent=2), flush=True)
             print(f"live protocol evaluation: {output_dir}", flush=True)
         except BaseException as error:
-            status = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+            status = (
+                RunStatus.INTERRUPTED.value
+                if isinstance(error, KeyboardInterrupt)
+                else RunStatus.FAILED.value
+            )
             active = report["active_policy"]
             if active is not None:
                 summary_path = output_dir / active / "summary.json"

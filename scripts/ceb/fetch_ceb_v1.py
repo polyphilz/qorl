@@ -21,6 +21,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/ceb-v1"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
+QUERY_ARCHIVE_PATH_PARTS = 5
 
 
 def verify_file(path: Path, specification: dict[str, Any]) -> None:
@@ -90,7 +91,7 @@ def selected_members(
             if not member.isdir():
                 raise RuntimeError(f"unsupported archive member: {member.name}")
             continue
-        if len(path.parts) != 5 or path.parts[1] != "queries":
+        if len(path.parts) != QUERY_ARCHIVE_PATH_PARTS or path.parts[1] != "queries":
             continue
         tree = next(
             (key for key, name in TREE_NAMES.items() if path.parts[2] == name),

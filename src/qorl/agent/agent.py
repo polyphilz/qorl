@@ -10,8 +10,19 @@ from qorl.agent.config import QoAgentConfig
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
+from qorl.agent.types import (
+    TERMINAL_STOP_REASON,
+    TURN_BUDGET_FIELD,
+    InspectionExecutor,
+    StopReason,
+    ToolName,
+)
+from qorl.evaluation.types import PolicyType
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_json
+
+MIN_COMPLETION_RESERVE_TOKENS = 256
+TOOL_MESSAGE_FRAME_BYTES = 64
 
 
 class QoAgentPolicy:
@@ -71,7 +82,7 @@ class QoAgentPolicy:
 
     def manifest(self) -> dict[str, Any]:
         return {
-            "type": "qo_agent",
+            "type": PolicyType.QO_AGENT.value,
             **asdict(self.config),
             "system_prompt": SYSTEM_PROMPT,
             "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
@@ -101,8 +112,11 @@ class QoAgentPolicy:
             body["seed"] = int.from_bytes(seed_bytes[:4], "big")
         return body
 
-    def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
-        completion_reserve = max(256, int(self.config.sampling.get("max_tokens", 0)))
+    def search(self, evaluator: RolloutEvaluator[InspectionExecutor]) -> dict[str, Any]:
+        completion_reserve = max(
+            MIN_COMPLETION_RESERVE_TOKENS,
+            int(self.config.sampling.get("max_tokens", 0)),
+        )
         protocol = AgentProtocol.from_evaluator(
             evaluator,
             self.config.maximum_model_turns,
@@ -113,7 +127,7 @@ class QoAgentPolicy:
         responses: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         environment = AgentEnvironment(evaluator)
-        stop_reason = "model_turn_limit"
+        stop_reason = StopReason.MODEL_TURN_LIMIT
         context_estimate_tokens: int | None = None
 
         for turn in range(1, self.config.maximum_model_turns + 1):
@@ -166,24 +180,26 @@ class QoAgentPolicy:
                 )
                 budget = protocol.budget(turn)
                 result = (
-                    {**result, "_turn_budget": budget}
+                    {**result, TURN_BUDGET_FIELD: budget}
                     if isinstance(result, dict)
-                    else {"result": result, "_turn_budget": budget}
+                    else {"result": result, TURN_BUDGET_FIELD: budget}
                 )
                 if index == 0:
-                    if name == "evaluate_candidate" and "candidate_id" in result:
+                    if name == ToolName.EVALUATE_CANDIDATE and "candidate_id" in result:
                         label = (
                             f"{result['provisional_speedup']:.3f}x"
                             if result["constraints_satisfied"]
                             else "invalid"
                         )
                         print(f"  {result['candidate_id']}: {label}", flush=True)
-                    elif name != "finish":
+                    elif name != ToolName.FINISH:
                         print(f"  turn-{turn:02d}: {name}", flush=True)
                 content = json.dumps(result, sort_keys=True)
                 # A byte-fallback tokenizer cannot produce more tokens than
                 # input bytes. Include a small allowance for message framing.
-                pending_tool_tokens += len(content.encode("utf-8")) + 64
+                pending_tool_tokens += (
+                    len(content.encode("utf-8")) + TOOL_MESSAGE_FRAME_BYTES
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -204,7 +220,7 @@ class QoAgentPolicy:
                 if finished:
                     terminal_tool = name
             if should_finish:
-                stop_reason = f"model_{terminal_tool}"
+                stop_reason = TERMINAL_STOP_REASON[ToolName(terminal_tool)]
                 break
             response_usage = response.get("usage", {})
             total_tokens = response_usage.get("total_tokens")
@@ -221,12 +237,12 @@ class QoAgentPolicy:
                     context_estimate_tokens + completion_reserve
                     >= self.config.context_length
                 ):
-                    stop_reason = "context_budget"
+                    stop_reason = StopReason.CONTEXT_BUDGET
                     break
             else:
                 # Continuing without server-reported usage would make the next
                 # request's fit unknowable. End this rollout cleanly instead.
-                stop_reason = "missing_token_usage"
+                stop_reason = StopReason.MISSING_TOKEN_USAGE
                 break
 
         usage: dict[str, int] = {}
@@ -235,7 +251,7 @@ class QoAgentPolicy:
                 if isinstance(value, int):
                     usage[name] = usage.get(name, 0) + value
         return {
-            "stop_reason": stop_reason,
+            "stop_reason": stop_reason.value,
             "initial_observation": protocol.observation,
             "tools": protocol.tools,
             "tools_sha256": sha256_json(protocol.tools),

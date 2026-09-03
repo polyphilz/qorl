@@ -16,7 +16,10 @@ from typing import Any
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
+from qorl.evaluation.types import RunStatus
 from qorl.measure.rollout import (
+    FinalStatus,
+    MeasurementProtocolId,
     RolloutEvaluator,
     TrainingRolloutEvaluatorV1,
 )
@@ -25,6 +28,7 @@ from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
 
 DEFAULT_CONFIG = Path("experiments/004-rl-run-v2/reward-protocol-audit/config.json")
+MIN_CORRELATION_SAMPLES = 2
 
 
 def fingerprint(value: Any) -> str:
@@ -73,7 +77,7 @@ def build_cases(
                 candidates = result.get("candidates", [])
                 if (
                     template_id not in expected
-                    or final.get("status") != "completed"
+                    or final.get("status") != FinalStatus.COMPLETED
                     or not candidates
                 ):
                     continue
@@ -155,12 +159,10 @@ def replay(
     seed: str,
 ) -> dict[str, Any]:
     counted = CountingWorker(worker)
-    evaluator_type = (
-        TrainingRolloutEvaluatorV1 if protocol == "rl-training-v1" else RolloutEvaluator
-    )
-    evaluator = evaluator_type(  # type: ignore[arg-type]
-        counted, task_set, task
-    )
+    if protocol == MeasurementProtocolId.RL_TRAINING_V1:
+        evaluator = TrainingRolloutEvaluatorV1(counted, task_set, task)
+    else:
+        evaluator = RolloutEvaluator(counted, task_set, task)
     baseline = evaluator.start()
     candidates = [evaluator.evaluate(action) for action in actions]
     final = evaluator.finish(random.Random(seed))
@@ -199,7 +201,7 @@ def sign(value: float) -> int:
 
 
 def correlation(left: list[float], right: list[float]) -> float | None:
-    if len(left) < 2:
+    if len(left) < MIN_CORRELATION_SAMPLES:
         return None
     left_mean = statistics.fmean(left)
     right_mean = statistics.fmean(right)
@@ -218,8 +220,11 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
         result
         for result in results
         if all(
-            result[protocol]["final"]["status"] == "completed"
-            for protocol in ("rl-training-v1", "rigorous-evaluation-v1")
+            result[protocol]["final"]["status"] == FinalStatus.COMPLETED
+            for protocol in (
+                MeasurementProtocolId.RL_TRAINING_V1,
+                MeasurementProtocolId.RIGOROUS_EVALUATION_V1,
+            )
         )
     ]
     cheap_scores = [
@@ -319,7 +324,7 @@ def run_audit(
     report: dict[str, Any] = {
         "schema_version": 1,
         "audit_id": config["audit_id"],
-        "status": "running",
+        "status": RunStatus.RUNNING.value,
         "started_at_utc": datetime.now(UTC).isoformat(),
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
@@ -369,7 +374,7 @@ def run_audit(
                     final = result[protocol]["final"]
                     label = (
                         f"{final['score']:.3f}x"
-                        if final["status"] == "completed"
+                        if final["status"] == FinalStatus.COMPLETED
                         else final["status"]
                     )
                     print(f"  {protocol}: {label}", flush=True)
@@ -377,7 +382,7 @@ def run_audit(
                 write_json(report_path, report)
             worker.capture_environment(output_dir, "post")
 
-    report["status"] = "completed"
+    report["status"] = RunStatus.COMPLETED.value
     report["completed_at_utc"] = datetime.now(UTC).isoformat()
     report["summary"] = summarize(report["results"], config["material_speedup_ratio"])
     write_json(report_path, report)

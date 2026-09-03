@@ -15,8 +15,12 @@ select = [
     "RUF",
     "N",
     "PTH",
+    "PLR2004",
 ]
 ignore = ["E501"]
+
+[lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004"]
 
 [lint.isort]
 known-first-party = ["qorl", "qorl_training", "scripts"]

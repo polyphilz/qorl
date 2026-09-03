@@ -10,7 +10,14 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from qorl.measure.rollout import (
+    DUPLICATE_ATTEMPT_PENALTY,
+    INVALID_ATTEMPT_PENALTY,
+    FinalStatus,
+)
 from qorl.util.io import write_json
+
+EXPECTED_GROUP_SIZE = 4
 
 
 def trace_records(run_dir: Path, kind: str) -> Iterable[dict[str, Any]]:
@@ -43,7 +50,7 @@ def matches_default(record: dict[str, Any]) -> bool:
     result = qorl_result(record)
     final = result["final"]
     return (
-        final["status"] == "completed"
+        final["status"] == FinalStatus.COMPLETED
         and final.get("winning_plan_sha256") == result["default"]["plan_sha256"]
     )
 
@@ -52,9 +59,9 @@ def rescored_reward(record: dict[str, Any]) -> float:
     if not matches_default(record):
         return original_reward(record)
     final = qorl_result(record)["final"]
-    return -0.10 * int(final["invalid_attempt_count"]) - 0.05 * int(
-        final["duplicate_attempt_count"]
-    )
+    return -INVALID_ATTEMPT_PENALTY * int(
+        final["invalid_attempt_count"]
+    ) - DUPLICATE_ATTEMPT_PENALTY * int(final["duplicate_attempt_count"])
 
 
 def geometric_mean(values: list[float]) -> float | None:
@@ -141,9 +148,10 @@ def rescore(run_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     maximum_advantage_error = 0.0
     for record in effective:
         whole_group = list(all_by_group[record["group_id"]].values())
-        if len(whole_group) != 4:
+        if len(whole_group) != EXPECTED_GROUP_SIZE:
             raise RuntimeError(
-                f"group {record['group_id']} has {len(whole_group)} traces, expected 4"
+                f"group {record['group_id']} has {len(whole_group)} traces, "
+                f"expected {EXPECTED_GROUP_SIZE}"
             )
         group = [item for item in whole_group if has_reward(item)]
         if not group:
@@ -167,13 +175,15 @@ def rescore(run_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 "task_id": result["task_id"],
                 "default_fingerprint_match": default_match,
                 "original_score": (
-                    float(final["score"]) if final["status"] == "completed" else None
+                    float(final["score"])
+                    if final["status"] == FinalStatus.COMPLETED
+                    else None
                 ),
                 "rescored_score": (
                     1.0
                     if default_match
                     else float(final["score"])
-                    if final["status"] == "completed"
+                    if final["status"] == FinalStatus.COMPLETED
                     else None
                 ),
                 "original_reward": original_reward(record),

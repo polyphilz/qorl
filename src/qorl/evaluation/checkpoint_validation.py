@@ -15,6 +15,7 @@ from threading import Lock
 from typing import Any
 
 from qorl import __version__
+from qorl.adapters.model import adapter_rank
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.db.fixture import DatabaseFixture
@@ -22,7 +23,8 @@ from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
 from qorl.evaluation.live_validation import trace_metrics, wait_for_server
 from qorl.evaluation.paired_validation import load_tasks, summarize
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.evaluation.types import RunStatus
+from qorl.measure.rollout import FinalStatus, RolloutEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -30,6 +32,10 @@ from qorl.workload.taskset import TaskSet
 CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
 START_POLICY = "start"
 PRINT_LOCK = Lock()
+EXPECTED_CONCURRENCY = 4
+FIRST_CHECKPOINT_STEP = 10
+FINAL_CHECKPOINT_STEP = 100
+CHECKPOINT_INTERVAL = 10
 
 
 def policy_name(step: int) -> str:
@@ -42,9 +48,16 @@ def load_config(repository: Path) -> tuple[dict[str, Any], Path]:
     steps = config.get("checkpoint_steps")
     if (
         config.get("schema_version") != 1
-        or config.get("concurrency") != 4
+        or config.get("concurrency") != EXPECTED_CONCURRENCY
         or not isinstance(steps, list)
-        or steps != list(range(10, 101, 10))
+        or steps
+        != list(
+            range(
+                FIRST_CHECKPOINT_STEP,
+                FINAL_CHECKPOINT_STEP + 1,
+                CHECKPOINT_INTERVAL,
+            )
+        )
     ):
         raise RuntimeError("invalid v2 checkpoint-evaluation configuration")
     return config, path
@@ -74,6 +87,7 @@ def verify_adapter(path: Path, base_model: Path) -> dict[str, Any]:
         "adapter_config_sha256": sha256_file(config_path),
         "tensor_count": manifest["tensor_count"],
         "nonzero_lora_b_values": manifest["nonzero_lora_b_values"],
+        "rank": adapter_rank(path),
     }
 
 
@@ -153,11 +167,14 @@ def model_command(
         "--enforce-eager",
     ]
     if adapters:
+        ranks = {identity["rank"] for identity in adapters.values()}
+        if len(ranks) != 1:
+            raise RuntimeError(f"checkpoint adapters use different LoRA ranks: {ranks}")
         command.extend(
             [
                 "--enable-lora",
                 "--max-lora-rank",
-                "16",
+                str(ranks.pop()),
                 "--max-loras",
                 str(min(concurrency, len(adapters))),
                 "--max-cpu-loras",
@@ -181,8 +198,10 @@ def checkpoint_summary(
     results: list[dict[str, Any]], planned_rollouts: int
 ) -> dict[str, Any]:
     summary = summarize(results, planned_rollouts)
-    completed = [item for item in results if item["status"] == "completed"]
-    valid = [item for item in completed if item["final"]["status"] == "completed"]
+    completed = [item for item in results if item["status"] == RunStatus.COMPLETED]
+    valid = [
+        item for item in completed if item["final"]["status"] == FinalStatus.COMPLETED
+    ]
     default_winners = [
         item
         for item in valid
@@ -232,7 +251,7 @@ def evaluate_once(
         final = evaluator.finish(random.Random(pair_seed))
         result = {
             "schema_version": 1,
-            "status": "completed",
+            "status": RunStatus.COMPLETED.value,
             "completed_at_utc": utc_now(),
             "task_id": task["task_id"],
             "template_id": task["template_id"],
@@ -248,7 +267,7 @@ def evaluate_once(
     except (ModelError, WorkerError) as error:
         result = {
             "schema_version": 1,
-            "status": "failed",
+            "status": RunStatus.FAILED.value,
             "completed_at_utc": utc_now(),
             "task_id": task["task_id"],
             "template_id": task["template_id"],
@@ -302,11 +321,11 @@ def evaluate_series(
             )
             results.append(result)
             with PRINT_LOCK:
-                if result["status"] == "completed":
+                if result["status"] == RunStatus.COMPLETED:
                     final = result["final"]
                     label = (
                         f"{final['score']:.3f}x"
-                        if final["status"] == "completed"
+                        if final["status"] == FinalStatus.COMPLETED
                         else final["status"]
                     )
                 else:
@@ -360,7 +379,7 @@ def main() -> None:
         "schema_version": 1,
         "evaluation_id": config["evaluation_id"],
         "mode": "preflight" if arguments.preflight else "full",
-        "status": "starting",
+        "status": RunStatus.STARTING.value,
         "started_at_utc": datetime.now(UTC).isoformat(),
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
@@ -387,7 +406,10 @@ def main() -> None:
         },
         "task_ids": [task["task_id"] for task in tasks],
         "rollout_seeds": seeds,
-        "policies": {name: {"status": "pending", "summary": None} for name in policies},
+        "policies": {
+            name: {"status": RunStatus.PENDING.value, "summary": None}
+            for name in policies
+        },
         "error": None,
     }
     report_path = output_dir / "report.json"
@@ -436,9 +458,9 @@ def main() -> None:
                     output_dir / "environment" / f"worker-{slot.resources.index}",
                     "pre",
                 )
-            report["status"] = "running"
+            report["status"] = RunStatus.RUNNING.value
             for name in policies:
-                report["policies"][name]["status"] = "running"
+                report["policies"][name]["status"] = RunStatus.RUNNING.value
             write_json(report_path, report)
 
             jobs = [
@@ -478,17 +500,21 @@ def main() -> None:
                     "post",
                 )
             for name in policies:
-                failures = sum(item["status"] != "completed" for item in results[name])
+                failures = sum(
+                    item["status"] != RunStatus.COMPLETED for item in results[name]
+                )
                 report["policies"][name]["status"] = (
-                    "completed" if not failures else "completed_with_failures"
+                    RunStatus.COMPLETED.value
+                    if not failures
+                    else RunStatus.COMPLETED_WITH_FAILURES.value
                 )
             report["status"] = (
-                "completed"
+                RunStatus.COMPLETED.value
                 if all(
-                    item["status"] == "completed"
+                    item["status"] == RunStatus.COMPLETED
                     for item in report["policies"].values()
                 )
-                else "completed_with_failures"
+                else RunStatus.COMPLETED_WITH_FAILURES.value
             )
             report["completed_at_utc"] = utc_now()
             write_json(report_path, report)
@@ -496,7 +522,9 @@ def main() -> None:
             print(f"checkpoint validation: {output_dir}", flush=True)
         except BaseException as error:
             report["status"] = (
-                "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+                RunStatus.INTERRUPTED.value
+                if isinstance(error, KeyboardInterrupt)
+                else RunStatus.FAILED.value
             )
             report["completed_at_utc"] = utc_now()
             report["error"] = {

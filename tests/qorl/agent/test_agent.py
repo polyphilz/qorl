@@ -13,6 +13,8 @@ from qorl.agent.client import OpenAIModelClient
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
+from qorl.agent.types import InspectionExecutor
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.plans.action import (
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
@@ -154,7 +156,7 @@ class MissingUsageClient(FakeClient):
         self.responses[0].pop("usage")
 
 
-class FakeEvaluator:
+class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         repository = Path(self.temporary_directory.name)
@@ -168,13 +170,18 @@ class FakeEvaluator:
                 **dict.fromkeys(INTEGER_SETTINGS, "1"),
             }
 
+        def admin_sql(sql: str) -> str:
+            del sql
+            return ""
+
         self.task = TASK
         self.sql = "SELECT 1;"
         self.catalog = TaskCatalog.from_task(
             TASK, {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
         )
-        self.worker = SimpleNamespace(
+        self._worker = SimpleNamespace(
             settings=settings,
+            admin_sql=admin_sql,
             fixture=SimpleNamespace(
                 snapshot={"postgresql": {"server_version_num": "180006"}},
                 repository=repository,
@@ -252,7 +259,7 @@ class QoAgentTest(unittest.TestCase):
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
-        QoAgentPolicy(config(), client).search(evaluator)  # type: ignore[arg-type]
+        QoAgentPolicy(config(), client).search(evaluator)
 
         digests = [
             hashlib.sha256(json.dumps(request).encode("utf-8")).hexdigest()
@@ -334,7 +341,7 @@ class QoAgentTest(unittest.TestCase):
 
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
-        trace = policy.search(evaluator)  # type: ignore[arg-type]
+        trace = policy.search(evaluator)
 
         self.assertEqual(evaluator.actions, [{"version": 1}])
         self.assertEqual(trace["stop_reason"], "model_finish")
@@ -383,7 +390,7 @@ class QoAgentTest(unittest.TestCase):
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
-        trace = policy.search(evaluator)  # type: ignore[arg-type]
+        trace = policy.search(evaluator)
 
         self.assertEqual(trace["stop_reason"], "model_keep_default")
         self.assertTrue(evaluator.kept_default)
@@ -410,7 +417,7 @@ class QoAgentTest(unittest.TestCase):
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
-        policy.search(evaluator)  # type: ignore[arg-type]
+        policy.search(evaluator)
 
         first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
         self.assertEqual(first_tools, {"evaluate_candidate", "keep_default"})
@@ -421,7 +428,7 @@ class QoAgentTest(unittest.TestCase):
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
-        trace = policy.search(evaluator)  # type: ignore[arg-type]
+        trace = policy.search(evaluator)
 
         self.assertEqual(trace["stop_reason"], "context_budget")
         self.assertEqual(len(client.requests), 1)
@@ -433,7 +440,7 @@ class QoAgentTest(unittest.TestCase):
         evaluator = FakeEvaluator()
         self.addCleanup(evaluator.temporary_directory.cleanup)
 
-        trace = policy.search(evaluator)  # type: ignore[arg-type]
+        trace = policy.search(evaluator)
 
         self.assertEqual(trace["stop_reason"], "missing_token_usage")
         self.assertEqual(len(client.requests), 1)

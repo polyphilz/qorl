@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+from qorl.agent.types import ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
+from qorl.evaluation.types import RunStatus
 from qorl.plans.fingerprint import plan_sha256
 from qorl.sft.assemble import load_documents
 from qorl.sft.build_protocol_dataset import PlanValidationEvaluator
@@ -21,7 +23,7 @@ def candidate_actions(document: dict[str, Any]) -> list[dict[str, Any]]:
         if message["role"] != "assistant":
             continue
         function = message["tool_calls"][0]["function"]
-        if function["name"] == "evaluate_candidate":
+        if function["name"] == ToolName.EVALUATE_CANDIDATE:
             actions.append(json.loads(function["arguments"])["action"])
     return actions
 
@@ -98,7 +100,7 @@ def main() -> None:
                     "template_id": template,
                     "task_id": task_id,
                     "candidate_ids": candidate_ids,
-                    "status": "passed",
+                    "status": RunStatus.PASSED.value,
                 }
             )
             print(
@@ -109,7 +111,7 @@ def main() -> None:
 
     report = {
         "schema_version": 1,
-        "status": "passed",
+        "status": RunStatus.PASSED.value,
         "selection": "lowest dataset ordinal per template",
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
         "data_identity": fixture.data_identity,

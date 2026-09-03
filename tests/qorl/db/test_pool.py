@@ -12,11 +12,15 @@ from qorl.db.resources import (
     load_runtime_profile,
     validate_host_topology,
 )
+from qorl.db.worker import PostgresWorker
 
 ROOT = Path(__file__).resolve().parents[3]
 
 
-class FakeWorker:
+class FakeWorker(PostgresWorker):
+    def __init__(self) -> None:
+        pass
+
     def close(self) -> None:
         pass
 
@@ -75,10 +79,9 @@ class WorkerPoolTest(unittest.TestCase):
     def test_claim_returns_workers_to_the_pool(self) -> None:
         profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
         slots = tuple(
-            WorkerSlot(resources, FakeWorker())  # type: ignore[arg-type]
-            for resources in profile.workers
+            WorkerSlot(resources, FakeWorker()) for resources in profile.workers
         )
-        pool = WorkerPool(slots, "test-pool", "test-sha")  # type: ignore[arg-type]
+        pool = WorkerPool(slots, "test-pool", "test-sha")
 
         with pool.claim_worker() as first, pool.claim_worker() as second:
             self.assertNotEqual(first.resources.index, second.resources.index)

@@ -12,6 +12,7 @@ from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RL_TRAINING_PROTOCOL_V1,
     RL_TRAINING_PROTOCOL_V2,
+    QueryExecutor,
     RolloutEvaluator,
     TrainingRolloutEvaluatorV1,
     TrainingRolloutEvaluatorV2,
@@ -19,9 +20,10 @@ from qorl.measure.rollout import (
     task_timeout_ms,
 )
 from qorl.plans.fingerprint import plan_sha256
+from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import TaskTimeout
 
-TASK = {
+TASK: dict[str, Any] = {
     "task_id": "job-test",
     "sql_path": "queries/test.sql",
     "sql_sha256": "unused",
@@ -50,7 +52,10 @@ DEFAULT_PLAN = {
 }
 
 
-class Fixture:
+class Fixture(TaskSet):
+    def __init__(self) -> None:
+        pass
+
     def load_sql(self, task: dict[str, Any]) -> str:
         return "SELECT 1;"
 
@@ -155,7 +160,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             Worker(),
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
         evaluator.start()
         result = evaluator.evaluate({"version": 2})
@@ -164,8 +169,8 @@ class RolloutTest(unittest.TestCase):
 
     def test_candidate_budget_can_be_reduced_for_training(self) -> None:
         evaluator = RolloutEvaluator(
-            Worker(),  # type: ignore[arg-type]
-            Fixture(),  # type: ignore[arg-type]
+            Worker(),
+            Fixture(),
             TASK,
             max_candidates=1,
         )
@@ -187,7 +192,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             Worker(),
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
         evaluator.start()
         result = evaluator.evaluate(
@@ -204,7 +209,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             worker,
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
         evaluator.start()
         evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
@@ -226,7 +231,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             worker,
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
         baseline = evaluator.start()
         analyze_calls_before_decision = worker.analyze_calls
@@ -248,7 +253,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             Worker(),
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
         evaluator.start()
         evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
@@ -261,7 +266,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = RolloutEvaluator(
             worker,
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
 
         default, candidates, final = self.run_full_rollout(evaluator)
@@ -282,7 +287,7 @@ class RolloutTest(unittest.TestCase):
         evaluator = TrainingRolloutEvaluatorV1(
             worker,
             Fixture(),
-            TASK,  # type: ignore[arg-type]
+            TASK,
         )
 
         default, candidates, final = self.run_full_rollout(evaluator)
@@ -298,7 +303,7 @@ class RolloutTest(unittest.TestCase):
     def test_serialized_rollout_record_is_unchanged(self) -> None:
         evaluator = RolloutEvaluator(
             CountingWorker(),
-            Fixture(),  # type: ignore[arg-type]
+            Fixture(),
             TASK,
         )
 
@@ -321,8 +326,8 @@ class RolloutTest(unittest.TestCase):
         default_plan["Plan Rows"] = 0
         default_plan_sha256 = plan_sha256(default_plan)
         evaluator = TrainingRolloutEvaluatorV2(
-            TimeoutWorker(),  # type: ignore[arg-type]
-            Fixture(),  # type: ignore[arg-type]
+            TimeoutWorker(),
+            Fixture(),
             TASK,
             TaskTimeout("job-test", 1_500.0, 5_000, (default_plan_sha256,)),
             "test-timeouts",
@@ -345,8 +350,8 @@ class RolloutTest(unittest.TestCase):
 
     def test_calibrated_default_plan_must_still_match(self) -> None:
         evaluator = TrainingRolloutEvaluatorV2(
-            CountingWorker(),  # type: ignore[arg-type]
-            Fixture(),  # type: ignore[arg-type]
+            CountingWorker(),
+            Fixture(),
             TASK,
             TaskTimeout("job-test", 1_500.0, 5_000, ("stale-plan",)),
             "test-timeouts",
@@ -359,7 +364,7 @@ class RolloutTest(unittest.TestCase):
 
     @staticmethod
     def run_full_rollout(
-        evaluator: RolloutEvaluator,
+        evaluator: RolloutEvaluator[QueryExecutor],
     ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         default = evaluator.start()
         candidates = [

@@ -18,6 +18,7 @@ from qorl.db.resources import (
 from qorl.db.worker import PostgresWorker
 
 DEFAULT_POOL_CONFIG = DEFAULT_TRAINING_PROFILE
+EXPECTED_POOL_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -67,7 +68,7 @@ def load_pool(
         environment.get("QORL_RL_WORKER_POOL_CONFIG", DEFAULT_POOL_CONFIG)
     )
     profile = load_runtime_profile(repository, configured)
-    if len(profile.workers) != 4:
+    if len(profile.workers) != EXPECTED_POOL_WORKERS:
         raise ValueError("the training profile must define exactly four workers")
     return profile
 

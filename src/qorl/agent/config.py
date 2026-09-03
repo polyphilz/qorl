@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from qorl.evaluation.types import PolicyType
+
 
 @dataclass(frozen=True)
 class QoAgentConfig:
@@ -22,7 +24,7 @@ class QoAgentConfig:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> QoAgentConfig:
-        if value.get("type") != "qo_agent":
+        if value.get("type") != PolicyType.QO_AGENT:
             raise ValueError("qo-agent policy type is incorrect")
         return cls(
             model=value["model"],

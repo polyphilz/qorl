@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import model_snapshot
+from qorl.evaluation.types import RunStatus
 
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"
@@ -52,7 +53,7 @@ def training_report(
     ]
     report = {
         "schema_version": 1,
-        "status": "passed",
+        "status": RunStatus.PASSED.value,
         "prime_rl_version": PRIME_RL_VERSION,
         "model": model["model"],
         "model_revision": model["revision"],
@@ -93,6 +94,7 @@ def sft(repository: Path) -> Path:
     dataset = repository / DATASET
     audit = dataset / "render-audit.json"
     config_path = repository / CONFIG
+    configured = tomllib.loads(config_path.read_text())
     output = repository / "outputs/sft"
 
     run(
@@ -100,7 +102,7 @@ def sft(repository: Path) -> Path:
         repository,
     )
     replay = json.loads((dataset / "replay-audit.json").read_text())
-    if replay.get("status") != "passed":
+    if replay.get("status") != RunStatus.PASSED:
         raise RuntimeError("protocol dataset replay audit has not passed")
     if replay.get("dataset_manifest_sha256") != sha256(dataset / "manifest.json"):
         raise RuntimeError("protocol dataset changed after its replay audit")
@@ -118,12 +120,13 @@ def sft(repository: Path) -> Path:
             str(dataset / "prime"),
             "--output",
             str(audit),
+            "--seed",
+            str(configured["data"]["seed"]),
         ],
         repository,
     )
 
     rendered = json.loads(audit.read_text())
-    configured = tomllib.loads(config_path.read_text())
     steps = rendered["packed_rows"]["train"]
     if configured["data"]["seed"] != rendered["seed"]:
         raise RuntimeError("render audit and training shuffle seeds differ")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 
@@ -11,8 +12,54 @@ class ActionError(ValueError):
 
 
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
-JOIN_METHODS = {"hash", "merge", "nestloop"}
-SCAN_METHODS = {"seq", "tid", "index", "index_only", "bitmap"}
+
+
+class JoinMethod(StrEnum):
+    HASH = "hash"
+    MERGE = "merge"
+    NESTLOOP = "nestloop"
+
+
+class ScanMethod(StrEnum):
+    SEQ = "seq"
+    TID = "tid"
+    INDEX = "index"
+    INDEX_ONLY = "index_only"
+    BITMAP = "bitmap"
+
+
+class MemoizeMode(StrEnum):
+    AUTO = "auto"
+    FORCE = "force"
+    FORBID = "forbid"
+
+
+class RowMode(StrEnum):
+    ABSOLUTE = "absolute"
+    ADD = "add"
+    SUBTRACT = "subtract"
+    MULTIPLY = "multiply"
+
+
+class ParallelMode(StrEnum):
+    SOFT = "soft"
+    HARD = "hard"
+
+
+AUTO = "auto"
+ACTION_SCHEMA_VERSION = 1
+MIN_JOIN_RELATIONS = 2
+MAX_PARALLEL_WORKERS = 2
+MAX_COST_SETTING = 1_000_000.0
+MAX_EFFECTIVE_CACHE_PAGES = 4_194_304
+MAX_COLLAPSE_LIMIT = 32
+MIN_ROW_MULTIPLIER = 0.001
+MAX_ROW_MULTIPLIER = 1_000.0
+MIN_ABSOLUTE_ROW_COUNT = 1.0
+MAX_ABSOLUTE_ROW_COUNT = 1_000_000_000_000.0
+
+JOIN_METHODS = {method.value for method in JoinMethod}
+SCAN_METHODS = {method.value for method in ScanMethod}
 
 BOOLEAN_SETTINGS = {
     "enable_async_append",
@@ -41,19 +88,19 @@ BOOLEAN_SETTINGS = {
 }
 
 NUMERIC_SETTINGS = {
-    "seq_page_cost": (0.0, 1_000_000.0),
-    "random_page_cost": (0.0, 1_000_000.0),
-    "cpu_tuple_cost": (0.0, 1_000_000.0),
-    "cpu_index_tuple_cost": (0.0, 1_000_000.0),
-    "cpu_operator_cost": (0.0, 1_000_000.0),
-    "parallel_setup_cost": (0.0, 1_000_000.0),
-    "parallel_tuple_cost": (0.0, 1_000_000.0),
+    "seq_page_cost": (0.0, MAX_COST_SETTING),
+    "random_page_cost": (0.0, MAX_COST_SETTING),
+    "cpu_tuple_cost": (0.0, MAX_COST_SETTING),
+    "cpu_index_tuple_cost": (0.0, MAX_COST_SETTING),
+    "cpu_operator_cost": (0.0, MAX_COST_SETTING),
+    "parallel_setup_cost": (0.0, MAX_COST_SETTING),
+    "parallel_tuple_cost": (0.0, MAX_COST_SETTING),
 }
 
 INTEGER_SETTINGS = {
-    "effective_cache_size": (1, 4_194_304),
-    "from_collapse_limit": (1, 32),
-    "join_collapse_limit": (1, 32),
+    "effective_cache_size": (1, MAX_EFFECTIVE_CACHE_PAGES),
+    "from_collapse_limit": (1, MAX_COLLAPSE_LIMIT),
+    "join_collapse_limit": (1, MAX_COLLAPSE_LIMIT),
 }
 
 
@@ -66,7 +113,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
     relation_list = {
         "type": "array",
         "items": relation,
-        "minItems": 2,
+        "minItems": MIN_JOIN_RELATIONS,
         "uniqueItems": True,
     }
     settings = {
@@ -87,7 +134,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
         "properties": {
             "version": {
                 "type": "integer",
-                "const": 1,
+                "const": ACTION_SCHEMA_VERSION,
                 "description": "PlanAction schema version.",
             },
             "leading": {
@@ -114,7 +161,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                         "relations": relation_list,
                         "force": {
                             "type": "string",
-                            "enum": ["hash", "merge", "nestloop"],
+                            "enum": [method.value for method in JoinMethod],
                         },
                         "forbid": {
                             "type": "array",
@@ -124,7 +171,10 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                         },
                         "memoize": {
                             "type": "string",
-                            "enum": ["force", "forbid"],
+                            "enum": [
+                                MemoizeMode.FORCE.value,
+                                MemoizeMode.FORBID.value,
+                            ],
                         },
                     },
                 },
@@ -192,7 +242,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                         "relations": relation_list,
                         "mode": {
                             "type": "string",
-                            "enum": ["absolute", "add", "subtract", "multiply"],
+                            "enum": [mode.value for mode in RowMode],
                         },
                         "value": {"type": "number"},
                     },
@@ -207,8 +257,15 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                     "required": ["relation", "workers", "mode"],
                     "properties": {
                         "relation": relation,
-                        "workers": {"type": "integer", "minimum": 0, "maximum": 2},
-                        "mode": {"type": "string", "enum": ["soft", "hard"]},
+                        "workers": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": MAX_PARALLEL_WORKERS,
+                        },
+                        "mode": {
+                            "type": "string",
+                            "enum": [mode.value for mode in ParallelMode],
+                        },
                     },
                 },
             },
@@ -267,7 +324,7 @@ class TaskCatalog:
         )
 
     def require_relations(self, values: Any, label: str) -> list[str]:
-        if not isinstance(values, list) or len(values) < 2:
+        if not isinstance(values, list) or len(values) < MIN_JOIN_RELATIONS:
             raise ActionError(f"{label} must contain at least two relations")
         if any(not isinstance(value, str) for value in values):
             raise ActionError(f"{label} must contain relation names")
@@ -372,7 +429,7 @@ def normalize_leading(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         raise ActionError("leading must contain at least two relations")
     if len(leaves) != len(set(leaves)):
         raise ActionError("leading contains duplicate relations")
-    if set(leaves) != catalog.relations:
+    if frozenset(leaves) != catalog.relations:
         raise ActionError("leading must contain every query relation exactly once")
     return tree
 
@@ -419,10 +476,10 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             "settings",
         },
     )
-    if action.get("version") != 1:
-        raise ActionError("action.version must equal 1")
+    if action.get("version") != ACTION_SCHEMA_VERSION:
+        raise ActionError(f"action.version must equal {ACTION_SCHEMA_VERSION}")
 
-    normalized: dict[str, Any] = {"version": 1}
+    normalized: dict[str, Any] = {"version": ACTION_SCHEMA_VERSION}
     if action.get("leading") is not None:
         normalized["leading"] = normalize_leading(action["leading"], catalog)
 
@@ -439,7 +496,9 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another join target")
         join_targets.add(target)
         force = require_enum(
-            item.get("force", "auto"), JOIN_METHODS | {"auto"}, f"{label}.force"
+            item.get("force", AUTO),
+            JOIN_METHODS | {AUTO},
+            f"{label}.force",
         )
         forbid = require_enum_list(item.get("forbid"), JOIN_METHODS, f"{label}.forbid")
         if set(forbid) == JOIN_METHODS:
@@ -447,9 +506,11 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         if force in forbid:
             raise ActionError(f"{label} both forces and forbids {force}")
         memoize = require_enum(
-            item.get("memoize", "auto"), {"auto", "force", "forbid"}, f"{label}.memoize"
+            item.get("memoize", MemoizeMode.AUTO.value),
+            {mode.value for mode in MemoizeMode},
+            f"{label}.memoize",
         )
-        if force == "auto" and not forbid and memoize == "auto":
+        if force == AUTO and not forbid and memoize == MemoizeMode.AUTO:
             raise ActionError(f"{label} does not request any steering")
         joins.append(
             {
@@ -472,7 +533,9 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another scan target")
         scan_relations.add(relation)
         force = require_enum(
-            item.get("force", "auto"), SCAN_METHODS | {"auto"}, f"{label}.force"
+            item.get("force", AUTO),
+            SCAN_METHODS | {AUTO},
+            f"{label}.force",
         )
         forbid = require_enum_list(item.get("forbid"), SCAN_METHODS, f"{label}.forbid")
         if set(forbid) == SCAN_METHODS:
@@ -482,9 +545,13 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         indexes = require_indexes(
             item.get("indexes"), relation, catalog, f"{label}.indexes"
         )
-        if indexes and force not in {"index", "index_only", "bitmap"}:
+        if indexes and force not in {
+            ScanMethod.INDEX,
+            ScanMethod.INDEX_ONLY,
+            ScanMethod.BITMAP,
+        }:
             raise ActionError(f"{label}.indexes requires an index-based forced scan")
-        if force == "auto" and not forbid:
+        if force == AUTO and not forbid:
             raise ActionError(f"{label} does not request any steering")
         scans.append(
             {
@@ -535,7 +602,7 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         correction_targets.add(target)
         mode = require_enum(
             item.get("mode"),
-            {"absolute", "add", "subtract", "multiply"},
+            {mode.value for mode in RowMode},
             f"{label}.mode",
         )
         number = item.get("value")
@@ -545,8 +612,12 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             or not math.isfinite(number)
         ):
             raise ActionError(f"{label}.value must be finite and numeric")
-        upper = 1_000.0 if mode == "multiply" else 1_000_000_000_000.0
-        lower = 0.001 if mode == "multiply" else 1.0
+        upper = (
+            MAX_ROW_MULTIPLIER if mode == RowMode.MULTIPLY else MAX_ABSOLUTE_ROW_COUNT
+        )
+        lower = (
+            MIN_ROW_MULTIPLIER if mode == RowMode.MULTIPLY else MIN_ABSOLUTE_ROW_COUNT
+        )
         if not lower <= number <= upper:
             raise ActionError(f"{label}.value is outside [{lower}, {upper}]")
         corrections.append({"relations": relations, "mode": mode, "value": number})
@@ -568,26 +639,33 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         if (
             isinstance(workers, bool)
             or not isinstance(workers, int)
-            or not 0 <= workers <= 2
+            or not 0 <= workers <= MAX_PARALLEL_WORKERS
         ):
-            raise ActionError(f"{label}.workers must be an integer from 0 through 2")
-        mode = require_enum(item.get("mode", "soft"), {"soft", "hard"}, f"{label}.mode")
+            raise ActionError(
+                f"{label}.workers must be an integer from 0 through "
+                f"{MAX_PARALLEL_WORKERS}"
+            )
+        mode = require_enum(
+            item.get("mode", ParallelMode.SOFT.value),
+            {mode.value for mode in ParallelMode},
+            f"{label}.mode",
+        )
         parallel.append({"relation": relation, "workers": workers, "mode": mode})
     if parallel:
         normalized["parallel"] = sorted(parallel, key=lambda item: item["relation"])
 
     settings = normalize_settings(action.get("settings"))
     join_setting = {
-        "hash": "enable_hashjoin",
-        "merge": "enable_mergejoin",
-        "nestloop": "enable_nestloop",
+        JoinMethod.HASH: "enable_hashjoin",
+        JoinMethod.MERGE: "enable_mergejoin",
+        JoinMethod.NESTLOOP: "enable_nestloop",
     }
     scan_setting = {
-        "seq": "enable_seqscan",
-        "tid": "enable_tidscan",
-        "index": "enable_indexscan",
-        "index_only": "enable_indexonlyscan",
-        "bitmap": "enable_bitmapscan",
+        ScanMethod.SEQ: "enable_seqscan",
+        ScanMethod.TID: "enable_tidscan",
+        ScanMethod.INDEX: "enable_indexscan",
+        ScanMethod.INDEX_ONLY: "enable_indexonlyscan",
+        ScanMethod.BITMAP: "enable_bitmapscan",
     }
     for item in joins:
         setting = join_setting.get(item["force"])
@@ -614,7 +692,8 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
                 f"action both forces and disables an index on {item['relation']}"
             )
         if (
-            item["force"] in {"index", "index_only", "bitmap"}
+            item["force"]
+            in {ScanMethod.INDEX, ScanMethod.INDEX_ONLY, ScanMethod.BITMAP}
             and disabled
             and disabled == set(catalog.indexes.get(item["relation"], ()))
         ):
@@ -650,27 +729,31 @@ def compile_action(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], st
     if "leading" in action:
         hints.append(f"Leading({render_leading(action['leading'])})")
 
-    join_names = {"hash": "HashJoin", "merge": "MergeJoin", "nestloop": "NestLoop"}
+    join_names = {
+        JoinMethod.HASH: "HashJoin",
+        JoinMethod.MERGE: "MergeJoin",
+        JoinMethod.NESTLOOP: "NestLoop",
+    }
     for join in action.get("joins", []):
         relations = " ".join(join["relations"])
-        if join["force"] != "auto":
+        if join["force"] != AUTO:
             hints.append(f"{join_names[join['force']]}({relations})")
         for method in join["forbid"]:
             hints.append(f"No{join_names[method]}({relations})")
-        if join["memoize"] != "auto":
-            prefix = "" if join["memoize"] == "force" else "No"
+        if join["memoize"] != MemoizeMode.AUTO:
+            prefix = "" if join["memoize"] == MemoizeMode.FORCE else "No"
             hints.append(f"{prefix}Memoize({relations})")
 
     scan_names = {
-        "seq": "SeqScan",
-        "tid": "TidScan",
-        "index": "IndexScan",
-        "index_only": "IndexOnlyScan",
-        "bitmap": "BitmapScan",
+        ScanMethod.SEQ: "SeqScan",
+        ScanMethod.TID: "TidScan",
+        ScanMethod.INDEX: "IndexScan",
+        ScanMethod.INDEX_ONLY: "IndexOnlyScan",
+        ScanMethod.BITMAP: "BitmapScan",
     }
     for scan in action.get("scans", []):
         arguments = " ".join([scan["relation"], *scan["indexes"]])
-        if scan["force"] != "auto":
+        if scan["force"] != AUTO:
             hints.append(f"{scan_names[scan['force']]}({arguments})")
         for method in scan["forbid"]:
             hints.append(f"No{scan_names[method]}({scan['relation']})")
@@ -679,7 +762,12 @@ def compile_action(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], st
         arguments = " ".join([item["relation"], *item["indexes"]])
         hints.append(f"DisableIndex({arguments})")
 
-    correction_prefix = {"absolute": "#", "add": "+", "subtract": "-", "multiply": "*"}
+    correction_prefix = {
+        RowMode.ABSOLUTE: "#",
+        RowMode.ADD: "+",
+        RowMode.SUBTRACT: "-",
+        RowMode.MULTIPLY: "*",
+    }
     for item in action.get("row_corrections", []):
         relations = " ".join(item["relations"])
         correction = correction_prefix[item["mode"]] + format_number(item["value"])

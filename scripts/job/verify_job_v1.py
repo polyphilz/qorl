@@ -19,6 +19,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/job-v1"
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+MAX_FRESHLY_FROZEN_XID_AGE = 1_000
 
 
 def run(command: list[str], *, input_text: str | None = None) -> str:
@@ -298,7 +299,7 @@ def validate_database_state(state: dict[str, Any], manifest: dict[str, Any]) -> 
         )
 
     max_frozen_age = max(row["frozen_xid_age"] for row in state["relations"])
-    if max_frozen_age > 1000:
+    if max_frozen_age > MAX_FRESHLY_FROZEN_XID_AGE:
         raise RuntimeError(
             f"JOB relations were not freshly frozen: max age={max_frozen_age}"
         )

@@ -6,10 +6,19 @@ from pathlib import Path
 from typing import Any
 
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
+from qorl.agent.protocol import (
+    INSPECTION_TURNS_PER_ALIAS,
+    RESERVED_DECISION_TURNS,
+    AgentProtocol,
+)
 from qorl.agent.tools import agent_tools
+from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.fixture import data_identity
-from qorl.measure.rollout import MAX_CANDIDATES
+from qorl.measure.rollout import (
+    MAX_CANDIDATES,
+    MeasurementStatus,
+    ToolResultStatus,
+)
 from qorl.plans.action import TaskCatalog, compile_action
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.verify import verify_action
@@ -18,6 +27,9 @@ from qorl.workload.taskset import TaskSet
 
 class DemoValidationError(ValueError):
     pass
+
+
+MIN_DEMONSTRATION_MESSAGES = 4
 
 
 def require(condition: bool, message: str) -> None:
@@ -84,7 +96,7 @@ def validate_protocol_demo(
     )
     sql = task_set.load_sql(task)
 
-    require(len(messages) >= 4, "demo has no tool interaction")
+    require(len(messages) >= MIN_DEMONSTRATION_MESSAGES, "demo has no tool interaction")
     require(
         messages[0] == {"role": "system", "content": SYSTEM_PROMPT},
         "system message differs from the live agent prompt",
@@ -105,7 +117,7 @@ def validate_protocol_demo(
         "maximum_model_turns must be positive",
     )
     inspection_limit = min(
-        len(aliases) * 3,
+        len(aliases) * INSPECTION_TURNS_PER_ALIAS,
         max(0, maximum_turns - RESERVED_DECISION_TURNS),
     )
     protocol = AgentProtocol(
@@ -179,12 +191,12 @@ def validate_protocol_demo(
         result = parse_json(tool_result.get("content"), f"turn {turn} result")
         require(isinstance(result, dict), f"turn {turn}: result must be an object")
         require(
-            result.get("_turn_budget") == protocol.budget(turn),
+            result.get(TURN_BUDGET_FIELD) == protocol.budget(turn),
             f"turn {turn}: budget mismatch",
         )
         require("error" not in result, f"turn {turn}: tool returned an error")
 
-        if name == "evaluate_candidate":
+        if name == ToolName.EVALUATE_CANDIDATE:
             expected_id = f"candidate-{len(issued_candidates) + 1:02d}"
             require(
                 result.get("candidate_id") == expected_id,
@@ -206,7 +218,7 @@ def validate_protocol_demo(
             require(result.get("compiled_hint") == hint, f"turn {turn}: hint mismatch")
             if metadata.get("measurement_mode") == "plan_validation_only":
                 require(
-                    result.get("measurement_status") == "not_measured",
+                    result.get("measurement_status") == MeasurementStatus.NOT_MEASURED,
                     f"turn {turn}: unexpected measurement status",
                 )
                 require(
@@ -245,7 +257,7 @@ def validate_protocol_demo(
             )
             require(verification.valid, "; ".join(verification.errors))
             issued_candidates.append(expected_id)
-        elif name == "get_plan":
+        elif name == ToolName.GET_PLAN:
             candidate_id = arguments.get("candidate_id")
             require(
                 candidate_id == "default" or candidate_id in issued_candidates,
@@ -260,21 +272,24 @@ def validate_protocol_demo(
                 else evidence["candidates"][candidate_id]["plain_explain"]
             )
             actual_plan = {
-                key: value for key, value in result.items() if key != "_turn_budget"
+                key: value for key, value in result.items() if key != TURN_BUDGET_FIELD
             }
             require(
                 actual_plan == expected_plan,
                 f"turn {turn}: plan result differs from evidence",
             )
-        elif name == "finish":
+        elif name == ToolName.FINISH:
             require(not arguments, f"turn {turn}: finish takes no arguments")
-            require(result.get("status") == "finished", f"turn {turn}: finish failed")
+            require(
+                result.get("status") == ToolResultStatus.FINISHED,
+                f"turn {turn}: finish failed",
+            )
             require(offset == len(tail) - 2, "finish must be the final call")
             finished = True
-        elif name == "keep_default":
+        elif name == ToolName.KEEP_DEFAULT:
             require(not arguments, f"turn {turn}: keep_default takes no arguments")
             require(
-                result.get("status") == "kept_default",
+                result.get("status") == ToolResultStatus.KEPT_DEFAULT,
                 f"turn {turn}: keep_default failed",
             )
             require(
@@ -313,7 +328,9 @@ def validate_protocol_demo(
         "task_id": task["task_id"],
         "turn_count": len(call_sequence),
         "candidate_ids": issued_candidates,
-        "terminal_decision": "keep_default" if kept_default else "finish",
+        "terminal_decision": (
+            ToolName.KEEP_DEFAULT.value if kept_default else ToolName.FINISH.value
+        ),
         "call_sequence": call_sequence,
         "canonical_sha256": hashlib.sha256(encoded).hexdigest(),
     }

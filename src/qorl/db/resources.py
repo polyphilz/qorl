@@ -9,6 +9,7 @@ from qorl.util.hashing import sha256_file
 DEFAULT_EVALUATION_PROFILE = Path("configs/postgres/evaluation-worker-v1.json")
 DEFAULT_TRAINING_PROFILE = Path("configs/postgres/training-pool-v1.json")
 NO_SWAP_BYTES = 0
+MIN_SIZE_TEXT_LENGTH = 2
 
 
 def cpu_ids(cpuset: str) -> set[int]:
@@ -26,7 +27,7 @@ def cpu_ids(cpuset: str) -> set[int]:
 
 
 def size_bytes(limit: str) -> int:
-    if len(limit) < 2 or limit[-1].lower() != "g":
+    if len(limit) < MIN_SIZE_TEXT_LENGTH or limit[-1].lower() != "g":
         raise ValueError("runtime sizes must use whole GiB, such as 8g")
     gib = int(limit[:-1])
     if gib < 1:

@@ -4,13 +4,14 @@ import json
 from typing import Any
 
 from qorl.agent.tools import candidate_feedback
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.agent.types import InspectionExecutor, ToolName
+from qorl.measure.rollout import RolloutEvaluator, ToolResultStatus
 from qorl.plans.action import IDENTIFIER
 from qorl.plans.verify import compact_plan
 
 
 class AgentEnvironment:
-    def __init__(self, evaluator: RolloutEvaluator) -> None:
+    def __init__(self, evaluator: RolloutEvaluator[InspectionExecutor]) -> None:
         self.evaluator = evaluator
         self.worker = evaluator.worker
         self.tables = {
@@ -23,7 +24,7 @@ class AgentEnvironment:
 
     def table(self, arguments: dict[str, Any]) -> tuple[str, str]:
         alias = arguments.get("relation")
-        if alias not in self.tables:
+        if not isinstance(alias, str) or alias not in self.tables:
             raise ValueError("relation is not part of this query")
         return alias, self.tables[alias]
 
@@ -128,33 +129,33 @@ class AgentEnvironment:
 
     def execute(self, name: str, arguments: Any) -> tuple[Any, bool]:
         if not isinstance(arguments, dict):
-            if name == "evaluate_candidate":
+            if name == ToolName.EVALUATE_CANDIDATE:
                 return (
                     candidate_feedback(self.evaluator.evaluate(arguments)),
                     False,
                 )
             return {"error": "tool arguments must be an object"}, False
         try:
-            if name == "evaluate_candidate":
+            if name == ToolName.EVALUATE_CANDIDATE:
                 return candidate_feedback(
                     self.evaluator.evaluate(arguments.get("action"))
                 ), False
-            if name == "keep_default":
+            if name == ToolName.KEEP_DEFAULT:
                 return self.evaluator.keep_default(), True
-            if name == "finish":
+            if name == ToolName.FINISH:
                 if not self.evaluator.candidates:
                     raise RuntimeError(
                         "finish requires a candidate; use keep_default to "
                         "keep PostgreSQL's plan"
                     )
-                return {"status": "finished"}, True
+                return {"status": ToolResultStatus.FINISHED.value}, True
             methods = {
-                "describe_table": self.describe_table,
-                "list_indexes": self.list_indexes,
-                "get_column_stats": self.get_column_stats,
-                "get_relation_size": self.get_relation_size,
-                "get_extended_stats": self.get_extended_stats,
-                "get_plan": self.get_plan,
+                ToolName.DESCRIBE_TABLE.value: self.describe_table,
+                ToolName.LIST_INDEXES.value: self.list_indexes,
+                ToolName.GET_COLUMN_STATS.value: self.get_column_stats,
+                ToolName.GET_RELATION_SIZE.value: self.get_relation_size,
+                ToolName.GET_EXTENDED_STATS.value: self.get_extended_stats,
+                ToolName.GET_PLAN.value: self.get_plan,
             }
             method = methods.get(name)
             if method is None:

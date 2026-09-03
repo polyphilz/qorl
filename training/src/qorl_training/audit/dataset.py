@@ -56,7 +56,7 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sequence-length", type=int, default=20480)
-    parser.add_argument("--seed", type=int, default=20260830)
+    parser.add_argument("--seed", type=int, required=True)
     arguments = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(arguments.model)

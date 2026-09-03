@@ -31,6 +31,8 @@ INVENTORY_JOIN_EDGE = re.compile(
 )
 
 JoinPredicate = tuple[str, str, str, str]
+MAX_ALIAS_PERMUTATIONS = 1_000_000
+MIN_JOIN_RELATIONS = 2
 
 
 def _canonical_graph_sha256(
@@ -48,7 +50,7 @@ def _canonical_graph_sha256(
         math.factorial(len(table_aliases))
         for table_aliases in aliases_by_table.values()
     )
-    if permutation_count > 1_000_000:
+    if permutation_count > MAX_ALIAS_PERMUTATIONS:
         raise RuntimeError(
             f"join graph has too many alias permutations: {permutation_count}"
         )
@@ -165,7 +167,7 @@ def extract_join_structure(sql: str, query_name: str) -> dict[str, Any]:
     ]
     tables = sorted(set(aliases.values()))
     edges = sorted(join_edges)
-    if len(relations) < 2 or not edges:
+    if len(relations) < MIN_JOIN_RELATIONS or not edges:
         raise RuntimeError(f"query has no usable join graph: {query_name}")
 
     adjacency = {alias: set() for alias in aliases}

@@ -8,13 +8,16 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from qorl.agent.types import ToolName
+from qorl.measure.rollout import MeasurementStatus
+from qorl.plans.action import AUTO, MemoizeMode
 from qorl.sft.validate import validate_protocol_demo
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
 
 DATASET_ID = "protocol-sft-v1"
-DATASET_SEED = 20260830
 SPLIT_COUNTS = {"train": 256, "validation": 64}
+SPEEDUP_BOUNDS = (0.5, 0.9, 1.1, 2.0)
 
 
 def canonical_json(value: Any) -> str:
@@ -85,9 +88,9 @@ def action_families(action: dict[str, Any]) -> list[str]:
     if "leading" in action:
         families.add("leading")
     for join in action.get("joins", []):
-        if join.get("force") not in {None, "auto"} or join.get("forbid"):
+        if join.get("force") not in {None, AUTO} or join.get("forbid"):
             families.add("join")
-        if join.get("memoize") not in {None, "auto"}:
+        if join.get("memoize") not in {None, MemoizeMode.AUTO}:
             families.add("memoize")
     if action.get("scans"):
         families.add("scan")
@@ -119,18 +122,18 @@ def speedup_distribution(values: list[float]) -> dict[str, Any]:
     if not values:
         return {
             "count": 0,
-            "status": "not_measured",
+            "status": MeasurementStatus.NOT_MEASURED.value,
             "selection_used_speed": False,
         }
     bins = Counter()
     for value in values:
-        if value < 0.5:
+        if value < SPEEDUP_BOUNDS[0]:
             bins["<0.5"] += 1
-        elif value < 0.9:
+        elif value < SPEEDUP_BOUNDS[1]:
             bins["0.5-0.9"] += 1
-        elif value <= 1.1:
+        elif value <= SPEEDUP_BOUNDS[2]:
             bins["0.9-1.1"] += 1
-        elif value <= 2.0:
+        elif value <= SPEEDUP_BOUNDS[3]:
             bins["1.1-2.0"] += 1
         else:
             bins[">2.0"] += 1
@@ -156,6 +159,7 @@ def finalize_dataset(
     repository: Path,
     output_dir: Path,
     failures: list[dict[str, str]],
+    dataset_seed: int,
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb-v1")
     overlap_path = repository / "data/ceb/provenance/job-overlap.json"
@@ -217,14 +221,17 @@ def finalize_dataset(
             if message["role"] == "assistant":
                 name = message["tool_calls"][0]["function"]["name"]
                 tool_calls[name] += 1
-                if name == "evaluate_candidate":
+                if name == ToolName.EVALUATE_CANDIDATE:
                     arguments = json.loads(
                         message["tool_calls"][0]["function"]["arguments"]
                     )
                     action = arguments["action"]
                     action_hashes.add(canonical_sha256(action))
                     family_counts.update(action_families(action))
-            elif message["role"] == "tool" and message["name"] == "evaluate_candidate":
+            elif (
+                message["role"] == "tool"
+                and message["name"] == ToolName.EVALUATE_CANDIDATE
+            ):
                 result = json.loads(message["content"])
                 plan_hashes.add(result["plan_sha256"])
                 speedup = result.get("provisional_speedup")
@@ -273,7 +280,7 @@ def finalize_dataset(
     manifest = {
         "schema_version": 1,
         "dataset_id": DATASET_ID,
-        "seed": DATASET_SEED,
+        "seed": dataset_seed,
         "task_set_id": task_set.task_set_id,
         **identities_record,
         "sources": {
@@ -312,7 +319,7 @@ def finalize_dataset(
             "candidate_counts": dict(sorted(candidate_counts.items())),
             "turn_counts": distribution(turn_counts),
             "action_families": dict(sorted(family_counts.items())),
-            "candidate_attempts": tool_calls["evaluate_candidate"],
+            "candidate_attempts": tool_calls[ToolName.EVALUATE_CANDIDATE],
             "unique_normalized_actions": len(action_hashes),
             "unique_physical_plans": len(plan_hashes),
             "provisional_speedups": speedup_distribution(speedups),

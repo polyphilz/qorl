@@ -17,12 +17,14 @@ from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
+from qorl.evaluation.types import PolicyType, RunStatus
 from qorl.measure.rollout import (
     DEFAULT_MEASUREMENTS,
     FINAL_PAIRS,
     GLOBAL_TIMEOUT_MS,
     MAX_CANDIDATES,
     RIGOROUS_EVALUATION_PROTOCOL_V1,
+    FinalStatus,
     RolloutEvaluator,
 )
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
@@ -30,7 +32,6 @@ from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
 
-RUN_SEED = 20260827
 DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
 
 
@@ -38,7 +39,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     completed = [
         result
         for result in results
-        if result.get("final", {}).get("status") == "completed"
+        if result.get("final", {}).get("status") == FinalStatus.COMPLETED
     ]
     scores = [result["final"]["score"] for result in completed]
     candidate_time = sum(
@@ -90,7 +91,7 @@ def run_task(
     evaluator = RolloutEvaluator(worker, task_set, task)
     baseline = evaluator.start()
     trace: dict[str, Any]
-    if policy["type"] == "random_structured_action":
+    if policy["type"] == PolicyType.RANDOM_STRUCTURED_ACTION:
         action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
         for _ in range(MAX_CANDIDATES):
             candidate = evaluator.evaluate(sample_action(evaluator.catalog, action_rng))
@@ -107,7 +108,7 @@ def run_task(
             raise RuntimeError("qo-agent policy is not initialized")
         trace = agent.search(evaluator)
 
-    final = evaluator.finish(random.Random(f"{RUN_SEED}:{task['task_id']}:pairs"))
+    final = evaluator.finish(random.Random(f"{policy['seed']}:{task['task_id']}:pairs"))
     return {
         "schema_version": 1,
         "task_id": task["task_id"],
@@ -163,10 +164,13 @@ def load_run_config(
         raise RuntimeError("policy configuration schema_version must equal 1")
     policy = policy_value.get("policy")
     if not isinstance(policy, dict) or policy.get("type") not in {
-        "random_structured_action",
-        "qo_agent",
+        PolicyType.RANDOM_STRUCTURED_ACTION,
+        PolicyType.QO_AGENT,
     }:
         raise RuntimeError("policy configuration has an unknown policy type")
+    seed = policy.get("seed")
+    if isinstance(seed, bool) or not isinstance(seed, int):
+        raise RuntimeError("policy configuration must define an integer seed")
     run_id_prefix = value.get("run_id_prefix")
     if not isinstance(run_id_prefix, str) or not run_id_prefix:
         raise RuntimeError("run configuration must define run_id_prefix")
@@ -183,7 +187,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
     agent: QoAgentPolicy | None = None
-    if policy["type"] == "qo_agent":
+    if policy["type"] == PolicyType.QO_AGENT:
         agent = QoAgentPolicy(QoAgentConfig.from_dict(policy))
         agent.preflight()
     started_at = datetime.now(UTC)
@@ -194,7 +198,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     manifest: dict[str, Any] = {
         "schema_version": 1,
         "benchmark_id": benchmark_id,
-        "status": "running",
+        "status": RunStatus.RUNNING.value,
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
         "inventory_id": task_set.inventory["inventory_id"],
@@ -220,7 +224,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                 "candidate_count": MAX_CANDIDATES,
                 "sampler": sampler_manifest(),
             }
-            if policy["type"] == "random_structured_action"
+            if policy["type"] == PolicyType.RANDOM_STRUCTURED_ACTION
             else {**agent.manifest(), "candidate_count": MAX_CANDIDATES}
         ),
         "protocol": {
@@ -283,7 +287,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                 print(f"[{index}/{manifest['task_count']}] {task_id}", flush=True)
                 try:
                     slot, result = future.result()
-                    if result["status"] == "completed":
+                    if result["status"] == RunStatus.COMPLETED:
                         manifest["completed_task_count"] += 1
                         print(
                             f"  worker={slot.resources.index} "
@@ -297,7 +301,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
                         "schema_version": 1,
                         "task_id": task["task_id"],
                         "template_id": task["template_id"],
-                        "status": "failed",
+                        "status": RunStatus.FAILED.value,
                         "completed_at_utc": utc_now(),
                         "error": str(error),
                     }
@@ -316,7 +320,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     except BaseException:
         if pool is not None:
             pool.close()
-        manifest["status"] = "interrupted"
+        manifest["status"] = RunStatus.INTERRUPTED.value
         manifest["completed_at_utc"] = utc_now()
         manifest["summary"] = summarize(
             [
@@ -329,7 +333,9 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         raise
 
     manifest["status"] = (
-        "completed" if manifest["failed_task_count"] == 0 else "completed_with_failures"
+        RunStatus.COMPLETED.value
+        if manifest["failed_task_count"] == 0
+        else RunStatus.COMPLETED_WITH_FAILURES.value
     )
     manifest["completed_at_utc"] = utc_now()
     manifest["summary"] = summarize(

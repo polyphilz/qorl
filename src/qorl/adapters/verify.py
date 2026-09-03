@@ -12,10 +12,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from qorl.adapters.model import adapter_rank
 from qorl.util.hashing import sha256_file
 
 BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
+MINIMUM_LOGPROBABILITY_DELTA = 1e-7
+TOP_LOGPROBS = 20
 
 
 def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
@@ -46,7 +49,7 @@ def request(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
     return json.loads(payload) if payload else {}
 
 
-def wait_for_server(url: str, process: subprocess.Popen, timeout: int) -> None:
+def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -68,7 +71,7 @@ def completion(base_url: str, model: str, prompt: list[int]) -> dict[str, Any]:
             "max_tokens": 1,
             "temperature": 0,
             "seed": 0,
-            "logprobs": 20,
+            "logprobs": TOP_LOGPROBS,
         },
     )
     choice = response["choices"][0]
@@ -115,7 +118,7 @@ def main() -> None:
         "--language-model-only",
         "--enable-lora",
         "--max-lora-rank",
-        "16",
+        str(adapter_rank(arguments.adapter)),
         "--lora-modules",
         f"{ADAPTER_MODEL}={arguments.adapter}",
         "--max-model-len",
@@ -162,7 +165,7 @@ def main() -> None:
     changed = (
         base["text"] != adapted["text"]
         or set(base["top_logprobs"]) != set(adapted["top_logprobs"])
-        or largest_shared_delta > 1e-7
+        or largest_shared_delta > MINIMUM_LOGPROBABILITY_DELTA
     )
     if not changed:
         raise RuntimeError("reloaded adapter did not change the measured distribution")

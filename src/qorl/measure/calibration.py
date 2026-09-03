@@ -13,16 +13,17 @@ from qorl import __version__
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.evaluation.types import RunStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
 from qorl.util.hashing import sha256_file
 from qorl.util.io import display_path, utc_now, write_json
 from qorl.workload.taskset import TaskSet
+from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS
 
 MEASUREMENT_RUNS = 20
 MIN_WARMUP_RUNS = 2
 MAX_WARMUP_RUNS = 5
 BUFFER_STABILITY_TOLERANCE = 0.02
-STATEMENT_TIMEOUT_MS = 120_000
 
 
 def observation(explain: dict[str, Any], run_number: int) -> dict[str, Any]:
@@ -55,9 +56,7 @@ def calibrate_task(
     sql = task_set.load_sql(task)
     warmups: list[dict[str, Any]] = []
     for run_number in range(1, MAX_WARMUP_RUNS + 1):
-        result = observation(
-            worker.explain_analyze(sql, STATEMENT_TIMEOUT_MS), run_number
-        )
+        result = observation(worker.explain_analyze(sql, GLOBAL_TIMEOUT_MS), run_number)
         warmups.append(result)
         if run_number >= MIN_WARMUP_RUNS and buffers_stable(warmups[-2], warmups[-1]):
             break
@@ -65,7 +64,7 @@ def calibrate_task(
     measurements: list[dict[str, Any]] = []
     representative_explain: dict[str, Any] | None = None
     for run_number in range(1, MEASUREMENT_RUNS + 1):
-        explain = worker.explain_analyze(sql, STATEMENT_TIMEOUT_MS)
+        explain = worker.explain_analyze(sql, GLOBAL_TIMEOUT_MS)
         if representative_explain is None:
             representative_explain = explain
         measurements.append(observation(explain, run_number))
@@ -79,7 +78,7 @@ def calibrate_task(
         "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
         "task_id": task["task_id"],
         "template_id": task["template_id"],
-        "status": "completed",
+        "status": RunStatus.COMPLETED.value,
         "completed_at_utc": utc_now(),
         "warmups": warmups,
         "measurements": measurements,
@@ -145,7 +144,7 @@ def failed_task(task: dict[str, Any], error: Exception) -> dict[str, Any]:
         "schema_version": 1,
         "task_id": task["task_id"],
         "template_id": task["template_id"],
-        "status": "failed",
+        "status": RunStatus.FAILED.value,
         "completed_at_utc": utc_now(),
         "error": str(error),
     }
@@ -196,7 +195,7 @@ def calibrate(
             if workload == "ceb"
             else "evaluation baseline calibration"
         ),
-        "status": "running",
+        "status": RunStatus.RUNNING.value,
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
         "inventory_id": task_set.inventory["inventory_id"],
@@ -211,7 +210,7 @@ def calibrate(
         },
         "protocol": {
             "explain": "EXPLAIN (ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON)",
-            "statement_timeout_ms": STATEMENT_TIMEOUT_MS,
+            "statement_timeout_ms": GLOBAL_TIMEOUT_MS,
             "minimum_warmup_runs": MIN_WARMUP_RUNS,
             "maximum_warmup_runs": MAX_WARMUP_RUNS,
             "buffer_stability_relative_tolerance": BUFFER_STABILITY_TOLERANCE,
@@ -285,12 +284,16 @@ def calibrate(
     except BaseException:
         if "pool" in locals():
             pool.close()
-        manifest["status"] = "interrupted"
+        manifest["status"] = RunStatus.INTERRUPTED.value
         manifest["completed_at_utc"] = utc_now()
         write_json(manifest_path, manifest)
         raise
 
-    manifest["status"] = "completed" if failures == 0 else "completed_with_failures"
+    manifest["status"] = (
+        RunStatus.COMPLETED.value
+        if failures == 0
+        else RunStatus.COMPLETED_WITH_FAILURES.value
+    )
     manifest["completed_at_utc"] = utc_now()
     write_json(manifest_path, manifest)
     if failures:

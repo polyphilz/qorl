@@ -29,7 +29,8 @@ from qorl.evaluation.live_validation import (
     trace_metrics,
     wait_for_server,
 )
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.evaluation.types import RunStatus
+from qorl.measure.rollout import FinalStatus, RolloutEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
@@ -37,6 +38,10 @@ from qorl.workload.taskset import TaskSet
 CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
 CONCURRENCY = 4
+EXPECTED_TASKS = 16
+EXPECTED_TEMPLATES = 4
+TASKS_PER_TEMPLATE = 4
+EXPECTED_ROLLOUT_SEEDS = 4
 
 
 def load_tasks(
@@ -49,10 +54,16 @@ def load_tasks(
     selected = selection["splits"][config["split"]]
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     chosen = [tasks[item["task_id"]] for item in selected]
-    if len(chosen) != 16 or len({task["task_id"] for task in chosen}) != 16:
+    if (
+        len(chosen) != EXPECTED_TASKS
+        or len({task["task_id"] for task in chosen}) != EXPECTED_TASKS
+    ):
         raise RuntimeError("paired validation requires 16 unique tasks")
     counts = Counter(task["template_id"] for task in chosen)
-    if set(counts.values()) != {4} or len(counts) != 4:
+    if (
+        set(counts.values()) != {TASKS_PER_TEMPLATE}
+        or len(counts) != EXPECTED_TEMPLATES
+    ):
         raise RuntimeError("paired validation requires four tasks from four templates")
     if any(task["partition"] != "validation" for task in chosen):
         raise RuntimeError("paired validation selected a training task")
@@ -68,9 +79,11 @@ def fingerprint(value: Any) -> str:
 def summarize(
     results: list[dict[str, Any]], planned_rollout_count: int = 64
 ) -> dict[str, Any]:
-    completed = [result for result in results if result["status"] == "completed"]
+    completed = [
+        result for result in results if result["status"] == RunStatus.COMPLETED
+    ]
     finals = [result["final"] for result in completed]
-    scored = [final for final in finals if final["status"] == "completed"]
+    scored = [final for final in finals if final["status"] == FinalStatus.COMPLETED]
     candidates = [
         candidate for result in completed for candidate in result["candidates"]
     ]
@@ -92,7 +105,7 @@ def summarize(
             "mean_reward": statistics.fmean(group_rewards),
             "reward_variance": statistics.pvariance(group_rewards),
             "valid_rollout_count": sum(
-                item["final"]["status"] == "completed" for item in members
+                item["final"]["status"] == FinalStatus.COMPLETED for item in members
             ),
         }
     candidate_time = sum(
@@ -216,7 +229,7 @@ def evaluate_rollout(
             )
             result = {
                 "schema_version": 1,
-                "status": "completed",
+                "status": RunStatus.COMPLETED.value,
                 "completed_at_utc": utc_now(),
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
@@ -231,7 +244,7 @@ def evaluate_rollout(
         except (ModelError, WorkerError) as error:
             result = {
                 "schema_version": 1,
-                "status": "failed",
+                "status": RunStatus.FAILED.value,
                 "completed_at_utc": utc_now(),
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
@@ -293,7 +306,10 @@ def main() -> None:
     task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
-    if len(seeds) != 4 or len(set(seeds)) != 4:
+    if (
+        len(seeds) != EXPECTED_ROLLOUT_SEEDS
+        or len(set(seeds)) != EXPECTED_ROLLOUT_SEEDS
+    ):
         raise RuntimeError("paired validation requires four unique rollout seeds")
 
     output_dir = repository / "outputs/rl" / config["evaluation_id"] / arguments.phase
@@ -304,7 +320,7 @@ def main() -> None:
         "schema_version": 1,
         "evaluation_id": config["evaluation_id"],
         "phase": arguments.phase,
-        "status": "starting",
+        "status": RunStatus.STARTING.value,
         "started_at_utc": started.isoformat(),
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
@@ -373,7 +389,7 @@ def main() -> None:
                     output_dir / "environment" / f"worker-{slot.resources.index}",
                     "pre",
                 )
-            report["status"] = "running"
+            report["status"] = RunStatus.RUNNING.value
             write_json(report_path, report)
 
             jobs = [(task, seed) for task in tasks for seed in seeds]
@@ -401,12 +417,12 @@ def main() -> None:
                         f"worker={slot.resources.index}",
                         flush=True,
                     )
-                    if result["status"] == "completed":
+                    if result["status"] == RunStatus.COMPLETED:
                         final = result["final"]
                         label = (
                             f"{final['score']:.3f}x "
                             f"reward={final['trajectory_reward']:.3f}"
-                            if final["status"] == "completed"
+                            if final["status"] == FinalStatus.COMPLETED
                             else "no valid candidate "
                             f"reward={final['trajectory_reward']:.3f}"
                         )
@@ -428,9 +444,9 @@ def main() -> None:
             pool = None
 
             report["status"] = (
-                "completed"
-                if all(result["status"] == "completed" for result in results)
-                else "completed_with_failures"
+                RunStatus.COMPLETED.value
+                if all(result["status"] == RunStatus.COMPLETED for result in results)
+                else RunStatus.COMPLETED_WITH_FAILURES.value
             )
             report["completed_at_utc"] = utc_now()
             report["summary"] = summarize(results)
@@ -439,7 +455,9 @@ def main() -> None:
             print(f"paired validation: {output_dir}", flush=True)
         except BaseException as error:
             report["status"] = (
-                "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+                RunStatus.INTERRUPTED.value
+                if isinstance(error, KeyboardInterrupt)
+                else RunStatus.FAILED.value
             )
             report["completed_at_utc"] = utc_now()
             report["summary"] = summarize(results)

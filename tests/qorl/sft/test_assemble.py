@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import json
 import unittest
 from collections import Counter
 from pathlib import Path
 
-from qorl.sft.assemble import (
-    DATASET_SEED,
-    action_families,
-    select_tasks,
-)
+from qorl.sft.assemble import action_families, select_tasks
 from qorl.workload.taskset import TaskSet
 
 ROOT = Path(__file__).resolve().parents[3]
+DATASET_SEED = json.loads(
+    (ROOT / "experiments/001-protocol-sft-v1/dataset.json").read_text()
+)["seed"]
 
 
 class ProtocolDatasetTest(unittest.TestCase):

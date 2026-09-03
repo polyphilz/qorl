@@ -11,11 +11,26 @@ from typing import Any
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import candidate_feedback
+from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
-from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
-from qorl.plans.action import ActionError, TaskCatalog, compile_action
+from qorl.measure.rollout import (
+    MAX_CANDIDATES,
+    MeasurementStatus,
+    RolloutEvaluator,
+    ToolResultStatus,
+)
+from qorl.plans.action import (
+    ACTION_SCHEMA_VERSION,
+    ActionError,
+    MemoizeMode,
+    ParallelMode,
+    RowMode,
+    ScanMethod,
+    TaskCatalog,
+    compile_action,
+)
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.random_tree import random_join_tree
 from qorl.plans.verify import (
@@ -32,7 +47,6 @@ from qorl.plans.verify import (
 )
 from qorl.sft.assemble import (
     DATASET_ID,
-    DATASET_SEED,
     SPLIT_COUNTS,
     canonical_json,
     finalize_dataset,
@@ -44,6 +58,7 @@ from qorl.workload.taskset import TaskSet
 
 MAXIMUM_MODEL_TURNS = 64
 MAX_ACTION_ATTEMPTS = 4
+CALL_ID_WIDTH = 4
 RECIPES = (
     "direct",
     "default_plan",
@@ -57,7 +72,7 @@ RECIPES = (
 )
 
 
-class PlanValidationEvaluator(RolloutEvaluator):
+class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
     """Exercise the live planning path without executing benchmark queries."""
 
     def start(self) -> dict[str, Any]:
@@ -106,7 +121,7 @@ class PlanValidationEvaluator(RolloutEvaluator):
 
         fingerprint = plan_sha256(plain.document["Plan"])
         duplicate = self.by_fingerprint.get(fingerprint)
-        result = {
+        result: dict[str, Any] = {
             "candidate_id": candidate_id,
             "action": action,
             "action_valid": True,
@@ -118,7 +133,7 @@ class PlanValidationEvaluator(RolloutEvaluator):
             "compact_plan": compact_plan(plain.document["Plan"]),
             "provisional_measurements": [],
             "provisional_speedup": None,
-            "measurement_status": "not_measured",
+            "measurement_status": MeasurementStatus.NOT_MEASURED.value,
             "errors_or_diagnostics": [],
             "pg_hint_plan": diagnostics,
             "attempts_remaining": MAX_CANDIDATES - len(self.candidates) - 1,
@@ -129,8 +144,8 @@ class PlanValidationEvaluator(RolloutEvaluator):
         return result
 
 
-def trace_seed(task_id: str) -> int:
-    digest = hashlib.sha256(f"{DATASET_SEED}:{task_id}".encode()).digest()
+def trace_seed(task_id: str, dataset_seed: int) -> int:
+    digest = hashlib.sha256(f"{dataset_seed}:{task_id}".encode()).digest()
     return int.from_bytes(digest[:8], "big")
 
 
@@ -147,7 +162,7 @@ def default_derived_actions(
     actions: list[tuple[str, dict[str, Any]]] = []
     tree = plan_join_tree(plan)
     leading = (
-        {"version": 1, "leading": encode_tree(tree)}
+        {"version": ACTION_SCHEMA_VERSION, "leading": encode_tree(tree)}
         if tree is not None and not isinstance(tree, str)
         else None
     )
@@ -164,7 +179,7 @@ def default_derived_actions(
         join = joins[rng.randrange(len(joins))]
         relations = sorted(relation_set(join))
         join_action = {
-            "version": 1,
+            "version": ACTION_SCHEMA_VERSION,
             "joins": [
                 {
                     "relations": relations,
@@ -174,12 +189,14 @@ def default_derived_actions(
         }
         actions.append(("join", join_action))
         memoize_action = {
-            "version": 1,
+            "version": ACTION_SCHEMA_VERSION,
             "joins": [
                 {
                     "relations": relations,
                     "memoize": (
-                        "force" if contains_node(join, "Memoize") else "forbid"
+                        MemoizeMode.FORCE.value
+                        if contains_node(join, "Memoize")
+                        else MemoizeMode.FORBID.value
                     ),
                 }
             ],
@@ -191,11 +208,11 @@ def default_derived_actions(
             (
                 "rows",
                 {
-                    "version": 1,
+                    "version": ACTION_SCHEMA_VERSION,
                     "row_corrections": [
                         {
                             "relations": relations,
-                            "mode": "absolute",
+                            "mode": RowMode.ABSOLUTE.value,
                             "value": rows,
                         }
                     ],
@@ -218,9 +235,17 @@ def default_derived_actions(
         method = SCAN_METHODS[scan["Node Type"]]
         item: dict[str, Any] = {"relation": scan["Alias"], "force": method}
         used_indexes = sorted(index_names(scan))
-        if method in {"index", "index_only", "bitmap"} and used_indexes:
+        if (
+            method
+            in {
+                ScanMethod.INDEX,
+                ScanMethod.INDEX_ONLY,
+                ScanMethod.BITMAP,
+            }
+            and used_indexes
+        ):
             item["indexes"] = used_indexes
-        scan_action = {"version": 1, "scans": [item]}
+        scan_action = {"version": ACTION_SCHEMA_VERSION, "scans": [item]}
         actions.append(("scan", scan_action))
 
         nonparallel = next(
@@ -231,12 +256,12 @@ def default_derived_actions(
                 (
                     "parallel",
                     {
-                        "version": 1,
+                        "version": ACTION_SCHEMA_VERSION,
                         "parallel": [
                             {
                                 "relation": nonparallel["Alias"],
                                 "workers": 0,
-                                "mode": "soft",
+                                "mode": ParallelMode.SOFT.value,
                             }
                         ],
                     },
@@ -251,7 +276,7 @@ def default_derived_actions(
                     (
                         "index_exclusion",
                         {
-                            "version": 1,
+                            "version": ACTION_SCHEMA_VERSION,
                             "disabled_indexes": [
                                 {"relation": alias, "indexes": [unused[0]]}
                             ],
@@ -267,9 +292,11 @@ def default_derived_actions(
     ]
     rng.shuffle(settings)
     for values in settings:
-        actions.append(("setting", {"version": 1, "settings": values}))
+        actions.append(
+            ("setting", {"version": ACTION_SCHEMA_VERSION, "settings": values})
+        )
     setting_action = {
-        "version": 1,
+        "version": ACTION_SCHEMA_VERSION,
         "settings": settings[0],
     }
 
@@ -321,22 +348,24 @@ def inspection_calls(
     stats_column = edge.rsplit(".", 1)[1]
     calls = {
         "direct": [],
-        "default_plan": [("get_plan", {"candidate_id": "default"})],
-        "relation_size": [("get_relation_size", {"relation": aliases[0]})],
-        "indexes": [("list_indexes", {"relation": indexed})],
+        "default_plan": [(ToolName.GET_PLAN.value, {"candidate_id": "default"})],
+        "relation_size": [(ToolName.GET_RELATION_SIZE.value, {"relation": aliases[0]})],
+        "indexes": [(ToolName.LIST_INDEXES.value, {"relation": indexed})],
         "column_stats": [
             (
-                "get_column_stats",
+                ToolName.GET_COLUMN_STATS.value,
                 {"relation": stats_alias, "column": stats_column},
             )
         ],
         "focused": [
-            ("get_relation_size", {"relation": aliases[0]}),
-            ("list_indexes", {"relation": indexed}),
+            (ToolName.GET_RELATION_SIZE.value, {"relation": aliases[0]}),
+            (ToolName.LIST_INDEXES.value, {"relation": indexed}),
         ],
-        "schema": [("describe_table", {"relation": aliases[0]})],
-        "extended_stats": [("get_extended_stats", {"relation": aliases[0]})],
-        "plan_aware": [("get_plan", {"candidate_id": "default"})],
+        "schema": [(ToolName.DESCRIBE_TABLE.value, {"relation": aliases[0]})],
+        "extended_stats": [
+            (ToolName.GET_EXTENDED_STATS.value, {"relation": aliases[0]})
+        ],
+        "plan_aware": [(ToolName.GET_PLAN.value, {"candidate_id": "default"})],
     }
     return calls[recipe]
 
@@ -349,7 +378,7 @@ def record_tool(
     arguments: dict[str, Any],
     result: dict[str, Any],
 ) -> None:
-    call_id = f"call-{turn:04d}"
+    call_id = f"call-{turn:0{CALL_ID_WIDTH}d}"
     messages.extend(
         [
             {
@@ -371,7 +400,7 @@ def record_tool(
                 "tool_call_id": call_id,
                 "name": name,
                 "content": json.dumps(
-                    {**result, "_turn_budget": protocol.budget(turn)},
+                    {**result, TURN_BUDGET_FIELD: protocol.budget(turn)},
                     sort_keys=True,
                 ),
             },
@@ -394,7 +423,7 @@ def execute_inspection(
 
 
 def evaluate_action(
-    evaluator: RolloutEvaluator,
+    evaluator: RolloutEvaluator[PostgresWorker],
     action: dict[str, Any],
     seen_actions: set[str],
     *,
@@ -422,7 +451,7 @@ def evaluate_action(
 
 
 def choose_candidate(
-    evaluator: RolloutEvaluator,
+    evaluator: RolloutEvaluator[PostgresWorker],
     derived: list[tuple[str, dict[str, Any]]],
     seen_actions: set[str],
     rng: random.Random,
@@ -432,7 +461,10 @@ def choose_candidate(
     rejected = 0
     if slot == 1:
         for _ in range(MAX_ACTION_ATTEMPTS):
-            action = {"version": 1, "leading": random_join_tree(evaluator.catalog, rng)}
+            action = {
+                "version": ACTION_SCHEMA_VERSION,
+                "leading": random_join_tree(evaluator.catalog, rng),
+            }
             evaluated = evaluate_action(
                 evaluator, action, seen_actions, require_novel_plan=True
             )
@@ -443,7 +475,7 @@ def choose_candidate(
 
     if not derived:
         raise RuntimeError("default plan supplied no derivable actions")
-    offset = (ordinal * 5 + slot) % len(derived)
+    offset = (ordinal * MAX_CANDIDATES + slot) % len(derived)
     for name, action in derived[offset:] + derived[:offset]:
         evaluated = evaluate_action(
             evaluator, action, seen_actions, require_novel_plan=False
@@ -460,15 +492,16 @@ def build_document(
     task_set: TaskSet,
     task: dict[str, Any],
     ordinal: int,
+    dataset_seed: int,
 ) -> dict[str, Any]:
     evaluator = PlanValidationEvaluator(worker, task_set, task)
     evaluator.start()
     protocol = AgentProtocol.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
     environment = AgentEnvironment(evaluator)
     messages = protocol.initial_messages()
-    rng = random.Random(trace_seed(task["task_id"]))
+    rng = random.Random(trace_seed(task["task_id"], dataset_seed))
     recipe = RECIPES[ordinal % len(RECIPES)]
-    requested_candidates = ordinal % 5 + 1
+    requested_candidates = ordinal % MAX_CANDIDATES + 1
     call_sequence: list[str] = []
     turn = 1
 
@@ -493,11 +526,11 @@ def build_document(
             messages,
             protocol,
             turn,
-            "evaluate_candidate",
+            ToolName.EVALUATE_CANDIDATE.value,
             {"action": candidate["action"]},
             feedback,
         )
-        call_sequence.append("evaluate_candidate")
+        call_sequence.append(ToolName.EVALUATE_CANDIDATE.value)
         strategies.append(strategy)
         evidence[candidate_id] = {
             "action": candidate["action"],
@@ -509,16 +542,21 @@ def build_document(
         if recipe == "plan_aware" and slot == 0:
             arguments = {"candidate_id": candidate_id}
             execute_inspection(
-                messages, environment, protocol, turn, "get_plan", arguments
+                messages,
+                environment,
+                protocol,
+                turn,
+                ToolName.GET_PLAN.value,
+                arguments,
             )
-            call_sequence.append("get_plan")
+            call_sequence.append(ToolName.GET_PLAN.value)
             turn += 1
 
-    result, finished = environment.execute("finish", {})
-    if not finished or result != {"status": "finished"}:
+    result, finished = environment.execute(ToolName.FINISH.value, {})
+    if not finished or result != {"status": ToolResultStatus.FINISHED.value}:
         raise RuntimeError("finish did not terminate the demonstration")
-    record_tool(messages, protocol, turn, "finish", {}, result)
-    call_sequence.append("finish")
+    record_tool(messages, protocol, turn, ToolName.FINISH.value, {}, result)
+    call_sequence.append(ToolName.FINISH.value)
 
     document = {
         "schema_version": 1,
@@ -536,7 +574,7 @@ def build_document(
             "data_identity": worker.fixture.data_identity,
             "runtime_identity": worker.fixture.runtime_identity,
             "in_author_unique_plans_subset": task["in_author_unique_plans_subset"],
-            "trace_seed": trace_seed(task["task_id"]),
+            "trace_seed": trace_seed(task["task_id"], dataset_seed),
             "maximum_model_turns": MAXIMUM_MODEL_TURNS,
             "inspection_recipe": recipe,
             "candidate_count": requested_candidates,
@@ -575,6 +613,7 @@ def main() -> None:
         description="Generate the deterministic 256/64 CEB protocol-SFT dataset."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument(
         "--output",
         type=Path,
@@ -582,6 +621,19 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
+    config_path = arguments.config
+    if not config_path.is_absolute():
+        config_path = repository / config_path
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if (
+        config.get("schema_version") != 1
+        or config.get("dataset_id") != DATASET_ID
+        or config.get("split_counts") != SPLIT_COUNTS
+        or isinstance(config.get("seed"), bool)
+        or not isinstance(config.get("seed"), int)
+    ):
+        raise RuntimeError(f"invalid protocol-SFT dataset configuration: {config_path}")
+    dataset_seed = config["seed"]
     output_dir = arguments.output
     if not output_dir.is_absolute():
         output_dir = repository / output_dir
@@ -590,7 +642,7 @@ def main() -> None:
     task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
     selected = {
         partition: select_tasks(
-            task_set.inventory["tasks"], partition, count, DATASET_SEED
+            task_set.inventory["tasks"], partition, count, dataset_seed
         )
         for partition, count in SPLIT_COUNTS.items()
     }
@@ -598,7 +650,7 @@ def main() -> None:
         task for partition in ("train", "validation") for task in selected[partition]
     ]
     ranked = {
-        partition: ranked_tasks(task_set.inventory["tasks"], partition, DATASET_SEED)
+        partition: ranked_tasks(task_set.inventory["tasks"], partition, dataset_seed)
         for partition in SPLIT_COUNTS
     }
     existing = existing_documents(repository, output_dir)
@@ -638,7 +690,9 @@ def main() -> None:
                         continue
                     attempted_task_ids.add(task["task_id"])
                     try:
-                        built = build_document(worker, task_set, task, ordinal)
+                        built = build_document(
+                            worker, task_set, task, ordinal, dataset_seed
+                        )
                     except Exception as error:
                         failure = {
                             "task_id": task["task_id"],
@@ -671,7 +725,7 @@ def main() -> None:
                     flush=True,
                 )
 
-    manifest = finalize_dataset(repository, output_dir, failures)
+    manifest = finalize_dataset(repository, output_dir, failures, dataset_seed)
     print(
         json.dumps(
             {

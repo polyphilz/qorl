@@ -5,6 +5,8 @@ from typing import Any
 
 from qorl.plans.action import TaskCatalog
 
+SWAP_CHILDREN_PROBABILITY = 0.5
+
 
 def random_join_tree(catalog: TaskCatalog, rng: random.Random) -> str | dict[str, Any]:
     components: list[tuple[set[str], str | dict[str, Any]]] = [
@@ -23,7 +25,7 @@ def random_join_tree(catalog: TaskCatalog, rng: random.Random) -> str | dict[str
         left_index, right_index = rng.choice(pairs)
         left_relations, left_tree = components[left_index]
         right_relations, right_tree = components[right_index]
-        if rng.random() < 0.5:
+        if rng.random() < SWAP_CHILDREN_PROBABILITY:
             left_tree, right_tree = right_tree, left_tree
         merged = (
             left_relations | right_relations,

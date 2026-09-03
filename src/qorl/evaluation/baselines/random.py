@@ -1,20 +1,64 @@
 from __future__ import annotations
 
 import random
+from enum import StrEnum
 from typing import Any
 
-from qorl.plans.action import ActionError, TaskCatalog, normalize_action
+from qorl.plans.action import (
+    ACTION_SCHEMA_VERSION,
+    AUTO,
+    MAX_PARALLEL_WORKERS,
+    ActionError,
+    JoinMethod,
+    MemoizeMode,
+    ParallelMode,
+    RowMode,
+    ScanMethod,
+    TaskCatalog,
+    normalize_action,
+)
 from qorl.plans.random_tree import random_join_tree
 
 SAMPLER_VERSION = 2
+
+
+class ActionFamily(StrEnum):
+    LEADING = "leading"
+    JOIN = "join"
+    SCAN = "scan"
+    ROWS = "rows"
+    PARALLEL = "parallel"
+    SETTING = "setting"
+    DISABLED_INDEX = "disabled_index"
+
+
+class JoinDirective(StrEnum):
+    FORCE = "force"
+    FORBID = "forbid"
+    MEMOIZE = "memoize"
+
+
+MIN_FAMILIES_PER_ACTION = 1
+MAX_FAMILIES_PER_ACTION = 3
+MAX_SAMPLE_ATTEMPTS = 100
+JOIN_DIRECTIVE_WEIGHTS = {
+    JoinDirective.FORCE.value: 70,
+    JoinDirective.FORBID.value: 20,
+    JoinDirective.MEMOIZE.value: 10,
+}
+SCAN_FORCE_PROBABILITY = 0.8
+NAMED_INDEX_PROBABILITY = 0.5
+ROW_MULTIPLIER_VALUES = (0.1, 0.25, 0.5, 2, 4, 10)
+ROW_ABSOLUTE_VALUES = (1, 10, 100, 1_000, 10_000, 100_000, 1_000_000)
+
 FAMILY_WEIGHTS = {
-    "leading": 30,
-    "join": 25,
-    "scan": 25,
-    "rows": 10,
-    "parallel": 4,
-    "setting": 4,
-    "disabled_index": 2,
+    ActionFamily.LEADING.value: 30,
+    ActionFamily.JOIN.value: 25,
+    ActionFamily.SCAN.value: 25,
+    ActionFamily.ROWS.value: 10,
+    ActionFamily.PARALLEL.value: 4,
+    ActionFamily.SETTING.value: 4,
+    ActionFamily.DISABLED_INDEX.value: 2,
 }
 
 SETTING_VALUES: dict[str, list[bool | int | float]] = {
@@ -62,37 +106,52 @@ def add_join(
 ) -> None:
     item: dict[str, Any] = {
         "relations": rng.choice(targets),
-        "force": "auto",
+        "force": AUTO,
         "forbid": [],
-        "memoize": "auto",
+        "memoize": MemoizeMode.AUTO.value,
     }
-    directive = rng.choices(["force", "forbid", "memoize"], weights=[70, 20, 10], k=1)[
-        0
-    ]
-    if directive == "force":
-        item["force"] = rng.choice(["hash", "merge", "nestloop"])
-    elif directive == "forbid":
-        item["forbid"] = [rng.choice(["hash", "merge", "nestloop"])]
+    directives = list(JOIN_DIRECTIVE_WEIGHTS)
+    directive = rng.choices(
+        directives,
+        weights=[JOIN_DIRECTIVE_WEIGHTS[name] for name in directives],
+        k=1,
+    )[0]
+    if directive == JoinDirective.FORCE:
+        item["force"] = rng.choice([method.value for method in JoinMethod])
+    elif directive == JoinDirective.FORBID:
+        item["forbid"] = [rng.choice([method.value for method in JoinMethod])]
     else:
-        item["memoize"] = rng.choice(["force", "forbid"])
+        item["memoize"] = rng.choice(
+            [MemoizeMode.FORCE.value, MemoizeMode.FORBID.value]
+        )
     action["joins"] = [item]
 
 
 def add_scan(action: dict[str, Any], catalog: TaskCatalog, rng: random.Random) -> None:
     relation = rng.choice(sorted(catalog.relations))
     indexes = sorted(catalog.indexes.get(relation, []))
-    methods = ["seq"]
+    methods = [ScanMethod.SEQ.value]
     if indexes:
-        methods.extend(["index", "index_only", "bitmap"])
-    force = rng.random() < 0.8
+        methods.extend(
+            [
+                ScanMethod.INDEX.value,
+                ScanMethod.INDEX_ONLY.value,
+                ScanMethod.BITMAP.value,
+            ]
+        )
+    force = rng.random() < SCAN_FORCE_PROBABILITY
     method = rng.choice(methods)
     item: dict[str, Any] = {
         "relation": relation,
-        "force": method if force else "auto",
+        "force": method if force else AUTO,
         "forbid": [] if force else [method],
         "indexes": [],
     }
-    if force and method in {"index", "index_only", "bitmap"} and rng.random() < 0.5:
+    if (
+        force
+        and method in {ScanMethod.INDEX, ScanMethod.INDEX_ONLY, ScanMethod.BITMAP}
+        and rng.random() < NAMED_INDEX_PROBABILITY
+    ):
         item["indexes"] = [rng.choice(indexes)]
     action["scans"] = [item]
 
@@ -100,12 +159,8 @@ def add_scan(action: dict[str, Any], catalog: TaskCatalog, rng: random.Random) -
 def add_rows(
     action: dict[str, Any], targets: list[list[str]], rng: random.Random
 ) -> None:
-    mode = rng.choice(["absolute", "add", "subtract", "multiply"])
-    values = (
-        [0.1, 0.25, 0.5, 2, 4, 10]
-        if mode == "multiply"
-        else [1, 10, 100, 1_000, 10_000, 100_000, 1_000_000]
-    )
+    mode = rng.choice([mode.value for mode in RowMode])
+    values = ROW_MULTIPLIER_VALUES if mode == RowMode.MULTIPLY else ROW_ABSOLUTE_VALUES
     action["row_corrections"] = [
         {"relations": rng.choice(targets), "mode": mode, "value": rng.choice(values)}
     ]
@@ -117,8 +172,8 @@ def add_parallel(
     action["parallel"] = [
         {
             "relation": rng.choice(sorted(catalog.relations)),
-            "workers": rng.choice([0, 1, 2]),
-            "mode": rng.choice(["soft", "hard"]),
+            "workers": rng.choice(range(MAX_PARALLEL_WORKERS + 1)),
+            "mode": rng.choice([mode.value for mode in ParallelMode]),
         }
     ]
 
@@ -146,24 +201,26 @@ def add_disabled_index(
 
 
 def sample_action(catalog: TaskCatalog, rng: random.Random) -> dict[str, Any]:
-    for _ in range(100):
+    for _ in range(MAX_SAMPLE_ATTEMPTS):
         tree = random_join_tree(catalog, rng)
         targets = join_targets(tree)
-        action: dict[str, Any] = {"version": 1}
-        for family in weighted_families(rng, rng.randint(1, 3)):
-            if family == "leading":
+        action: dict[str, Any] = {"version": ACTION_SCHEMA_VERSION}
+        for family in weighted_families(
+            rng, rng.randint(MIN_FAMILIES_PER_ACTION, MAX_FAMILIES_PER_ACTION)
+        ):
+            if family == ActionFamily.LEADING:
                 action["leading"] = tree
-            elif family == "join":
+            elif family == ActionFamily.JOIN:
                 add_join(action, targets, rng)
-            elif family == "scan":
+            elif family == ActionFamily.SCAN:
                 add_scan(action, catalog, rng)
-            elif family == "rows":
+            elif family == ActionFamily.ROWS:
                 add_rows(action, targets, rng)
-            elif family == "parallel":
+            elif family == ActionFamily.PARALLEL:
                 add_parallel(action, catalog, rng)
-            elif family == "setting":
+            elif family == ActionFamily.SETTING:
                 add_setting(action, rng)
-            elif family == "disabled_index":
+            elif family == ActionFamily.DISABLED_INDEX:
                 add_disabled_index(action, catalog, rng)
         try:
             return normalize_action(action, catalog)
@@ -176,14 +233,14 @@ def sampler_manifest() -> dict[str, Any]:
     return {
         "version": SAMPLER_VERSION,
         "families_per_action": {
-            "minimum": 1,
-            "maximum": 3,
+            "minimum": MIN_FAMILIES_PER_ACTION,
+            "maximum": MAX_FAMILIES_PER_ACTION,
             "distribution": "uniform",
         },
         "family_weights": FAMILY_WEIGHTS,
-        "join_directive_weights": {"force": 70, "forbid": 20, "memoize": 10},
-        "scan_force_probability": 0.8,
-        "named_index_probability_given_index_scan": 0.5,
+        "join_directive_weights": JOIN_DIRECTIVE_WEIGHTS,
+        "scan_force_probability": SCAN_FORCE_PROBABILITY,
+        "named_index_probability_given_index_scan": NAMED_INDEX_PROBABILITY,
         "tid_scan_sampling": False,
         "disabled_index_sampling": True,
         "setting_values": SETTING_VALUES,

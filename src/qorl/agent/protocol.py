@@ -6,10 +6,12 @@ from typing import Any
 
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.tools import agent_tools
+from qorl.agent.types import InspectionExecutor, ToolName
 from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
 from qorl.plans.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
 RESERVED_DECISION_TURNS = MAX_CANDIDATES + 1
+INSPECTION_TURNS_PER_ALIAS = 3
 
 
 @dataclass(frozen=True)
@@ -24,7 +26,7 @@ class AgentProtocol:
     @classmethod
     def from_evaluator(
         cls,
-        evaluator: RolloutEvaluator,
+        evaluator: RolloutEvaluator[InspectionExecutor],
         maximum_model_turns: int,
         context_length: int | None = None,
         completion_reserve: int | None = None,
@@ -34,7 +36,7 @@ class AgentProtocol:
         candidate_attempts = getattr(evaluator, "max_candidates", MAX_CANDIDATES)
         reserved_decision_turns = candidate_attempts + 1
         inspection_turn_limit = min(
-            len(aliases) * 3,
+            len(aliases) * INSPECTION_TURNS_PER_ALIAS,
             max(0, maximum_model_turns - reserved_decision_turns),
         )
         settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
@@ -95,18 +97,21 @@ class AgentProtocol:
 
     def available_tool_names(self, turn: int, candidate_count: int) -> set[str]:
         if candidate_count >= self.candidate_attempts:
-            return {"finish"}
+            return {ToolName.FINISH.value}
         if turn > self.inspection_turn_limit:
             return (
-                {"evaluate_candidate", "finish"}
+                {ToolName.EVALUATE_CANDIDATE.value, ToolName.FINISH.value}
                 if candidate_count
-                else {"evaluate_candidate", "keep_default"}
+                else {
+                    ToolName.EVALUATE_CANDIDATE.value,
+                    ToolName.KEEP_DEFAULT.value,
+                }
             )
         names = {tool["function"]["name"] for tool in self.tools}
         if not candidate_count:
-            names.remove("finish")
+            names.remove(ToolName.FINISH.value)
         else:
-            names.remove("keep_default")
+            names.remove(ToolName.KEEP_DEFAULT.value)
         return names
 
     def budget(self, turn: int) -> dict[str, int]:

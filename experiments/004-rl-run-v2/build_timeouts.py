@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.db.fixture import DatabaseFixture, data_identity
+from qorl.evaluation.types import RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
@@ -30,7 +31,7 @@ def build(calibration: Path) -> dict[str, Any]:
     task_set = TaskSet.load(ROOT, "ceb-v1")
     fixture = DatabaseFixture.load(ROOT)
     selected = selection["splits"]["train"]
-    if source_manifest.get("status") != "completed":
+    if source_manifest.get("status") != RunStatus.COMPLETED:
         raise RuntimeError("source calibration is not complete")
     source_data_identity = source_manifest.get(
         "data_identity", source_manifest.get("database", {})
@@ -44,7 +45,7 @@ def build(calibration: Path) -> dict[str, Any]:
     for item in selected:
         path = calibration / "tasks" / f"{item['task_id']}.json"
         result = json.loads(path.read_text(encoding="utf-8"))
-        if result.get("status") != "completed":
+        if result.get("status") != RunStatus.COMPLETED:
             raise RuntimeError(f"calibration is incomplete: {item['task_id']}")
         summary = result["summary"]
         median = summary["median_execution_time_ms"]

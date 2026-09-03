@@ -38,8 +38,8 @@ class RlCheckpointValidationTest(unittest.TestCase):
             Path("/venv/vllm"),
             Path("/models/start"),
             {
-                10: {"path": "/adapters/10"},
-                20: {"path": "/adapters/20"},
+                10: {"path": "/adapters/10", "rank": 16},
+                20: {"path": "/adapters/20", "rank": 16},
             },
             {"tool_call_parser": "qwen3_coder"},
             20_480,
@@ -52,6 +52,22 @@ class RlCheckpointValidationTest(unittest.TestCase):
         self.assertIn("step-020=/adapters/20", command)
         self.assertEqual(command[command.index("--max-num-seqs") + 1], "4")
         self.assertEqual(command[command.index("--max-loras") + 1], "2")
+        self.assertEqual(command[command.index("--max-lora-rank") + 1], "16")
+
+    def test_model_command_rejects_mixed_adapter_ranks(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "different LoRA ranks"):
+            model_command(
+                Path("/venv/vllm"),
+                Path("/models/start"),
+                {
+                    10: {"path": "/adapters/10", "rank": 8},
+                    20: {"path": "/adapters/20", "rank": 16},
+                },
+                {"tool_call_parser": "qwen3_coder"},
+                20_480,
+                4,
+                8000,
+            )
 
     def test_summary_reports_default_and_novel_behavior(self) -> None:
         result = {

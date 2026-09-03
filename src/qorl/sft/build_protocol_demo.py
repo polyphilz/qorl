@@ -8,6 +8,7 @@ from typing import Any
 
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
+from qorl.agent.types import ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.measure.rollout import RolloutEvaluator
@@ -18,7 +19,12 @@ from qorl.workload.taskset import TaskSet
 DEMONSTRATION_ID = "protocol-demo-v1"
 TASK_ID = "ceb-4a-4a434"
 MAXIMUM_MODEL_TURNS = 64
-CALL_SEQUENCE = ["get_plan", "evaluate_candidate", "get_plan", "finish"]
+CALL_SEQUENCE = [
+    ToolName.GET_PLAN.value,
+    ToolName.EVALUATE_CANDIDATE.value,
+    ToolName.GET_PLAN.value,
+    ToolName.FINISH.value,
+]
 
 
 def leading_action(plan: dict[str, Any]) -> dict[str, Any]:
@@ -101,7 +107,12 @@ def build_demo(repository: Path) -> dict[str, Any]:
         messages = protocol.initial_messages()
 
         call_tool(
-            messages, environment, protocol, 1, "get_plan", {"candidate_id": "default"}
+            messages,
+            environment,
+            protocol,
+            1,
+            ToolName.GET_PLAN.value,
+            {"candidate_id": "default"},
         )
         action = leading_action(evaluator.default["plain_explain"]["Plan"])
         candidate, _ = call_tool(
@@ -109,7 +120,7 @@ def build_demo(repository: Path) -> dict[str, Any]:
             environment,
             protocol,
             2,
-            "evaluate_candidate",
+            ToolName.EVALUATE_CANDIDATE.value,
             {"action": action},
         )
         candidate_id = candidate.get("candidate_id")
@@ -122,10 +133,12 @@ def build_demo(repository: Path) -> dict[str, Any]:
             environment,
             protocol,
             3,
-            "get_plan",
+            ToolName.GET_PLAN.value,
             {"candidate_id": candidate_id},
         )
-        _, finished = call_tool(messages, environment, protocol, 4, "finish", {})
+        _, finished = call_tool(
+            messages, environment, protocol, 4, ToolName.FINISH.value, {}
+        )
         if not finished:
             raise RuntimeError("finish did not end the demonstration")
 

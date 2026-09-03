@@ -7,6 +7,7 @@ from typing import Literal
 
 import verifiers.v1 as vf
 
+from qorl.measure.rollout import Decision, FinalStatus
 from qorl.workload.taskset import TaskSet
 
 SELECTION_SPLITS = {
@@ -67,11 +68,13 @@ class QorlTask(vf.Task[QorlTaskData]):
                 )
             ),
             "has_valid_candidate": float(
-                final["status"] == "completed"
-                and final.get("decision") != "keep_default"
+                final["status"] == FinalStatus.COMPLETED
+                and final.get("decision") != Decision.KEEP_DEFAULT
             ),
-            "kept_default": float(final.get("decision") == "keep_default"),
-            "final_candidate_timeout": float(final["status"] == "candidate_timeout"),
+            "kept_default": float(final.get("decision") == Decision.KEEP_DEFAULT),
+            "final_candidate_timeout": float(
+                final["status"] == FinalStatus.CANDIDATE_TIMEOUT
+            ),
             "final_speedup": float(final.get("score", 0.0)),
             "model_turns": float(len(trace.calls)),
             "total_tokens": float(trace.num_total_tokens),

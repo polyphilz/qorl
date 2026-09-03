@@ -4,7 +4,12 @@ import json
 import unittest
 from pathlib import Path
 
-from qorl.plans.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
+from qorl.plans.action import (
+    BOOLEAN_SETTINGS,
+    INTEGER_SETTINGS,
+    MAX_PARALLEL_WORKERS,
+    NUMERIC_SETTINGS,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -48,3 +53,7 @@ class DockerContractTest(unittest.TestCase):
         self.assertEqual(contract["benchmark_config_id"], "benchmark-v2")
         self.assertEqual(versions["benchmark"]["config_id"], "benchmark-v2")
         self.assertEqual(contract["settings"]["geqo"], "off")
+        self.assertEqual(
+            int(contract["settings"]["max_parallel_workers_per_gather"]),
+            MAX_PARALLEL_WORKERS,
+        )

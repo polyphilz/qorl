@@ -4,11 +4,11 @@ import math
 import random
 import statistics
 from dataclasses import dataclass
-from typing import Any
+from enum import StrEnum
+from typing import Any, Protocol
 
 from qorl.db.worker import (
     ExplainResult,
-    PostgresWorker,
     QueryTimeout,
     WorkerError,
 )
@@ -21,11 +21,62 @@ from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_
 DEFAULT_MEASUREMENTS = 3
 FINAL_PAIRS = 5
 MAX_CANDIDATES = 5
+MIN_SCORE = 0.1
+MAX_SCORE = 10.0
+INVALID_ATTEMPT_PENALTY = 0.10
+DUPLICATE_ATTEMPT_PENALTY = 0.05
+NO_VALID_CANDIDATE_REWARD = -3.0
+
+
+class MeasurementProtocolId(StrEnum):
+    RIGOROUS_EVALUATION_V1 = "rigorous-evaluation-v1"
+    RL_TRAINING_V1 = "rl-training-v1"
+    RL_TRAINING_V2 = "rl-training-v2"
+
+
+class FinalStatus(StrEnum):
+    COMPLETED = "completed"
+    NO_VALID_CANDIDATE = "no_valid_candidate"
+    CANDIDATE_TIMEOUT = "candidate_timeout"
+
+
+class Decision(StrEnum):
+    KEEP_DEFAULT = "keep_default"
+    CANDIDATE = "candidate"
+
+
+class ScoreSource(StrEnum):
+    EXPLICIT_KEEP_DEFAULT = "explicit_keep_default"
+    DEFAULT_FINGERPRINT = "default_fingerprint"
+    INTERLEAVED_MEASUREMENT = "interleaved_measurement"
+
+
+class MeasurementStatus(StrEnum):
+    NOT_MEASURED = "not_measured"
+    MEASURED = "measured"
+
+
+class ToolResultStatus(StrEnum):
+    FINISHED = "finished"
+    KEPT_DEFAULT = "kept_default"
+
+
+class QueryExecutor(Protocol):
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult: ...
+
+    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]: ...
 
 
 @dataclass(frozen=True)
 class MeasurementProtocol:
-    protocol_id: str
+    protocol_id: MeasurementProtocolId
     default_warmup_runs: int
     default_measurement_runs: int
     candidate_warmup_runs: int
@@ -51,7 +102,7 @@ class MeasurementProtocol:
         self, candidate_attempts: int = MAX_CANDIDATES
     ) -> dict[str, int | str]:
         return {
-            "id": self.protocol_id,
+            "id": self.protocol_id.value,
             "candidate_attempts": candidate_attempts,
             "default_warmup_runs": self.default_warmup_runs,
             "default_measurement_runs": self.default_measurement_runs,
@@ -66,7 +117,7 @@ class MeasurementProtocol:
 
 
 RIGOROUS_EVALUATION_PROTOCOL_V1 = MeasurementProtocol(
-    protocol_id="rigorous-evaluation-v1",
+    protocol_id=MeasurementProtocolId.RIGOROUS_EVALUATION_V1,
     default_warmup_runs=1,
     default_measurement_runs=DEFAULT_MEASUREMENTS,
     candidate_warmup_runs=1,
@@ -76,7 +127,7 @@ RIGOROUS_EVALUATION_PROTOCOL_V1 = MeasurementProtocol(
 )
 
 RL_TRAINING_PROTOCOL_V1 = MeasurementProtocol(
-    protocol_id="rl-training-v1",
+    protocol_id=MeasurementProtocolId.RL_TRAINING_V1,
     default_warmup_runs=1,
     default_measurement_runs=1,
     candidate_warmup_runs=0,
@@ -86,7 +137,7 @@ RL_TRAINING_PROTOCOL_V1 = MeasurementProtocol(
 )
 
 RL_TRAINING_PROTOCOL_V2 = MeasurementProtocol(
-    protocol_id="rl-training-v2",
+    protocol_id=MeasurementProtocolId.RL_TRAINING_V2,
     default_warmup_runs=1,
     default_measurement_runs=1,
     candidate_warmup_runs=0,
@@ -106,13 +157,13 @@ def measured(result: ExplainResult) -> dict[str, Any]:
 
 
 def score(default_median_ms: float, candidate_median_ms: float) -> float:
-    return min(10.0, max(0.1, default_median_ms / candidate_median_ms))
+    return min(MAX_SCORE, max(MIN_SCORE, default_median_ms / candidate_median_ms))
 
 
-class RolloutEvaluator:
+class RolloutEvaluator[ExecutorT: QueryExecutor]:
     def __init__(
         self,
-        worker: PostgresWorker,
+        worker: ExecutorT,
         task_set: TaskSet,
         task: dict[str, Any],
         *,
@@ -124,7 +175,7 @@ class RolloutEvaluator:
     ) -> None:
         if max_candidates < 1:
             raise ValueError("max_candidates must be at least 1")
-        self.worker = worker
+        self._worker = worker
         self.task = task
         self.sql = task_set.load_sql(task)
         self.global_timeout_ms = global_timeout_ms
@@ -142,6 +193,10 @@ class RolloutEvaluator:
             if calibrated_timeout is not None
             else global_timeout_ms
         )
+
+    @property
+    def worker(self) -> ExecutorT:
+        return self._worker
 
     def start(self) -> dict[str, Any]:
         baseline_timeout_ms = (
@@ -174,7 +229,7 @@ class RolloutEvaluator:
         if self.calibrated_timeout is None:
             self.timeout_ms = task_timeout_ms(median_ms, self.global_timeout_ms)
         self.default = {
-            "measurement_protocol_id": self.measurement_protocol.protocol_id,
+            "measurement_protocol_id": self.measurement_protocol.protocol_id.value,
             "plan_sha256": default_plan_sha256,
             "plain_explain": plain.document,
             "warmup": measured(warmups[-1]) if warmups else None,
@@ -225,7 +280,7 @@ class RolloutEvaluator:
             "duplicate_of": None,
             "plan_sha256": None,
             "provisional_measurements": [],
-            "provisional_speedup": 0.1 if execution_timed_out else 0.0,
+            "provisional_speedup": MIN_SCORE if execution_timed_out else 0.0,
             "execution_timed_out": execution_timed_out,
             "timeout_ms": self.timeout_ms if execution_timed_out else None,
             "errors_or_diagnostics": [error],
@@ -281,7 +336,7 @@ class RolloutEvaluator:
         fingerprint = plan_sha256(plain.document["Plan"])
         duplicate = self.by_fingerprint.get(fingerprint)
         if duplicate is not None:
-            result = {
+            result: dict[str, Any] = {
                 "candidate_id": candidate_id,
                 "action": action,
                 "action_valid": True,
@@ -327,7 +382,7 @@ class RolloutEvaluator:
                 "plain_explain": plain.document,
                 "compact_plan": compact_plan(plain.document["Plan"]),
                 "provisional_measurements": [],
-                "provisional_speedup": 0.1,
+                "provisional_speedup": MIN_SCORE,
                 "execution_timed_out": True,
                 "timeout_ms": error.timeout_ms,
                 "errors_or_diagnostics": [str(error)],
@@ -386,7 +441,7 @@ class RolloutEvaluator:
         if self.kept_default:
             raise RuntimeError("rollout already kept the default plan")
         self.kept_default = True
-        return {"status": "kept_default"}
+        return {"status": ToolResultStatus.KEPT_DEFAULT.value}
 
     def checked_execution(self, action: dict[str, Any], hint: str) -> ExplainResult:
         result = self.worker.explain(self.sql, self.timeout_ms, analyze=True, hint=hint)
@@ -401,12 +456,12 @@ class RolloutEvaluator:
         if self.kept_default:
             median_ms = self.default["median_execution_time_ms"]
             return {
-                "measurement_protocol_id": self.measurement_protocol.protocol_id,
-                "status": "completed",
-                "decision": "keep_default",
+                "measurement_protocol_id": self.measurement_protocol.protocol_id.value,
+                "status": FinalStatus.COMPLETED.value,
+                "decision": Decision.KEEP_DEFAULT.value,
                 "winning_candidate_id": "default",
                 "winning_plan_sha256": self.default["plan_sha256"],
-                "score_source": "explicit_keep_default",
+                "score_source": ScoreSource.EXPLICIT_KEEP_DEFAULT.value,
                 "pair_orders": [],
                 "candidate_measurements": self.default["measurements"],
                 "default_measurements": self.default["measurements"],
@@ -436,10 +491,10 @@ class RolloutEvaluator:
         if not valid:
             return {
                 "measurement_protocol_id": (self.measurement_protocol.protocol_id),
-                "status": "no_valid_candidate",
+                "status": FinalStatus.NO_VALID_CANDIDATE.value,
                 "winning_candidate_id": None,
                 "score": 0.0,
-                "trajectory_reward": -3.0,
+                "trajectory_reward": NO_VALID_CANDIDATE_REWARD,
                 "invalid_attempt_count": invalid_count,
                 "duplicate_attempt_count": duplicate_count,
                 "timeout_attempt_count": timeout_count,
@@ -452,19 +507,22 @@ class RolloutEvaluator:
         if winner["plan_sha256"] == self.default["plan_sha256"]:
             median_ms = self.default["median_execution_time_ms"]
             return {
-                "measurement_protocol_id": self.measurement_protocol.protocol_id,
-                "status": "completed",
-                "decision": "candidate",
+                "measurement_protocol_id": self.measurement_protocol.protocol_id.value,
+                "status": FinalStatus.COMPLETED.value,
+                "decision": Decision.CANDIDATE.value,
                 "winning_candidate_id": winner["candidate_id"],
                 "winning_plan_sha256": winner["plan_sha256"],
-                "score_source": "default_fingerprint",
+                "score_source": ScoreSource.DEFAULT_FINGERPRINT.value,
                 "pair_orders": [],
                 "candidate_measurements": self.default["measurements"],
                 "default_measurements": self.default["measurements"],
                 "candidate_median_execution_time_ms": median_ms,
                 "default_median_execution_time_ms": median_ms,
                 "score": 1.0,
-                "trajectory_reward": (-0.10 * invalid_count - 0.05 * duplicate_count),
+                "trajectory_reward": (
+                    -INVALID_ATTEMPT_PENALTY * invalid_count
+                    - DUPLICATE_ATTEMPT_PENALTY * duplicate_count
+                ),
                 "invalid_attempt_count": invalid_count,
                 "duplicate_attempt_count": duplicate_count,
                 "timeout_attempt_count": timeout_count,
@@ -485,11 +543,11 @@ class RolloutEvaluator:
         candidate_measurements: list[dict[str, Any]] = []
         default_measurements: list[dict[str, Any]] = []
         for _ in range(self.measurement_protocol.final_randomized_pairs):
-            order = ["candidate", "default"]
+            order = [Decision.CANDIDATE.value, "default"]
             rng.shuffle(order)
             pair_orders.append(order)
             for label in order:
-                if label == "candidate":
+                if label == Decision.CANDIDATE:
                     try:
                         candidate_measurements.append(
                             measured(self.checked_execution(action, hint))
@@ -519,12 +577,12 @@ class RolloutEvaluator:
         )
         final_score = score(default_median, candidate_median)
         return {
-            "measurement_protocol_id": self.measurement_protocol.protocol_id,
-            "status": "completed",
-            "decision": "candidate",
+            "measurement_protocol_id": self.measurement_protocol.protocol_id.value,
+            "status": FinalStatus.COMPLETED.value,
+            "decision": Decision.CANDIDATE.value,
             "winning_candidate_id": winner["candidate_id"],
             "winning_plan_sha256": winner["plan_sha256"],
-            "score_source": "interleaved_measurement",
+            "score_source": ScoreSource.INTERLEAVED_MEASUREMENT.value,
             "pair_orders": pair_orders,
             "candidate_measurements": candidate_measurements,
             "default_measurements": default_measurements,
@@ -532,7 +590,9 @@ class RolloutEvaluator:
             "default_median_execution_time_ms": default_median,
             "score": final_score,
             "trajectory_reward": (
-                math.log(final_score) - 0.10 * invalid_count - 0.05 * duplicate_count
+                math.log(final_score)
+                - INVALID_ATTEMPT_PENALTY * invalid_count
+                - DUPLICATE_ATTEMPT_PENALTY * duplicate_count
             ),
             "invalid_attempt_count": invalid_count,
             "duplicate_attempt_count": duplicate_count,
@@ -549,10 +609,10 @@ class RolloutEvaluator:
         candidate_measurements: list[dict[str, Any]] | None = None,
         default_measurements: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        final_score = 0.1
+        final_score = MIN_SCORE
         return {
-            "measurement_protocol_id": self.measurement_protocol.protocol_id,
-            "status": "candidate_timeout",
+            "measurement_protocol_id": self.measurement_protocol.protocol_id.value,
+            "status": FinalStatus.CANDIDATE_TIMEOUT.value,
             "winning_candidate_id": winner["candidate_id"],
             "winning_plan_sha256": winner["plan_sha256"],
             "pair_orders": pair_orders or [],
@@ -561,7 +621,9 @@ class RolloutEvaluator:
             "timeout_ms": self.timeout_ms,
             "score": final_score,
             "trajectory_reward": (
-                math.log(final_score) - 0.10 * invalid_count - 0.05 * duplicate_count
+                math.log(final_score)
+                - INVALID_ATTEMPT_PENALTY * invalid_count
+                - DUPLICATE_ATTEMPT_PENALTY * duplicate_count
             ),
             "invalid_attempt_count": invalid_count,
             "duplicate_attempt_count": duplicate_count,
@@ -569,12 +631,12 @@ class RolloutEvaluator:
         }
 
 
-class TrainingRolloutEvaluatorV1(RolloutEvaluator):
+class TrainingRolloutEvaluatorV1[ExecutorT: QueryExecutor](RolloutEvaluator[ExecutorT]):
     """Cheaper reward measurement used only while training the policy."""
 
     def __init__(
         self,
-        worker: PostgresWorker,
+        worker: ExecutorT,
         task_set: TaskSet,
         task: dict[str, Any],
         *,
@@ -591,12 +653,12 @@ class TrainingRolloutEvaluatorV1(RolloutEvaluator):
         )
 
 
-class TrainingRolloutEvaluatorV2(RolloutEvaluator):
+class TrainingRolloutEvaluatorV2[ExecutorT: QueryExecutor](RolloutEvaluator[ExecutorT]):
     """Training measurement with pinned task-relative execution timeouts."""
 
     def __init__(
         self,
-        worker: PostgresWorker,
+        worker: ExecutorT,
         task_set: TaskSet,
         task: dict[str, Any],
         calibrated_timeout: TaskTimeout,

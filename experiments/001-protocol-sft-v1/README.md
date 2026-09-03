@@ -4,7 +4,11 @@
 
 This experiment teaches the base model the QORL message and tool-call protocol.
 `spike.toml` checks compatibility; `train.toml` defines the full one-epoch LoRA
-run. `run.py` preserves the exact experiment-specific training orchestration.
+run. `dataset.json` pins the dataset selection seed and split sizes. `run.py`
+preserves the exact experiment-specific training orchestration.
+
+The historical dataset builder receives that configuration explicitly with
+`--config experiments/001-protocol-sft-v1/dataset.json`.
 
 - Outputs: `outputs/sft/protocol-sft-spike/`, the prepared dataset under
   `outputs/sft/protocol-sft-v1/`, and training under

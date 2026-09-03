@@ -72,6 +72,12 @@ class BenchmarkTest(unittest.TestCase):
             self.assertEqual(config["policy"]["seed"], 7)
             self.assertEqual(config["_policy_config_path"], policy_path)
 
+            policy = json.loads(policy_path.read_text())
+            del policy["policy"]["seed"]
+            policy_path.write_text(json.dumps(policy))
+            with self.assertRaisesRegex(RuntimeError, "integer seed"):
+                load_run_config(repository, str(run_path))
+
     def test_summary_reports_primary_metrics(self) -> None:
         results = [
             {

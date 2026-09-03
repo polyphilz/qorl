@@ -26,7 +26,6 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--rank", type=int, default=16)
     parser.add_argument("--alpha", type=float, default=32.0)
     parser.add_argument("--dropout", type=float, default=0.0)
     arguments = parser.parse_args()
@@ -59,6 +58,14 @@ def main() -> None:
     )
     if changed == 0:
         raise RuntimeError("all LoRA B tensors remain zero after training")
+    ranks = {
+        value.shape[0]
+        for key, value in adapter.items()
+        if key.endswith("lora_A.weight")
+    }
+    if len(ranks) != 1:
+        raise RuntimeError(f"checkpoint contains inconsistent LoRA ranks: {ranks}")
+    rank = ranks.pop()
 
     arguments.output.mkdir(parents=True, exist_ok=True)
     weights = arguments.output / "adapter_model.safetensors"
@@ -74,7 +81,7 @@ def main() -> None:
         "peft_type": "LORA",
         "task_type": "CAUSAL_LM",
         "base_model_name_or_path": str(arguments.model),
-        "r": arguments.rank,
+        "r": rank,
         "lora_alpha": arguments.alpha,
         "lora_dropout": arguments.dropout,
         "bias": "none",

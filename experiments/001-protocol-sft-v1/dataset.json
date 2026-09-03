@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "dataset_id": "protocol-sft-v1",
+  "seed": 20260830,
+  "split_counts": {
+    "train": 256,
+    "validation": 64
+  }
+}
