@@ -53,3 +53,12 @@ To reproduce the frozen random baseline instead:
 ```bash
 uv run python experiments/000-vanilla-baseline/run.py
 ```
+
+## Development
+
+The repository records mechanical formatting commits in
+`.git-blame-ignore-revs`. Configure a fresh clone to honor that file with:
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
