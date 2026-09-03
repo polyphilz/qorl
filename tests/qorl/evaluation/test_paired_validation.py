@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import unittest
-
 from qorl.evaluation.paired_validation import summarize
 
 
@@ -37,15 +35,15 @@ def result(task_id: str, reward: float, speedup: float | None) -> dict:
     }
 
 
-class RlValidationTest(unittest.TestCase):
+class TestRlValidation:
     def test_summary_keeps_invalid_rollouts_in_reward_mean(self) -> None:
         summary = summarize([result("task-a", 0.5, 2.0), result("task-a", -3.0, None)])
 
-        self.assertEqual(summary["completed_rollout_count"], 2)
-        self.assertEqual(summary["valid_rollout_count"], 1)
-        self.assertEqual(summary["valid_rollout_rate"], 0.5)
-        self.assertEqual(summary["mean_trajectory_reward"], -1.25)
-        self.assertEqual(summary["geometric_mean_speedup"], 2.0)
-        self.assertEqual(summary["total_workload_speedup"], 2.0)
-        self.assertEqual(summary["postgres_explain_analyze_call_count"], 4)
-        self.assertEqual(summary["nonzero_reward_variance_group_count"], 1)
+        assert summary["completed_rollout_count"] == 2
+        assert summary["valid_rollout_count"] == 1
+        assert summary["valid_rollout_rate"] == 0.5
+        assert summary["mean_trajectory_reward"] == -1.25
+        assert summary["geometric_mean_speedup"] == 2.0
+        assert summary["total_workload_speedup"] == 2.0
+        assert summary["postgres_explain_analyze_call_count"] == 4
+        assert summary["nonzero_reward_variance_group_count"] == 1

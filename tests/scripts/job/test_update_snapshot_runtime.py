@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import json
-import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
+
+import pytest
 
 from scripts.job.update_snapshot_runtime import refresh_snapshot_runtime
 
 
-class SnapshotRuntimeTest(unittest.TestCase):
-    def test_refresh_changes_only_the_image_block(self) -> None:
+class TestSnapshotRuntime:
+    def test_refresh_changes_only_the_image_block(self, tmp_path: Path) -> None:
         document = {
             "fixture_id": "job-v1",
             "snapshot_id": "snapshot",
@@ -29,42 +29,39 @@ class SnapshotRuntimeTest(unittest.TestCase):
             "Os": "linux",
             "Config": {"Labels": {"io.qorl.benchmark.config-id": "benchmark-v2"}},
         }
-        with TemporaryDirectory() as temporary:
-            path = Path(temporary) / "snapshot.json"
-            path.write_text(json.dumps(document), encoding="utf-8")
-            old, new = refresh_snapshot_runtime(path, image, "benchmark-v2")
-            refreshed = json.loads(path.read_text(encoding="utf-8"))
+        path = tmp_path / "snapshot.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        old, new = refresh_snapshot_runtime(path, image, "benchmark-v2")
+        refreshed = json.loads(path.read_text(encoding="utf-8"))
 
-        self.assertEqual((old, new), ("sha256:old", "sha256:new"))
-        self.assertEqual(
-            {key: value for key, value in refreshed.items() if key != "image"},
-            {key: value for key, value in document.items() if key != "image"},
-        )
-        self.assertEqual(refreshed["image"]["id"], "sha256:new")
-        self.assertEqual(refreshed["image"]["benchmark_config_id"], "benchmark-v2")
+        assert (old, new) == ("sha256:old", "sha256:new")
+        assert {key: value for key, value in refreshed.items() if key != "image"} == {
+            key: value for key, value in document.items() if key != "image"
+        }
+        assert refreshed["image"]["id"] == "sha256:new"
+        assert refreshed["image"]["benchmark_config_id"] == "benchmark-v2"
 
-    def test_refresh_rejects_an_uncontracted_image(self) -> None:
-        with TemporaryDirectory() as temporary:
-            path = Path(temporary) / "snapshot.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "image": {
-                            "reference": "qorl-postgres:test",
-                            "id": "sha256:old",
-                        }
+    def test_refresh_rejects_an_uncontracted_image(self, tmp_path: Path) -> None:
+        path = tmp_path / "snapshot.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "image": {
+                        "reference": "qorl-postgres:test",
+                        "id": "sha256:old",
                     }
-                ),
-                encoding="utf-8",
+                }
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(RuntimeError, match="benchmark-v2"):
+            refresh_snapshot_runtime(
+                path,
+                {
+                    "Id": "sha256:new",
+                    "Architecture": "amd64",
+                    "Os": "linux",
+                    "Config": {"Labels": {}},
+                },
+                "benchmark-v2",
             )
-            with self.assertRaisesRegex(RuntimeError, "benchmark-v2"):
-                refresh_snapshot_runtime(
-                    path,
-                    {
-                        "Id": "sha256:new",
-                        "Architecture": "amd64",
-                        "Os": "linux",
-                        "Config": {"Labels": {}},
-                    },
-                    "benchmark-v2",
-                )

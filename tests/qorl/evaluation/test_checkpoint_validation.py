@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import unittest
 from pathlib import Path
+
+import pytest
 
 from qorl.evaluation.checkpoint_validation import (
     checkpoint_summary,
@@ -10,13 +11,13 @@ from qorl.evaluation.checkpoint_validation import (
 )
 
 
-class RlCheckpointValidationTest(unittest.TestCase):
+class TestRlCheckpointValidation:
     def test_policy_order_rotates_without_changing_membership(self) -> None:
         policies = ["start", "step-010", "step-020"]
 
-        self.assertEqual(rotated(policies, 0), policies)
-        self.assertEqual(rotated(policies, 1), ["step-010", "step-020", "start"])
-        self.assertEqual(rotated(policies, 4), ["step-010", "step-020", "start"])
+        assert rotated(policies, 0) == policies
+        assert rotated(policies, 1) == ["step-010", "step-020", "start"]
+        assert rotated(policies, 4) == ["step-010", "step-020", "start"]
 
     def test_model_command_registers_every_adapter(self) -> None:
         command = model_command(
@@ -32,15 +33,15 @@ class RlCheckpointValidationTest(unittest.TestCase):
             8000,
         )
 
-        self.assertIn("--enable-lora", command)
-        self.assertIn("step-010=/adapters/10", command)
-        self.assertIn("step-020=/adapters/20", command)
-        self.assertEqual(command[command.index("--max-num-seqs") + 1], "4")
-        self.assertEqual(command[command.index("--max-loras") + 1], "2")
-        self.assertEqual(command[command.index("--max-lora-rank") + 1], "16")
+        assert "--enable-lora" in command
+        assert "step-010=/adapters/10" in command
+        assert "step-020=/adapters/20" in command
+        assert command[command.index("--max-num-seqs") + 1] == "4"
+        assert command[command.index("--max-loras") + 1] == "2"
+        assert command[command.index("--max-lora-rank") + 1] == "16"
 
     def test_model_command_rejects_mixed_adapter_ranks(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "different LoRA ranks"):
+        with pytest.raises(RuntimeError, match="different LoRA ranks"):
             model_command(
                 Path("/venv/vllm"),
                 Path("/models/start"),
@@ -83,7 +84,7 @@ class RlCheckpointValidationTest(unittest.TestCase):
 
         summary = checkpoint_summary([result], 1)
 
-        self.assertEqual(summary["planned_rollout_count"], 1)
-        self.assertEqual(summary["default_winner_rate"], 1.0)
-        self.assertEqual(summary["novel_candidate_count"], 0)
-        self.assertEqual(summary["rollout_novel_candidate_rate"], 0.0)
+        assert summary["planned_rollout_count"] == 1
+        assert summary["default_winner_rate"] == 1.0
+        assert summary["novel_candidate_count"] == 0
+        assert summary["rollout_novel_candidate_rate"] == 0.0

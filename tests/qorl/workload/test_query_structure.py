@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import unittest
 from pathlib import Path
 
 from qorl.workload.query_structure import (
@@ -9,10 +8,8 @@ from qorl.workload.query_structure import (
     task_join_fingerprints,
 )
 
-ROOT = Path(__file__).resolve().parents[3]
 
-
-class QueryStructureTest(unittest.TestCase):
+class TestQueryStructure:
     def test_fingerprints_ignore_alias_names_and_filter_literals(self) -> None:
         first = extract_join_structure(
             """
@@ -34,7 +31,7 @@ class QueryStructureTest(unittest.TestCase):
             """,
             "second.sql",
         )
-        self.assertEqual(task_join_fingerprints(first), task_join_fingerprints(second))
+        assert task_join_fingerprints(first) == task_join_fingerprints(second)
 
     def test_topology_ignores_columns_but_exact_graph_does_not(self) -> None:
         first = extract_join_structure(
@@ -55,8 +52,8 @@ class QueryStructureTest(unittest.TestCase):
         )
         first_graph, first_topology = task_join_fingerprints(first)
         second_graph, second_topology = task_join_fingerprints(second)
-        self.assertNotEqual(first_graph, second_graph)
-        self.assertEqual(first_topology, second_topology)
+        assert first_graph != second_graph
+        assert first_topology == second_topology
 
     def test_repeated_table_instances_are_alias_independent(self) -> None:
         first = extract_join_structure(
@@ -77,12 +74,14 @@ class QueryStructureTest(unittest.TestCase):
             """,
             "second.sql",
         )
-        self.assertEqual(task_join_fingerprints(first), task_join_fingerprints(second))
+        assert task_join_fingerprints(first) == task_join_fingerprints(second)
 
-    def test_shared_code_preserves_checked_in_job_hash(self) -> None:
+    def test_shared_code_preserves_checked_in_job_hash(
+        self, repository_root: Path
+    ) -> None:
         inventory = json.loads(
-            (ROOT / "data/job/tasks.json").read_text(encoding="utf-8")
+            (repository_root / "data/job/tasks.json").read_text(encoding="utf-8")
         )
         task = inventory["tasks"][0]
         graph_hash, _topology_hash = task_join_fingerprints(task)
-        self.assertEqual(graph_hash, task["join_graph_sha256"])
+        assert graph_hash == task["join_graph_sha256"]

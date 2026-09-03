@@ -11,14 +11,15 @@ import pytest
 
 from qorl.util.hashing import sha256_file
 
-ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_pilot_config_has_twelve_four_group_updates(
+    repository_root: Path,
     load_experiment: Callable[[str], dict[str, Any]],
 ) -> None:
     experiment = load_experiment("experiments/003-rl-pilot-v1/run.py")
-    config = tomllib.loads((ROOT / experiment["CONFIG"]).read_text(encoding="utf-8"))
+    config = tomllib.loads(
+        (repository_root / experiment["CONFIG"]).read_text(encoding="utf-8")
+    )
 
     assert config["max_steps"] == 12
     assert config["orchestrator"]["batch_size"] == 16
@@ -29,13 +30,17 @@ def test_pilot_config_has_twelve_four_group_updates(
     )
 
 
-def test_paired_validation_cohort_and_seeds_are_frozen() -> None:
+def test_paired_validation_cohort_and_seeds_are_frozen(
+    repository_root: Path,
+) -> None:
     config = json.loads(
-        (ROOT / "experiments/003-rl-pilot-v1/validation.json").read_text(
+        (repository_root / "experiments/003-rl-pilot-v1/validation.json").read_text(
             encoding="utf-8"
         )
     )
-    selection = json.loads((ROOT / config["selection"]).read_text(encoding="utf-8"))
+    selection = json.loads(
+        (repository_root / config["selection"]).read_text(encoding="utf-8")
+    )
     selected = selection["splits"][config["split"]]
 
     assert len(selected) == 16

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-import unittest
 
 from qorl.evaluation.baselines.random import FAMILY_WEIGHTS, sample_action
 from qorl.plans.catalog import TaskCatalog
@@ -22,8 +21,8 @@ TASK = {
 }
 
 
-class RandomPolicyTest(unittest.TestCase):
-    def setUp(self) -> None:
+class TestRandomPolicy:
+    def setup_method(self) -> None:
         self.catalog = TaskCatalog.from_task(
             TASK,
             indexes={relation: {f"table_{relation}_pkey"} for relation in "abcd"},
@@ -34,11 +33,9 @@ class RandomPolicyTest(unittest.TestCase):
         right = random.Random(1234)
         for _ in range(1_000):
             action = sample_action(self.catalog, left)
-            self.assertEqual(action, sample_action(self.catalog, right))
-            self.assertEqual(
-                action, PlanAction.from_raw(action, self.catalog).to_wire()
-            )
-            self.assertLessEqual(len(action) - 1, 3)
+            assert action == sample_action(self.catalog, right)
+            assert action == PlanAction.from_raw(action, self.catalog).to_wire()
+            assert len(action) - 1 <= 3
 
     def test_fixed_sample_reaches_every_family(self) -> None:
         rng = random.Random(20260827)
@@ -57,4 +54,4 @@ class RandomPolicyTest(unittest.TestCase):
             observed.update(
                 field_to_family[field] for field in action if field != "version"
             )
-        self.assertEqual(observed, set(FAMILY_WEIGHTS))
+        assert observed == set(FAMILY_WEIGHTS)

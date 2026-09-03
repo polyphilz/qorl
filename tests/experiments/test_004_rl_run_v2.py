@@ -6,8 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[2]
-
 
 def test_inventory_is_deterministic_balanced_and_new(
     load_experiment: Callable[[str], dict[str, Any]],
@@ -38,9 +36,11 @@ def test_inventory_is_deterministic_balanced_and_new(
         assert len({item["template_id"] for item in batch}) == 4
 
 
-def test_final_run_is_pinned_to_its_inputs_and_limits() -> None:
+def test_final_run_is_pinned_to_its_inputs_and_limits(repository_root: Path) -> None:
     config = tomllib.loads(
-        (ROOT / "experiments/004-rl-run-v2/train.toml").read_text(encoding="utf-8")
+        (repository_root / "experiments/004-rl-run-v2/train.toml").read_text(
+            encoding="utf-8"
+        )
     )
     source = config["orchestrator"]["train"]["source"][0]
     concurrency = config["orchestrator"]["concurrency"]
@@ -83,11 +83,13 @@ def test_final_run_is_pinned_to_its_inputs_and_limits() -> None:
     assert run_dir / "checkpoints" == Path("outputs/rl/rl-run-v2/checkpoints")
 
 
-def test_checkpoint_evaluation_cadence_and_cohort_are_frozen() -> None:
+def test_checkpoint_evaluation_cadence_and_cohort_are_frozen(
+    repository_root: Path,
+) -> None:
     config = json.loads(
-        (ROOT / "experiments/004-rl-run-v2/checkpoint-evaluation.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            repository_root / "experiments/004-rl-run-v2/checkpoint-evaluation.json"
+        ).read_text(encoding="utf-8")
     )
 
     assert config["selection"] == "experiments/003-rl-pilot-v1/selection.json"
@@ -102,11 +104,13 @@ def test_checkpoint_evaluation_cadence_and_cohort_are_frozen() -> None:
     assert config["concurrency"] == 4
 
 
-def test_spike_matches_four_rollouts_to_four_database_workers() -> None:
+def test_spike_matches_four_rollouts_to_four_database_workers(
+    repository_root: Path,
+) -> None:
     config = tomllib.loads(
-        (ROOT / "experiments/004-rl-run-v2/concurrency-spike.toml").read_text(
-            encoding="utf-8"
-        )
+        (
+            repository_root / "experiments/004-rl-run-v2/concurrency-spike.toml"
+        ).read_text(encoding="utf-8")
     )
     source = config["orchestrator"]["train"]["source"][0]
     concurrency = config["orchestrator"]["concurrency"]

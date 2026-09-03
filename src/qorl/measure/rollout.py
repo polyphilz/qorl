@@ -7,7 +7,7 @@ from typing import Any
 
 from qorl.db.exceptions import QueryTimeout, WorkerError
 from qorl.db.worker import ExplainResult
-from qorl.measure.protocols import QueryExecutor
+from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
     MIN_SCORE,
     NO_VALID_CANDIDATE_REWARD,
@@ -29,7 +29,6 @@ from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
-from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
 
 DEFAULT_MEASUREMENTS = 3
@@ -127,7 +126,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
     def __init__(
         self,
         worker: ExecutorT,
-        task_set: TaskSet,
+        task_set: SqlSource,
         task: dict[str, Any],
         *,
         global_timeout_ms: int = GLOBAL_TIMEOUT_MS,

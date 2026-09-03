@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import unittest
+import pytest
 
 from qorl.db.exceptions import QueryTimeout, WorkerError
 from qorl.db.worker import PostgresWorker
@@ -19,9 +19,9 @@ class TimeoutWorker(PostgresWorker):
         raise WorkerError("ERROR: canceling statement due to statement timeout")
 
 
-class WorkerTest(unittest.TestCase):
+class TestWorker:
     def test_statement_timeout_has_a_specific_error_type(self) -> None:
-        with self.assertRaises(QueryTimeout) as raised:
+        with pytest.raises(QueryTimeout) as raised:
             TimeoutWorker().explain("SELECT 1", 5_000, analyze=True)
 
-        self.assertEqual(raised.exception.timeout_ms, 5_000)
+        assert raised.value.timeout_ms == 5_000

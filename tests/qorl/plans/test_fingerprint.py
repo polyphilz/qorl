@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import unittest
 
 from qorl.plans.fingerprint import (
     PLAN_FINGERPRINT_VERSION,
@@ -26,7 +25,7 @@ def explain(*, rows: int = 10, hits: int = 100, reads: int = 5) -> dict:
     }
 
 
-class FingerprintTest(unittest.TestCase):
+class TestFingerprint:
     def test_plan_fingerprint_ignores_runtime_observations(self) -> None:
         first = explain(rows=10, hits=100, reads=5)["Plan"]
         first.update(
@@ -58,7 +57,7 @@ class FingerprintTest(unittest.TestCase):
                 "Workers Launched": 1,
             }
         )
-        self.assertEqual(plan_sha256(first), plan_sha256(second))
+        assert plan_sha256(first) == plan_sha256(second)
 
     def test_plain_and_analyzed_hash_aggregate_have_the_same_fingerprint(self) -> None:
         plain = {
@@ -110,9 +109,9 @@ class FingerprintTest(unittest.TestCase):
             }
         )
 
-        self.assertEqual(PLAN_FINGERPRINT_VERSION, 3)
-        self.assertEqual(canonical_plan(analyzed), plain)
-        self.assertEqual(plan_sha256(analyzed), plan_sha256(plain))
+        assert PLAN_FINGERPRINT_VERSION == 3
+        assert canonical_plan(analyzed) == plain
+        assert plan_sha256(analyzed) == plan_sha256(plain)
 
     def test_incremental_sort_runtime_groups_do_not_change_fingerprint(self) -> None:
         plain = {
@@ -140,7 +139,7 @@ class FingerprintTest(unittest.TestCase):
                 },
             },
         }
-        self.assertEqual(plan_sha256(analyzed), plan_sha256(plain))
+        assert plan_sha256(analyzed) == plan_sha256(plain)
 
     def test_fingerprint_keeps_planner_fields_near_runtime_fields(self) -> None:
         plan = {
@@ -163,16 +162,13 @@ class FingerprintTest(unittest.TestCase):
             "Workers": [{"Worker Number": 0, "Actual Rows": 50}],
         }
 
-        self.assertEqual(canonical_plan(analyzed), plan)
-        self.assertNotEqual(
-            plan_sha256(plan),
-            plan_sha256({**plan, "Workers Planned": 1}),
-        )
+        assert canonical_plan(analyzed) == plan
+        assert plan_sha256(plan) != plan_sha256({**plan, "Workers Planned": 1})
         changed_partitions = json.loads(json.dumps(plan))
         changed_partitions["Plans"][0]["Planned Partitions"] = 2
-        self.assertNotEqual(plan_sha256(plan), plan_sha256(changed_partitions))
+        assert plan_sha256(plan) != plan_sha256(changed_partitions)
 
     def test_plan_fingerprint_detects_physical_plan_change(self) -> None:
         first = explain()["Plan"]
         second = {**first, "Node Type": "Index Scan"}
-        self.assertNotEqual(plan_sha256(first), plan_sha256(second))
+        assert plan_sha256(first) != plan_sha256(second)

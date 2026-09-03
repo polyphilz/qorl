@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import tempfile
-import unittest
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -158,9 +156,7 @@ class MissingUsageClient(FakeClient):
 
 
 class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
-    def __init__(self) -> None:
-        self.temporary_directory = tempfile.TemporaryDirectory()
-        repository = Path(self.temporary_directory.name)
+    def __init__(self, repository: Path) -> None:
         self.requested_settings: set[str] = set()
 
         def settings(names: set[str]) -> dict[str, str]:
@@ -261,11 +257,10 @@ def config() -> QoAgentConfig:
     )
 
 
-class QoAgentTest(unittest.TestCase):
-    def test_model_visible_request_bytes_are_stable(self) -> None:
+class TestQoAgent:
+    def test_model_visible_request_bytes_are_stable(self, tmp_path: Path) -> None:
         client = FakeClient()
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
 
         QoAgentPolicy(config(), client).search(evaluator)
 
@@ -273,38 +268,35 @@ class QoAgentTest(unittest.TestCase):
             hashlib.sha256(json.dumps(request).encode("utf-8")).hexdigest()
             for request in client.requests
         ]
-        self.assertEqual(
-            digests,
-            [
-                "83a76ec61fc4670286a44649c040eaeb6ec3815e4d7d0f069004cd4363925517",
-                "dfed7b674193dfe6cc6def422cc8eae036ed3c0244b6fbad59483e11639d5e3d",
-            ],
-        )
+        assert digests == [
+            "83a76ec61fc4670286a44649c040eaeb6ec3815e4d7d0f069004cd4363925517",
+            "dfed7b674193dfe6cc6def422cc8eae036ed3c0244b6fbad59483e11639d5e3d",
+        ]
 
-    def test_protocol_exposes_a_one_candidate_training_budget(self) -> None:
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+    def test_protocol_exposes_a_one_candidate_training_budget(
+        self, tmp_path: Path
+    ) -> None:
+        evaluator = FakeEvaluator(tmp_path)
         evaluator.max_candidates = 1
 
         protocol = AgentProtocol.from_evaluator(evaluator, 64)
 
-        self.assertEqual(protocol.observation["candidate_attempts"], 1)
-        self.assertEqual(protocol.observation["turn_budget"]["reserved_final_turns"], 2)
-        self.assertEqual(protocol.available_tool_names(1, 1), {"finish"})
+        assert protocol.observation["candidate_attempts"] == 1
+        assert protocol.observation["turn_budget"]["reserved_final_turns"] == 2
+        assert protocol.available_tool_names(1, 1) == {"finish"}
 
-    def test_get_default_plan_returns_only_compact_fields(self) -> None:
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+    def test_get_default_plan_returns_only_compact_fields(self, tmp_path: Path) -> None:
+        evaluator = FakeEvaluator(tmp_path)
 
         result, finished = AgentEnvironment(evaluator).execute(
             "get_plan", {"candidate_id": "default"}
         )
 
-        self.assertEqual(result, {"Plan": {"Node Type": "Result", "Plan Rows": 1}})
-        self.assertFalse(finished)
+        assert result == {"Plan": {"Node Type": "Result", "Plan Rows": 1}}
+        assert not finished
 
-    def test_exhausted_candidate_budget_is_tool_feedback(self) -> None:
-        evaluator = FakeEvaluator()
+    def test_exhausted_candidate_budget_is_tool_feedback(self, tmp_path: Path) -> None:
+        evaluator = FakeEvaluator(tmp_path)
 
         def exhausted(_: object) -> dict:
             raise RuntimeError("rollout candidate budget is exhausted")
@@ -314,20 +306,19 @@ class QoAgentTest(unittest.TestCase):
             "evaluate_candidate", {"action": {"version": 1}}
         )
 
-        self.assertEqual(result, {"error": "rollout candidate budget is exhausted"})
-        self.assertFalse(finished)
-        evaluator.temporary_directory.cleanup()
+        assert result == {"error": "rollout candidate budget is exhausted"}
+        assert not finished
 
     def test_model_client_accepts_a_rollout_scoped_api_key(self) -> None:
         client = OpenAIModelClient("http://example.test/v1", 10, "secret")
 
-        self.assertEqual(client.api_key, "secret")
+        assert client.api_key == "secret"
 
     def test_request_seed_can_be_left_to_the_rollout_server(self) -> None:
         policy = QoAgentPolicy(replace(config(), seed=None), FakeClient())
         body = policy.request_body([], [], "job-test", 1)
 
-        self.assertNotIn("seed", body)
+        assert "seed" not in body
 
     def test_preflight_inherits_lora_context_length_from_parent(self) -> None:
         policy = QoAgentPolicy(
@@ -336,122 +327,116 @@ class QoAgentTest(unittest.TestCase):
 
         identity = policy.preflight()
 
-        self.assertEqual(identity["model"]["id"], "qorl-protocol-adapter")
-        self.assertEqual(identity["effective_context_model"]["id"], "qorl-base")
+        assert identity["model"]["id"] == "qorl-protocol-adapter"
+        assert identity["effective_context_model"]["id"] == "qorl-base"
 
-    def test_runs_evaluate_then_finish_tool_loop(self) -> None:
+    def test_runs_evaluate_then_finish_tool_loop(self, tmp_path: Path) -> None:
         client = FakeClient()
         policy = QoAgentPolicy(config(), client)
-        self.assertEqual(
-            policy.preflight()["advertised_models"],
-            ["empero-ai/Qwen3.8-4B-Distill"],
-        )
+        assert policy.preflight()["advertised_models"] == [
+            "empero-ai/Qwen3.8-4B-Distill"
+        ]
 
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
         trace = policy.search(evaluator)
 
-        self.assertEqual(evaluator.actions, [{"version": 1}])
-        self.assertEqual(trace["stop_reason"], "model_finish")
-        self.assertEqual(trace["usage"]["prompt_tokens"], 220)
-        self.assertEqual(
-            trace["initial_observation"]["planner_settings"]["enable_hashjoin"],
-            "on",
+        assert evaluator.actions == [{"version": 1}]
+        assert trace["stop_reason"] == "model_finish"
+        assert trace["usage"]["prompt_tokens"] == 220
+        assert (
+            trace["initial_observation"]["planner_settings"]["enable_hashjoin"] == "on"
         )
-        self.assertEqual(
-            evaluator.requested_settings,
-            set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS),
-        )
-        self.assertEqual(
-            trace["initial_observation"]["turn_budget"],
-            {
-                "total_model_turns": 64,
-                "maximum_inspection_turns": 6,
-                "reserved_final_turns": 6,
-                "reserved_for": {
-                    "candidate_evaluations": 5,
-                    "finish_or_keep_default": 1,
-                },
+        assert evaluator.requested_settings == set(BOOLEAN_SETTINGS) | set(
+            NUMERIC_SETTINGS
+        ) | set(INTEGER_SETTINGS)
+        assert trace["initial_observation"]["turn_budget"] == {
+            "total_model_turns": 64,
+            "maximum_inspection_turns": 6,
+            "reserved_final_turns": 6,
+            "reserved_for": {
+                "candidate_evaluations": 5,
+                "finish_or_keep_default": 1,
             },
-        )
+        }
         first_tool_result = json.loads(trace["transcript"][3]["content"])
-        self.assertEqual(first_tool_result["_turn_budget"]["turns_remaining"], 63)
-        self.assertEqual(len(trace["tools_sha256"]), 64)
-        self.assertEqual(
-            [message["role"] for message in trace["transcript"]],
-            ["system", "user", "assistant", "tool", "assistant", "tool"],
-        )
-        self.assertEqual(client.requests[0]["tool_choice"], "required")
+        assert first_tool_result["_turn_budget"]["turns_remaining"] == 63
+        assert len(trace["tools_sha256"]) == 64
+        assert [message["role"] for message in trace["transcript"]] == [
+            "system",
+            "user",
+            "assistant",
+            "tool",
+            "assistant",
+            "tool",
+        ]
+        assert client.requests[0]["tool_choice"] == "required"
         first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
         second_tools = {
             tool["function"]["name"] for tool in client.requests[1]["tools"]
         }
-        self.assertNotIn("finish", first_tools)
-        self.assertIn("keep_default", first_tools)
-        self.assertIn("finish", second_tools)
-        self.assertNotIn("keep_default", second_tools)
-        self.assertFalse(client.requests[0]["chat_template_kwargs"]["enable_thinking"])
+        assert "finish" not in first_tools
+        assert "keep_default" in first_tools
+        assert "finish" in second_tools
+        assert "keep_default" not in second_tools
+        assert not client.requests[0]["chat_template_kwargs"]["enable_thinking"]
 
-    def test_keep_default_ends_without_a_candidate(self) -> None:
+    def test_keep_default_ends_without_a_candidate(self, tmp_path: Path) -> None:
         client = KeepDefaultClient()
         policy = QoAgentPolicy(config(), client)
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
 
         trace = policy.search(evaluator)
 
-        self.assertEqual(trace["stop_reason"], "model_keep_default")
-        self.assertTrue(evaluator.kept_default)
-        self.assertEqual(evaluator.candidates, [])
-        self.assertEqual(trace["tool_events"][0]["result"]["status"], "kept_default")
+        assert trace["stop_reason"] == "model_keep_default"
+        assert evaluator.kept_default
+        assert evaluator.candidates == []
+        assert trace["tool_events"][0]["result"]["status"] == "kept_default"
 
-    def test_terminal_tools_enforce_the_decision_order(self) -> None:
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+    def test_terminal_tools_enforce_the_decision_order(self, tmp_path: Path) -> None:
+        evaluator = FakeEvaluator(tmp_path)
         environment = AgentEnvironment(evaluator)
 
         result, finished = environment.execute("finish", {})
-        self.assertIn("use keep_default", result["error"])
-        self.assertFalse(finished)
+        assert "use keep_default" in result["error"]
+        assert not finished
 
         evaluator.evaluate({"version": 1})
         result, finished = environment.execute("keep_default", {})
-        self.assertIn("before submitting a candidate", result["error"])
-        self.assertFalse(finished)
+        assert "before submitting a candidate" in result["error"]
+        assert not finished
 
-    def test_reserved_turns_only_offer_decision_tools(self) -> None:
+    def test_reserved_turns_only_offer_decision_tools(self, tmp_path: Path) -> None:
         client = FakeClient()
         policy = QoAgentPolicy(replace(config(), maximum_model_turns=2), client)
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
 
         policy.search(evaluator)
 
         first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
-        self.assertEqual(first_tools, {"evaluate_candidate", "keep_default"})
+        assert first_tools == {"evaluate_candidate", "keep_default"}
 
-    def test_stops_before_the_next_turn_would_exceed_context(self) -> None:
+    def test_stops_before_the_next_turn_would_exceed_context(
+        self, tmp_path: Path
+    ) -> None:
         client = ContextLimitClient()
         policy = QoAgentPolicy(replace(config(), context_length=20_480), client)
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
 
         trace = policy.search(evaluator)
 
-        self.assertEqual(trace["stop_reason"], "context_budget")
-        self.assertEqual(len(client.requests), 1)
-        self.assertGreater(trace["context_estimate_tokens"], 19_000)
+        assert trace["stop_reason"] == "context_budget"
+        assert len(client.requests) == 1
+        assert trace["context_estimate_tokens"] > 19_000
 
-    def test_stops_if_the_server_omits_token_usage(self) -> None:
+    def test_stops_if_the_server_omits_token_usage(self, tmp_path: Path) -> None:
         client = MissingUsageClient()
         policy = QoAgentPolicy(config(), client)
-        evaluator = FakeEvaluator()
-        self.addCleanup(evaluator.temporary_directory.cleanup)
+        evaluator = FakeEvaluator(tmp_path)
 
         trace = policy.search(evaluator)
 
-        self.assertEqual(trace["stop_reason"], "missing_token_usage")
-        self.assertEqual(len(client.requests), 1)
+        assert trace["stop_reason"] == "missing_token_usage"
+        assert len(client.requests) == 1
 
     def test_evaluate_tool_contains_resolvable_join_tree_schema(self) -> None:
         evaluate = next(
@@ -461,14 +446,9 @@ class QoAgentTest(unittest.TestCase):
         )
         parameters = evaluate["function"]["parameters"]
         leading = parameters["properties"]["action"]["properties"]["leading"]
-        self.assertEqual(leading["$ref"], "#/$defs/JoinNode")
+        assert leading["$ref"] == "#/$defs/JoinNode"
         join_node = parameters["$defs"]["JoinNode"]
-        self.assertEqual(
-            join_node["properties"]["left"]["anyOf"][1]["$ref"],
-            "#/$defs/JoinNode",
-        )
-        self.assertEqual(
-            join_node["properties"]["left"]["anyOf"][0]["enum"], ["a", "b"]
-        )
+        assert join_node["properties"]["left"]["anyOf"][1]["$ref"] == "#/$defs/JoinNode"
+        assert join_node["properties"]["left"]["anyOf"][0]["enum"] == ["a", "b"]
         scans = parameters["$defs"]["ScanConstraint"]
-        self.assertEqual(scans["properties"]["relation"]["enum"], ["a", "b"])
+        assert scans["properties"]["relation"]["enum"] == ["a", "b"]

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import copy
 import json
-import unittest
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from qorl.agent.prompts import SYSTEM_PROMPT
 from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
@@ -17,8 +18,6 @@ from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
 from qorl.workload.taskset import TaskSet
 
-ROOT = Path(__file__).resolve().parents[3]
-
 
 def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
     if isinstance(tree, str):
@@ -29,8 +28,8 @@ def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def synthetic_demo() -> dict[str, Any]:
-    task_set = TaskSet.load(ROOT, "ceb-v1")
+def synthetic_demo(repository: Path) -> dict[str, Any]:
+    task_set = TaskSet.load(repository, "ceb-v1")
     task = next(
         item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID
     )
@@ -152,15 +151,19 @@ def synthetic_demo() -> dict[str, Any]:
     }
 
 
-class ProtocolDemoTest(unittest.TestCase):
-    def test_validates_exact_live_protocol_shape(self) -> None:
-        summary = validate_protocol_demo(synthetic_demo(), ROOT)
-        self.assertEqual(summary["candidate_ids"], ["candidate-01"])
-        self.assertEqual(summary["terminal_decision"], "finish")
-        self.assertEqual(summary["call_sequence"], CALL_SEQUENCE)
+class TestProtocolDemo:
+    def test_validates_exact_live_protocol_shape(self, repository_root: Path) -> None:
+        summary = validate_protocol_demo(
+            synthetic_demo(repository_root), repository_root
+        )
+        assert summary["candidate_ids"] == ["candidate-01"]
+        assert summary["terminal_decision"] == "finish"
+        assert summary["call_sequence"] == CALL_SEQUENCE
 
-    def test_validates_keep_default_as_a_terminal_decision(self) -> None:
-        demo = synthetic_demo()
+    def test_validates_keep_default_as_a_terminal_decision(
+        self, repository_root: Path
+    ) -> None:
+        demo = synthetic_demo(repository_root)
         observation = json.loads(demo["messages"][1]["content"])
         protocol = AgentProtocol(
             maximum_model_turns=demo["metadata"]["maximum_model_turns"],
@@ -203,14 +206,14 @@ class ProtocolDemoTest(unittest.TestCase):
         )
         demo["metadata"]["call_sequence"] = ["get_plan", "keep_default"]
 
-        summary = validate_protocol_demo(demo, ROOT)
+        summary = validate_protocol_demo(demo, repository_root)
 
-        self.assertEqual(summary["candidate_ids"], [])
-        self.assertEqual(summary["terminal_decision"], "keep_default")
+        assert summary["candidate_ids"] == []
+        assert summary["terminal_decision"] == "keep_default"
 
-    def test_rejects_unissued_candidate_id(self) -> None:
-        demo = copy.deepcopy(synthetic_demo())
+    def test_rejects_unissued_candidate_id(self, repository_root: Path) -> None:
+        demo = copy.deepcopy(synthetic_demo(repository_root))
         call = demo["messages"][6]["tool_calls"][0]
         call["function"]["arguments"] = '{"candidate_id":"candidate-02"}'
-        with self.assertRaisesRegex(DemoValidationError, "was not issued"):
-            validate_protocol_demo(demo, ROOT)
+        with pytest.raises(DemoValidationError, match="was not issued"):
+            validate_protocol_demo(demo, repository_root)

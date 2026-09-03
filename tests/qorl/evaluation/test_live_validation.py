@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
-import unittest
 from pathlib import Path
 
 from qorl.evaluation.live_validation import (
@@ -40,7 +38,7 @@ def metrics(**overrides: object) -> dict[str, object]:
     return value
 
 
-class LiveProtocolValidationTest(unittest.TestCase):
+class TestLiveProtocolValidation:
     def test_summary_counts_failures_and_completed_rollouts(self) -> None:
         summary = summarize(
             [
@@ -49,42 +47,41 @@ class LiveProtocolValidationTest(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(summary["completed_task_count"], 1)
-        self.assertEqual(summary["orchestration_failure_count"], 1)
-        self.assertEqual(summary["valid_tool_call_rate"], 1.0)
-        self.assertEqual(summary["rollout_valid_candidate_rate"], 0.5)
-        self.assertEqual(summary["finish_call_rate"], 0.5)
-        self.assertEqual(summary["keep_default_call_rate"], 0.0)
+        assert summary["completed_task_count"] == 1
+        assert summary["orchestration_failure_count"] == 1
+        assert summary["valid_tool_call_rate"] == 1.0
+        assert summary["rollout_valid_candidate_rate"] == 0.5
+        assert summary["finish_call_rate"] == 0.5
+        assert summary["keep_default_call_rate"] == 0.0
 
-    def test_adapter_path_comes_from_passed_training_report(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            repository = Path(temporary)
-            run_dir = repository / TRAINING_RUN
-            adapter = run_dir / "checkpoints/step_7/adapter"
-            adapter.mkdir(parents=True)
-            for filename in (
-                "adapter_model.safetensors",
-                "adapter_config.json",
-                "qorl-manifest.json",
-            ):
-                (adapter / filename).touch()
-            (run_dir / "training-report.json").write_text(
-                json.dumps(
-                    {
-                        "status": "passed",
-                        "adapter": "checkpoints/step_7/adapter",
-                    }
-                )
+    def test_adapter_path_comes_from_passed_training_report(
+        self, tmp_path: Path
+    ) -> None:
+        run_dir = tmp_path / TRAINING_RUN
+        adapter = run_dir / "checkpoints/step_7/adapter"
+        adapter.mkdir(parents=True)
+        for filename in (
+            "adapter_model.safetensors",
+            "adapter_config.json",
+            "qorl-manifest.json",
+        ):
+            (adapter / filename).touch()
+        (run_dir / "training-report.json").write_text(
+            json.dumps(
+                {
+                    "status": "passed",
+                    "adapter": "checkpoints/step_7/adapter",
+                }
             )
+        )
 
-            self.assertEqual(adapter_path(repository), adapter.resolve())
+        assert adapter_path(tmp_path) == adapter.resolve()
 
     def test_policy_selection_defaults_can_be_composed(self) -> None:
-        self.assertEqual(
-            [name for name, _ in selected_policies("adapter", "base-first")],
-            ["adapter"],
-        )
-        self.assertEqual(
-            [name for name, _ in selected_policies("both", "base-first")],
-            ["base", "adapter"],
-        )
+        assert [name for name, _ in selected_policies("adapter", "base-first")] == [
+            "adapter"
+        ]
+        assert [name for name, _ in selected_policies("both", "base-first")] == [
+            "base",
+            "adapter",
+        ]

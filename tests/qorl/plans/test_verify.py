@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import unittest
-
 from qorl.plans.verify import parse_hint_diagnostics, verify_action
 
 DIAGNOSTICS = (
@@ -29,13 +27,13 @@ PLAN = {
 }
 
 
-class PlanTest(unittest.TestCase):
+class TestPlan:
     def test_parses_real_diagnostic_shape(self) -> None:
         diagnostic = parse_hint_diagnostics(DIAGNOSTICS)
-        self.assertIsNotNone(diagnostic)
         assert diagnostic is not None
-        self.assertEqual(diagnostic.used, "SeqScan(a)HashJoin(a b)")
-        self.assertEqual(diagnostic.not_used, "(none)")
+        assert diagnostic is not None
+        assert diagnostic.used == "SeqScan(a)HashJoin(a b)"
+        assert diagnostic.not_used == "(none)"
 
     def test_verifies_join_tree_join_and_scan(self) -> None:
         result = verify_action(
@@ -62,7 +60,7 @@ class PlanTest(unittest.TestCase):
             PLAN,
             DIAGNOSTICS,
         )
-        self.assertTrue(result.valid, result.errors)
+        assert result.valid, result.errors
 
     def test_rejects_unused_hint(self) -> None:
         result = verify_action(
@@ -72,8 +70,8 @@ class PlanTest(unittest.TestCase):
                 "{not used hints:(none)}", "{not used hints:MergeJoin(a b)}"
             ),
         )
-        self.assertFalse(result.valid)
-        self.assertIn("not used hints", result.errors[0])
+        assert not result.valid
+        assert "not used hints" in result.errors[0]
 
     def test_rejects_actual_plan_mismatch(self) -> None:
         result = verify_action(
@@ -91,8 +89,8 @@ class PlanTest(unittest.TestCase):
             PLAN,
             DIAGNOSTICS,
         )
-        self.assertFalse(result.valid)
-        self.assertTrue(any("uses hash, not merge" in error for error in result.errors))
+        assert not result.valid
+        assert any("uses hash, not merge" in error for error in result.errors)
 
     def test_rejects_disabled_index_in_actual_plan(self) -> None:
         result = verify_action(
@@ -103,7 +101,5 @@ class PlanTest(unittest.TestCase):
             PLAN,
             DIAGNOSTICS,
         )
-        self.assertFalse(result.valid)
-        self.assertTrue(
-            any("uses disabled indexes" in error for error in result.errors)
-        )
+        assert not result.valid
+        assert any("uses disabled indexes" in error for error in result.errors)

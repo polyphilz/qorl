@@ -1,17 +1,16 @@
-import unittest
 from pathlib import Path
 
 from qorl.db.fixture import DatabaseFixture
 
-ROOT = Path(__file__).resolve().parents[3]
 
-
-class DatabaseFixtureTest(unittest.TestCase):
-    def test_fixture_splits_data_and_runtime_identity(self) -> None:
+class TestDatabaseFixture:
+    def test_fixture_splits_data_and_runtime_identity(
+        self, repository_root: Path
+    ) -> None:
         fixture = DatabaseFixture(
-            repository=ROOT,
-            snapshot_manifest_path=ROOT / "snapshot.json",
-            archive_path=ROOT / "snapshot.tar.gz",
+            repository=repository_root,
+            snapshot_manifest_path=repository_root / "snapshot.json",
+            archive_path=repository_root / "snapshot.tar.gz",
             snapshot={
                 "fixture_id": "job-v1",
                 "snapshot_id": "snapshot",
@@ -24,19 +23,13 @@ class DatabaseFixtureTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(
-            fixture.data_identity,
-            {
-                "fixture_id": "job-v1",
-                "snapshot_id": "snapshot",
-                "snapshot_archive_sha256": "archive",
-                "postgres_system_identifier": "system",
-            },
-        )
-        self.assertEqual(
-            fixture.runtime_identity,
-            {
-                "postgres_image_id": "sha256:image",
-                "benchmark_config_id": "benchmark-v2",
-            },
-        )
+        assert fixture.data_identity == {
+            "fixture_id": "job-v1",
+            "snapshot_id": "snapshot",
+            "snapshot_archive_sha256": "archive",
+            "postgres_system_identifier": "system",
+        }
+        assert fixture.runtime_identity == {
+            "postgres_image_id": "sha256:image",
+            "benchmark_config_id": "benchmark-v2",
+        }

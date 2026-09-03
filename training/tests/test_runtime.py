@@ -1,29 +1,50 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
 
+from qorl.db.container import PostgresContainer
+from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerSlot
 from qorl.db.resources import (
     DEFAULT_TRAINING_PROFILE,
     load_runtime_profile,
     validate_host_topology,
 )
+from qorl.db.worker import PostgresWorker
+from qorl.workload.taskset import TaskSet
 from qorl_training.runtime import QorlRuntime
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-class FakeWorker:
-    fixture = SimpleNamespace(runtime_identity={})
-
-
-class FakeContainer:
-    def close(self) -> None:
-        pass
+def database_fixture() -> DatabaseFixture:
+    database = json.loads((ROOT / "data/job/tasks.json").read_text(encoding="utf-8"))[
+        "database"
+    ]
+    benchmark = json.loads(
+        (ROOT / "docker/postgres/contract/benchmark.expected.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return DatabaseFixture(
+        repository=ROOT,
+        snapshot_manifest_path=ROOT / "artifacts/job-v1/job-v1.snapshot.json",
+        archive_path=ROOT / "artifacts/job-v1/job-v1.snapshot.tar.gz",
+        snapshot={
+            "fixture_id": database["fixture_id"],
+            "snapshot_id": database["snapshot_id"],
+            "archive": {"sha256": database["snapshot_archive_sha256"]},
+            "postgresql": {"system_identifier": database["postgres_system_identifier"]},
+            "image": {
+                "id": database["postgres_image_id"],
+                "benchmark_config_id": benchmark["benchmark_config_id"],
+            },
+        },
+    )
 
 
 class WorkerPoolTest(unittest.TestCase):
@@ -43,20 +64,23 @@ class WorkerPoolTest(unittest.TestCase):
 
     def test_claim_returns_workers_to_the_pool(self) -> None:
         profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
-        slots = tuple(
-            WorkerSlot(  # type: ignore[arg-type]
+        fixture = database_fixture()
+        slots = []
+        for resources in profile.workers:
+            container = PostgresContainer(
+                fixture,
+                f"test-pool-{resources.index}",
+                profile,
                 resources,
-                FakeContainer(),
-                FakeWorker(),
             )
-            for resources in profile.workers
-        )
-        runtime = QorlRuntime(  # type: ignore[arg-type]
-            SimpleNamespace(data_identity={}),
-            slots,
+            slots.append(WorkerSlot(resources, container, PostgresWorker(container)))
+        runtime = QorlRuntime(
+            TaskSet.load(ROOT, "ceb-v1", fixture.data_identity),
+            tuple(slots),
             "test-pool",
             "test-sha",
         )
+        self.addCleanup(runtime.close)
 
         with runtime.claim_worker() as first, runtime.claim_worker() as second:
             self.assertNotEqual(first.resources.index, second.resources.index)

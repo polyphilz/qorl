@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-import unittest
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.exceptions import ActionError
@@ -28,20 +29,8 @@ def compile_raw(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], str]:
     return action.to_wire(), action.compile()
 
 
-class ActionTest(unittest.TestCase):
-    def test_rejects_non_string_forbidden_methods_as_an_action_error(self) -> None:
-        with self.assertRaisesRegex(
-            ActionError, "scans\\[0\\]\\.forbid must contain only"
-        ):
-            compile_raw(
-                {
-                    "version": 1,
-                    "scans": [{"relation": "a", "forbid": [{"method": "seq"}]}],
-                },
-                self.catalog,
-            )
-
-    def setUp(self) -> None:
+class TestAction:
+    def setup_method(self) -> None:
         self.catalog = TaskCatalog.from_task(
             TASK,
             indexes={
@@ -50,6 +39,18 @@ class ActionTest(unittest.TestCase):
                 "c": {"table_c_pkey"},
             },
         )
+
+    def test_rejects_non_string_forbidden_methods_as_an_action_error(self) -> None:
+        with pytest.raises(
+            ActionError, match="scans\\[0\\]\\.forbid must contain only"
+        ):
+            compile_raw(
+                {
+                    "version": 1,
+                    "scans": [{"relation": "a", "forbid": [{"method": "seq"}]}],
+                },
+                self.catalog,
+            )
 
     def test_compiles_plan_example(self) -> None:
         _, hint = compile_raw(
@@ -69,7 +70,7 @@ class ActionTest(unittest.TestCase):
             },
             self.catalog,
         )
-        self.assertEqual(hint, "/*+ Leading(((a b) c)) HashJoin(a b) */")
+        assert hint == "/*+ Leading(((a b) c)) HashJoin(a b) */"
 
     def test_compiles_every_hint_family_deterministically(self) -> None:
         normalized, hint = compile_raw(
@@ -100,32 +101,31 @@ class ActionTest(unittest.TestCase):
             },
             self.catalog,
         )
-        self.assertEqual(normalized["joins"][0]["relations"], ["b", "c"])
-        self.assertEqual(
-            hint,
-            "/*+ MergeJoin(b c) NoHashJoin(b c) NoMemoize(b c) "
+        assert normalized["joins"][0]["relations"] == ["b", "c"]
+        assert (
+            hint == "/*+ MergeJoin(b c) NoHashJoin(b c) NoMemoize(b c) "
             "IndexScan(a table_a_value_idx) NoSeqScan(a) "
             "DisableIndex(b table_b_pkey) "
             "Rows(b c *10) Parallel(c 2 hard) "
-            "Set(enable_hashagg off) Set(random_page_cost 1.1) */",
+            "Set(enable_hashagg off) Set(random_page_cost 1.1) */"
         )
 
     def test_rejects_disconnected_join_target(self) -> None:
-        with self.assertRaisesRegex(ActionError, "not connected"):
+        with pytest.raises(ActionError, match="not connected"):
             compile_raw(
                 {"version": 1, "joins": [{"relations": ["a", "c"]}]},
                 self.catalog,
             )
 
     def test_rejects_leading_that_omits_a_relation(self) -> None:
-        with self.assertRaisesRegex(ActionError, "every query relation"):
+        with pytest.raises(ActionError, match="every query relation"):
             compile_raw(
                 {"version": 1, "leading": {"left": "a", "right": "b"}},
                 self.catalog,
             )
 
     def test_rejects_disconnected_leading_subtree(self) -> None:
-        with self.assertRaisesRegex(ActionError, "disconnected subtrees"):
+        with pytest.raises(ActionError, match="disconnected subtrees"):
             compile_raw(
                 {
                     "version": 1,
@@ -138,7 +138,7 @@ class ActionTest(unittest.TestCase):
             )
 
     def test_rejects_scan_conflict(self) -> None:
-        with self.assertRaisesRegex(ActionError, "both forces and forbids"):
+        with pytest.raises(ActionError, match="both forces and forbids"):
             compile_raw(
                 {
                     "version": 1,
@@ -148,7 +148,7 @@ class ActionTest(unittest.TestCase):
             )
 
     def test_rejects_forced_disabled_index(self) -> None:
-        with self.assertRaisesRegex(ActionError, "both forces and disables"):
+        with pytest.raises(ActionError, match="both forces and disables"):
             compile_raw(
                 {
                     "version": 1,
@@ -167,11 +167,11 @@ class ActionTest(unittest.TestCase):
             )
 
     def test_rejects_unallowlisted_setting(self) -> None:
-        with self.assertRaisesRegex(ActionError, "unknown fields"):
+        with pytest.raises(ActionError, match="unknown fields"):
             compile_raw({"version": 1, "settings": {"work_mem": 1024}}, self.catalog)
 
     def test_rejects_setting_that_disables_forced_method(self) -> None:
-        with self.assertRaisesRegex(ActionError, "both forces hash"):
+        with pytest.raises(ActionError, match="both forces hash"):
             compile_raw(
                 {
                     "version": 1,
@@ -183,27 +183,23 @@ class ActionTest(unittest.TestCase):
 
     def test_model_schema_matches_the_setting_allowlist(self) -> None:
         settings = PlanAction.tool_schema()["$defs"]["PlannerSettings"]["properties"]
-        self.assertIn("enable_hashjoin", settings)
-        self.assertNotIn("work_mem", settings)
+        assert "enable_hashjoin" in settings
+        assert "work_mem" not in settings
 
     def test_tool_schema_matches_golden(self) -> None:
         expected = json.loads(
             (FIXTURES / "plan_action_schema.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(
-            PlanAction.tool_schema(["a", "b", "c"]),
-            expected,
-        )
+        assert PlanAction.tool_schema(["a", "b", "c"]) == expected
 
     def test_malformed_action_feedback_matches_golden(self) -> None:
         cases = json.loads(
             (FIXTURES / "malformed_actions.json").read_text(encoding="utf-8")
         )
         for case in cases:
-            with self.subTest(case=case["name"]):
-                with self.assertRaises(ActionError) as raised:
-                    PlanAction.from_raw(case["action"], self.catalog)
-                self.assertEqual(str(raised.exception), case["error"])
+            with pytest.raises(ActionError) as raised:
+                PlanAction.from_raw(case["action"], self.catalog)
+            assert str(raised.value) == case["error"], case["name"]
 
     def test_removed_settings_are_not_exposed_or_accepted(self) -> None:
         settings = PlanAction.tool_schema()["$defs"]["PlannerSettings"]["properties"]
@@ -219,14 +215,13 @@ class ActionTest(unittest.TestCase):
             "geqo_selection_bias",
             "geqo_seed",
         ):
-            with self.subTest(name=name):
-                self.assertNotIn(name, settings)
-                with self.assertRaisesRegex(ActionError, "unknown fields"):
-                    compile_raw({"version": 1, "settings": {name: 1}}, self.catalog)
+            assert name not in settings
+            with pytest.raises(ActionError, match="unknown fields"):
+                compile_raw({"version": 1, "settings": {name: 1}}, self.catalog)
 
     def test_parallel_workers_are_capped_at_two(self) -> None:
         parallel = PlanAction.tool_schema()["$defs"]["ParallelRequest"]
-        self.assertEqual(parallel["properties"]["workers"]["maximum"], 2)
+        assert parallel["properties"]["workers"]["maximum"] == 2
         compile_raw(
             {
                 "version": 1,
@@ -234,7 +229,7 @@ class ActionTest(unittest.TestCase):
             },
             self.catalog,
         )
-        with self.assertRaisesRegex(ActionError, "from 0 through 2"):
+        with pytest.raises(ActionError, match="from 0 through 2"):
             compile_raw(
                 {
                     "version": 1,
