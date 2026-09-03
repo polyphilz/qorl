@@ -16,8 +16,18 @@ from typing import Any
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
-from qorl.measure.rollout import RolloutEvaluator, training_protocol
-from qorl.measure.schemas import FinalStatus, MeasurementProtocolId, RunStatus
+from qorl.measure.rollout import (
+    MATERIAL_SHARED_READ_FRACTION,
+    RolloutEvaluator,
+    has_material_shared_reads,
+    training_protocol,
+)
+from qorl.measure.schemas import (
+    FinalStatus,
+    MeasurementProtocolId,
+    RunStatus,
+    ScoreSource,
+)
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.workload.taskset import TaskSet
@@ -168,6 +178,37 @@ def replay(
     baseline = evaluator.start()
     candidates = [evaluator.evaluate(action) for action in actions]
     final = evaluator.finish(random.Random(seed))
+    provisional_measurements = [
+        measurement
+        for candidate in candidates
+        if candidate.duplicate_of is None
+        for measurement in candidate.provisional_measurements
+    ]
+    final_measurements = (
+        final.candidate_measurements
+        if final.score_source == ScoreSource.INTERLEAVED_MEASUREMENT
+        or final.status == FinalStatus.CANDIDATE_TIMEOUT
+        else []
+    )
+    retained_candidate_measurements = provisional_measurements + final_measurements
+    cold_read_repeat_count = (
+        sum(candidate.cold_read_repeat_count for candidate in candidates)
+        + final.cold_read_repeat_count
+    )
+    initial_candidate_measurement_count = (
+        sum(
+            len(candidate.provisional_measurements) + int(candidate.execution_timed_out)
+            for candidate in candidates
+            if candidate.duplicate_of is None
+        )
+        + len(final_measurements)
+        + int(final.status == FinalStatus.CANDIDATE_TIMEOUT)
+    )
+    repeat_fraction = evaluator.measurement_protocol.cold_read_repeat_fraction
+    retained_material_shared_read_count = sum(
+        has_material_shared_reads(measurement, MATERIAL_SHARED_READ_FRACTION)
+        for measurement in retained_candidate_measurements
+    )
     return {
         "measurement_protocol": evaluator.measurement_protocol.manifest(),
         "default_median_execution_time_ms": baseline.median_execution_time_ms,
@@ -179,10 +220,25 @@ def replay(
                 "duplicate_of": candidate.duplicate_of,
                 "plan_sha256": candidate.plan_sha256,
                 "provisional_speedup": candidate.provisional_speedup,
+                "cold_read_repeat_count": candidate.cold_read_repeat_count,
             }
             for candidate in candidates
         ],
         "final": final.to_wire(),
+        "cold_read_guard": {
+            "audit_fraction": MATERIAL_SHARED_READ_FRACTION,
+            "repeat_fraction": repeat_fraction,
+            "repeat_count": cold_read_repeat_count,
+            "initial_candidate_measurement_count": (
+                initial_candidate_measurement_count
+            ),
+            "retained_candidate_measurement_count": len(
+                retained_candidate_measurements
+            ),
+            "retained_material_shared_read_count": (
+                retained_material_shared_read_count
+            ),
+        },
         "database_calls": {
             "explain": counted.explain_calls,
             "explain_analyze": counted.explain_analyze_calls,
@@ -200,6 +256,32 @@ def direction(value: float, material_ratio: float = 1.0) -> str:
 
 def sign(value: float) -> int:
     return (value > 0) - (value < 0)
+
+
+def summarize_cold_reads(
+    results: list[dict[str, Any]], protocol: MeasurementProtocolId
+) -> dict[str, Any]:
+    guards = [result[protocol]["cold_read_guard"] for result in results]
+    repeat_count = sum(guard["repeat_count"] for guard in guards)
+    initial_count = sum(
+        guard["initial_candidate_measurement_count"] for guard in guards
+    )
+    retained_count = sum(
+        guard["retained_candidate_measurement_count"] for guard in guards
+    )
+    retained_material_count = sum(
+        guard["retained_material_shared_read_count"] for guard in guards
+    )
+    return {
+        "guard_repeat_count": repeat_count,
+        "guard_repeat_rate": (repeat_count / initial_count if initial_count else None),
+        "initial_candidate_measurement_count": initial_count,
+        "retained_candidate_measurement_count": retained_count,
+        "retained_material_shared_read_count": retained_material_count,
+        "retained_material_shared_read_rate": (
+            retained_material_count / retained_count if retained_count else None
+        ),
+    }
 
 
 def correlation(left: list[float], right: list[float]) -> float | None:
@@ -296,6 +378,17 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
             if count
             else None
         ),
+        "cold_read_audit": {
+            "material_shared_read_fraction": MATERIAL_SHARED_READ_FRACTION,
+            MeasurementProtocolId.RL_TRAINING_V1.value: summarize_cold_reads(
+                results, MeasurementProtocolId.RL_TRAINING_V1
+            ),
+            MeasurementProtocolId.RIGOROUS_EVALUATION_V1.value: (
+                summarize_cold_reads(
+                    results, MeasurementProtocolId.RIGOROUS_EVALUATION_V1
+                )
+            ),
+        },
         "training_explain_analyze_calls": sum(
             result["rl-training-v1"]["database_calls"]["explain_analyze"]
             for result in results

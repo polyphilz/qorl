@@ -128,7 +128,11 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 ),
             },
             "candidates": [
-                {**candidate.feedback(), "action": candidate.action}
+                {
+                    **candidate.feedback(),
+                    "action": candidate.action,
+                    "cold_read_repeat_count": candidate.cold_read_repeat_count,
+                }
                 for candidate in evaluator.candidates
             ],
             "final": final.to_wire(),

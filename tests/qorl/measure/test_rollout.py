@@ -15,6 +15,7 @@ from qorl.measure.protocols import QueryExecutor
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RolloutEvaluator,
+    has_material_shared_reads,
     training_protocol,
 )
 from qorl.measure.schemas import (
@@ -22,6 +23,7 @@ from qorl.measure.schemas import (
     Baseline,
     Candidate,
     CandidateOutcome,
+    Measurement,
     MeasurementProtocolId,
     Outcome,
     OutcomeKind,
@@ -174,6 +176,32 @@ class CalibratedTimeoutWorker(CountingWorker):
         return result
 
 
+class ColdReadWorker(CountingWorker):
+    def __init__(self, candidate_buffers: list[tuple[int, int]]) -> None:
+        super().__init__()
+        self.candidate_buffers = iter(candidate_buffers)
+
+    def explain(
+        self,
+        sql: str,
+        timeout_ms: int,
+        *,
+        analyze: bool = False,
+        hint: str = "",
+    ) -> ExplainResult:
+        result = super().explain(
+            sql,
+            timeout_ms,
+            analyze=analyze,
+            hint=hint,
+        )
+        if analyze:
+            hits, reads = next(self.candidate_buffers) if hint else (100, 0)
+            result.document["Plan"]["Shared Hit Blocks"] = hits
+            result.document["Plan"]["Shared Read Blocks"] = reads
+        return result
+
+
 class TestRollout:
     def test_task_relative_timeout(self) -> None:
         assert task_timeout_ms(10, 120_000) == 5_000
@@ -183,6 +211,24 @@ class TestRollout:
     def test_score_is_clipped(self) -> None:
         assert score(100, 1) == 10.0
         assert score(1, 100) == 0.1
+
+    def test_material_shared_reads_require_ten_percent(self) -> None:
+        measurement = Measurement(
+            execution_time_ms=1.0,
+            planning_time_ms=1.0,
+            plan_sha256="plan",
+            shared_hit_blocks=90,
+            shared_read_blocks=10,
+        )
+
+        assert has_material_shared_reads(measurement, 0.10)
+        assert not has_material_shared_reads(measurement, None)
+        assert not has_material_shared_reads(
+            measurement.model_copy(
+                update={"shared_hit_blocks": 91, "shared_read_blocks": 9}
+            ),
+            0.10,
+        )
 
     def test_invalid_action_consumes_attempt(self) -> None:
         evaluator = RolloutEvaluator(
@@ -308,6 +354,11 @@ class TestRollout:
         assert candidates[0].warmup is not None
         assert len(final.pair_orders) == 5
         assert final.measurement_protocol_id == "rigorous-evaluation-v1"
+        assert RIGOROUS_EVALUATION_PROTOCOL_V1.cold_read_repeat_fraction is None
+        assert (
+            RIGOROUS_EVALUATION_PROTOCOL_V1.nominal_explain_analyze_executions_for(5)
+            == 26
+        )
         assert RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions == 26
 
     def test_training_protocol_uses_13_executions(self) -> None:
@@ -328,7 +379,64 @@ class TestRollout:
         assert candidates[0].warmup is None
         assert len(final.pair_orders) == 3
         assert final.measurement_protocol_id == "rl-training-v1"
-        assert protocol.max_explain_analyze_executions == 13
+        assert protocol.nominal_explain_analyze_executions_for(5) == 13
+        assert protocol.max_explain_analyze_executions == 21
+
+    def test_training_protocol_repeats_a_cold_candidate_measurement_once(
+        self,
+    ) -> None:
+        worker = ColdReadWorker([(0, 100), (100, 0)])
+        protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V2)
+        evaluator = RolloutEvaluator(
+            worker,
+            Fixture(),
+            TASK,
+            measurement_protocol=protocol,
+            max_candidates=1,
+        )
+        evaluator.start()
+
+        candidate = evaluator.evaluate(
+            {"version": 1, "settings": {"seq_page_cost": 2.0}}
+        )
+
+        assert worker.analyze_calls == 4
+        assert candidate.cold_read_repeat_count == 1
+        assert "cold_read_repeat_count" not in candidate.feedback()
+        assert candidate.to_wire()["cold_read_repeat_count"] == 1
+        assert len(candidate.provisional_measurements) == 1
+        assert candidate.provisional_measurements[0].shared_read_blocks == 0
+        assert protocol.manifest(1)["nominal_explain_analyze_executions"] == 9
+        assert protocol.manifest(1)["max_explain_analyze_executions"] == 13
+
+    def test_training_protocol_does_not_repeat_a_replacement(self) -> None:
+        worker = ColdReadWorker(
+            [
+                (100, 0),
+                (0, 100),
+                (0, 100),
+                (100, 0),
+                (100, 0),
+            ]
+        )
+        evaluator = RolloutEvaluator(
+            worker,
+            Fixture(),
+            TASK,
+            measurement_protocol=training_protocol(
+                MeasurementProtocolId.RL_TRAINING_V2
+            ),
+            max_candidates=1,
+        )
+        evaluator.start()
+        evaluator.evaluate({"version": 1, "settings": {"seq_page_cost": 2.0}})
+
+        final = evaluator.finish(random.Random(0))
+
+        assert worker.analyze_calls == 10
+        assert final.cold_read_repeat_count == 1
+        assert len(final.candidate_measurements) == 3
+        assert final.candidate_measurements[0].shared_read_blocks == 100
 
     def test_serialized_rollout_record_is_unchanged(self) -> None:
         evaluator = RolloutEvaluator(
@@ -457,7 +565,7 @@ class TestRollout:
         with pytest.raises(RuntimeError, match="default plan differs"):
             evaluator.start()
         assert evaluator.measurement_protocol.protocol_id == "rl-training-v2"
-        assert protocol.max_explain_analyze_executions == 13
+        assert protocol.max_explain_analyze_executions == 21
 
     @staticmethod
     def run_full_rollout(
