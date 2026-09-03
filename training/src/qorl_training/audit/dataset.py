@@ -60,9 +60,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(arguments.model)
-    renderer = create_renderer(
-        tokenizer, Qwen35RendererConfig(enable_thinking=False)
-    )
+    renderer = create_renderer(tokenizer, Qwen35RendererConfig(enable_thinking=False))
     role_tokens: Counter[str] = Counter()
     trainable_role_tokens: Counter[str] = Counter()
     split_counts: Counter[str] = Counter()
@@ -113,9 +111,7 @@ def main() -> None:
                 fail(f"{partition}[{index}] has an unsupervised assistant turn")
 
             last_trainable = max(
-                position
-                for position, enabled in enumerate(sample.loss_mask)
-                if enabled
+                position for position, enabled in enumerate(sample.loss_mask) if enabled
             )
             if sample.token_ids[last_trainable] not in renderer.get_stop_token_ids():
                 fail(f"{partition}[{index}] final assistant turn has no stop token")
@@ -171,9 +167,7 @@ def main() -> None:
         "seed": arguments.seed,
         "counts": dict(sorted(split_counts.items())),
         "packed_rows": {
-            partition: packed_rows(
-                lengths, arguments.sequence_length, arguments.seed
-            )
+            partition: packed_rows(lengths, arguments.sequence_length, arguments.seed)
             for partition, lengths in split_lengths.items()
         },
         "rendered_tokens_after_shift": distribution(rendered_lengths),

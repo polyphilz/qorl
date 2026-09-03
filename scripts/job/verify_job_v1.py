@@ -9,12 +9,11 @@ import os
 import re
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from qorl.util.hashing import sha256_bytes, sha256_file
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
@@ -27,8 +26,7 @@ def run(command: list[str], *, input_text: str | None = None) -> str:
         command,
         input=input_text,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if completed.returncode != 0:
@@ -47,7 +45,7 @@ def fingerprint(value: Any) -> str:
 
 
 def admin_psql(container: str, sql: str) -> str:
-    shell = r'''
+    shell = r"""
 exec psql \
     --username="$POSTGRES_USER" \
     --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
@@ -56,7 +54,7 @@ exec psql \
     --quiet \
     --tuples-only \
     --no-align
-'''
+"""
     return run(
         [
             "docker",
@@ -74,7 +72,7 @@ exec psql \
 
 
 def runner_psql(container: str, sql: str) -> str:
-    shell = r'''
+    shell = r"""
 exec env \
     PGPASSWORD="$QORL_RUNNER_PASSWORD" \
     PGAPPNAME=qorl-job-v1-query-verifier \
@@ -86,7 +84,7 @@ exec env \
         --set=ON_ERROR_STOP=1 \
         --quiet \
         --csv
-'''
+"""
     return run(
         [
             "docker",
@@ -249,9 +247,7 @@ WHERE database_row.datname = current_database();
     return json.loads(admin_psql(container, sql))
 
 
-def validate_database_state(
-    state: dict[str, Any], manifest: dict[str, Any]
-) -> None:
+def validate_database_state(state: dict[str, Any], manifest: dict[str, Any]) -> None:
     expected_rows = {
         member["table"]: member["rows"]
         for member in manifest["dataset"]["members"].values()
@@ -283,9 +279,7 @@ def validate_database_state(
     primary_count = sum(index["primary"] for index in indexes)
     secondary_count = sum(not index["primary"] for index in indexes)
     invalid = [
-        index["name"]
-        for index in indexes
-        if not index["valid"] or not index["ready"]
+        index["name"] for index in indexes if not index["valid"] or not index["ready"]
     ]
     if len(indexes) != database["expected_total_index_count"]:
         raise RuntimeError(f"unexpected total index count: {len(indexes)}")
@@ -305,7 +299,9 @@ def validate_database_state(
 
     max_frozen_age = max(row["frozen_xid_age"] for row in state["relations"])
     if max_frozen_age > 1000:
-        raise RuntimeError(f"JOB relations were not freshly frozen: max age={max_frozen_age}")
+        raise RuntimeError(
+            f"JOB relations were not freshly frozen: max age={max_frozen_age}"
+        )
 
 
 def representative_query_outputs(
@@ -361,9 +357,7 @@ def main() -> None:
         ]
     )
 
-    state = load_database_state(
-        args.container, manifest["load"]["table_order"]
-    )
+    state = load_database_state(args.container, manifest["load"]["table_order"])
     validate_database_state(state, manifest)
     query_outputs = representative_query_outputs(
         args.container,
@@ -381,15 +375,14 @@ def main() -> None:
         "representative_query_outputs": query_outputs,
     }
     fingerprints = {
-        name: fingerprint(value)
-        for name, value in sorted(fingerprint_sections.items())
+        name: fingerprint(value) for name, value in sorted(fingerprint_sections.items())
     }
 
     result = {
         "schema_version": 1,
         "fixture_id": manifest["fixture_id"],
         "phase": args.phase,
-        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "captured_at_utc": datetime.now(UTC).isoformat(),
         "source_manifest_sha256": sha256_file(args.manifest),
         "database": state,
         "representative_query_outputs": query_outputs,

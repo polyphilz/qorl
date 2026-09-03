@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from qorl.plans.action import ActionError, TaskCatalog, compile_action, plan_action_schema
-
+from qorl.plans.action import (
+    ActionError,
+    TaskCatalog,
+    compile_action,
+    plan_action_schema,
+)
 
 TASK = {
     "relations": [
@@ -26,9 +30,7 @@ class ActionTest(unittest.TestCase):
             compile_action(
                 {
                     "version": 1,
-                    "scans": [
-                        {"relation": "a", "forbid": [{"method": "seq"}]}
-                    ],
+                    "scans": [{"relation": "a", "forbid": [{"method": "seq"}]}],
                 },
                 self.catalog,
             )
@@ -75,9 +77,7 @@ class ActionTest(unittest.TestCase):
                         "forbid": ["seq"],
                     }
                 ],
-                "disabled_indexes": [
-                    {"relation": "b", "indexes": ["table_b_pkey"]}
-                ],
+                "disabled_indexes": [{"relation": "b", "indexes": ["table_b_pkey"]}],
                 "joins": [
                     {
                         "relations": ["b", "c"],
@@ -136,9 +136,7 @@ class ActionTest(unittest.TestCase):
             compile_action(
                 {
                     "version": 1,
-                    "scans": [
-                        {"relation": "a", "force": "seq", "forbid": ["seq"]}
-                    ],
+                    "scans": [{"relation": "a", "force": "seq", "forbid": ["seq"]}],
                 },
                 self.catalog,
             )
@@ -164,9 +162,7 @@ class ActionTest(unittest.TestCase):
 
     def test_rejects_unallowlisted_setting(self) -> None:
         with self.assertRaisesRegex(ActionError, "unknown fields"):
-            compile_action(
-                {"version": 1, "settings": {"work_mem": 1024}}, self.catalog
-            )
+            compile_action({"version": 1, "settings": {"work_mem": 1024}}, self.catalog)
 
     def test_rejects_setting_that_disables_forced_method(self) -> None:
         with self.assertRaisesRegex(ActionError, "both forces hash"):
@@ -201,9 +197,7 @@ class ActionTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertNotIn(name, settings)
                 with self.assertRaisesRegex(ActionError, "unknown fields"):
-                    compile_action(
-                        {"version": 1, "settings": {name: 1}}, self.catalog
-                    )
+                    compile_action({"version": 1, "settings": {name: 1}}, self.catalog)
 
     def test_parallel_workers_are_capped_at_two(self) -> None:
         parallel = plan_action_schema()["properties"]["parallel"]["items"]
@@ -219,9 +213,7 @@ class ActionTest(unittest.TestCase):
             compile_action(
                 {
                     "version": 1,
-                    "parallel": [
-                        {"relation": "a", "workers": 3, "mode": "hard"}
-                    ],
+                    "parallel": [{"relation": "a", "workers": 3, "mode": "hard"}],
                 },
                 self.catalog,
             )

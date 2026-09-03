@@ -5,9 +5,7 @@ from qorl.evaluation.benchmark import run_benchmark
 
 
 def run_random_benchmark(repository: Path) -> Path:
-    return run_benchmark(
-        repository, "experiments/000-vanilla-baseline/random.json"
-    )
+    return run_benchmark(repository, "experiments/000-vanilla-baseline/random.json")
 
 
 def main() -> None:

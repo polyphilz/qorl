@@ -6,7 +6,6 @@ import unittest
 from qorl.evaluation.baselines.random import FAMILY_WEIGHTS, sample_action
 from qorl.plans.action import TaskCatalog, normalize_action
 
-
 TASK = {
     "relations": [
         {"alias": "a", "table": "table_a"},
@@ -52,5 +51,7 @@ class RandomPolicyTest(unittest.TestCase):
         }
         for _ in range(2_000):
             action = sample_action(self.catalog, rng)
-            observed.update(field_to_family[field] for field in action if field != "version")
+            observed.update(
+                field_to_family[field] for field in action if field != "version"
+            )
         self.assertEqual(observed, set(FAMILY_WEIGHTS))

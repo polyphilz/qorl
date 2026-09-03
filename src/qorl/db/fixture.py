@@ -41,7 +41,9 @@ class DatabaseFixture:
         repository = repository.resolve()
         manifest_path = repository / "artifacts/job-v1/job-v1.snapshot.json"
         if not manifest_path.is_file():
-            raise FixtureError(f"required database snapshot is missing: {manifest_path}")
+            raise FixtureError(
+                f"required database snapshot is missing: {manifest_path}"
+            )
 
         snapshot = json.loads(manifest_path.read_text(encoding="utf-8"))
         archive_name = snapshot["archive"]["filename"]
@@ -74,9 +76,7 @@ class DatabaseFixture:
     def runtime_identity(self) -> dict[str, str]:
         return {
             "postgres_image_id": self.snapshot["image"]["id"],
-            "benchmark_config_id": self.snapshot["image"][
-                "benchmark_config_id"
-            ],
+            "benchmark_config_id": self.snapshot["image"]["benchmark_config_id"],
         }
 
     def verify_archive(self) -> None:

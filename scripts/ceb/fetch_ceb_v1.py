@@ -17,7 +17,6 @@ from typing import Any
 
 from qorl.util.hashing import sha256_stream
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/ceb-v1"
@@ -73,15 +72,14 @@ def selected_members(
     archive_specification = manifest["provenance"]["immutable_archive"]
     if len(archive_members) != archive_specification["members"]:
         raise RuntimeError("archive member count differs")
-    if sum(member.isfile() for member in archive_members) != archive_specification[
-        "regular_files"
-    ]:
+    if (
+        sum(member.isfile() for member in archive_members)
+        != archive_specification["regular_files"]
+    ):
         raise RuntimeError("archive regular-file count differs")
     roots: set[str] = set()
     selected: dict[str, tarfile.TarInfo] = {}
-    counts: dict[str, Counter[str]] = {
-        key: Counter() for key in TREE_NAMES
-    }
+    counts: dict[str, Counter[str]] = {key: Counter() for key in TREE_NAMES}
     for member in archive_members:
         path = safe_path(member.name)
         if path.parts:
@@ -136,10 +134,7 @@ def verify_extracted(
     members: dict[str, tarfile.TarInfo],
     target: Path,
 ) -> None:
-    actual = {
-        path.relative_to(target).as_posix()
-        for path in target.glob("*/*/*.pkl")
-    }
+    actual = {path.relative_to(target).as_posix() for path in target.glob("*/*/*.pkl")}
     if actual != set(members):
         raise RuntimeError("extracted CEB file set differs from the pinned archive")
     for relative, member in sorted(members.items()):

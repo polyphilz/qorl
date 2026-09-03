@@ -35,8 +35,7 @@ def main() -> None:
     checkpoint_keys = sorted(
         key
         for key in metadata.state_dict_metadata
-        if key.startswith("app.model.")
-        and (".lora_A." in key or ".lora_B." in key)
+        if key.startswith("app.model.") and (".lora_A." in key or ".lora_B." in key)
     )
     if not checkpoint_keys:
         raise RuntimeError("checkpoint contains no model LoRA tensors")

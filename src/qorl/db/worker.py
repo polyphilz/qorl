@@ -23,7 +23,7 @@ class WorkerError(RuntimeError):
     pass
 
 
-class QueryTimeout(WorkerError):
+class QueryTimeout(WorkerError):  # noqa: N818
     def __init__(self, timeout_ms: int) -> None:
         super().__init__(f"query exceeded statement_timeout={timeout_ms} ms")
         self.timeout_ms = timeout_ms
@@ -48,8 +48,7 @@ def execute(
         cwd=cwd,
         input=input_text,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
         env=environment,
     )
@@ -196,7 +195,7 @@ class PostgresWorker:
                 "inspect",
                 self.container,
                 "--format",
-                "{{range .Mounts}}{{if eq .Destination \"/var/lib/postgresql\"}}{{.Name}}{{end}}{{end}}",
+                '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}',
             ]
         ).strip()
         if not volume:
@@ -242,9 +241,7 @@ test ! -e "/target/$2/postmaster.pid"
         print("Starting PostgreSQL worker...")
         self.compose_command("up", "--detach", "--wait", "--no-build", "postgres")
         self.container = self.compose_command("ps", "--quiet", "postgres").strip()
-        self.command(
-            ["docker", "exec", self.container, "qorl-assert-benchmark-config"]
-        )
+        self.command(["docker", "exec", self.container, "qorl-assert-benchmark-config"])
         actual_system_identifier = self.admin_sql(
             "SELECT system_identifier FROM pg_control_system();"
         ).strip()
@@ -316,9 +313,7 @@ exec env \
         if not missing:
             return {name: self._settings_cache[name] for name in sorted(names)}
         ordered = sorted(missing)
-        literals = ", ".join(
-            "'" + name.replace("'", "''") + "'" for name in ordered
-        )
+        literals = ", ".join("'" + name.replace("'", "''") + "'" for name in ordered)
         output = self.runner_sql(
             "SELECT json_object_agg(name, setting ORDER BY name) "
             "FROM pg_settings "
@@ -327,9 +322,7 @@ exec env \
         values = json.loads(output)
         if not isinstance(values, dict) or set(values) != missing:
             raise WorkerError("PostgreSQL planner-setting response is incomplete")
-        self._settings_cache.update(
-            {name: str(values[name]) for name in ordered}
-        )
+        self._settings_cache.update({name: str(values[name]) for name in ordered})
         return {name: self._settings_cache[name] for name in sorted(names)}
 
     def explain(
@@ -343,13 +336,10 @@ exec env \
         self.explain_calls += 1
         self.explain_analyze_calls += int(analyze)
         explain_options = (
-            "ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON"
-            if analyze
-            else "FORMAT JSON"
+            "ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON" if analyze else "FORMAT JSON"
         )
         debug_options = (
-            " -c pg_hint_plan.debug_print=detailed"
-            " -c pg_hint_plan.message_level=notice"
+            " -c pg_hint_plan.debug_print=detailed -c pg_hint_plan.message_level=notice"
             if hint
             else ""
         )
@@ -428,9 +418,7 @@ exec env \
                 "--phase",
                 phase,
                 "--runtime-profile",
-                str(
-                    self.fixture.repository / self.runtime_profile.path
-                ),
+                str(self.fixture.repository / self.runtime_profile.path),
             ]
         )
 

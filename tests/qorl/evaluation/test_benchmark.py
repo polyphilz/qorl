@@ -31,15 +31,11 @@ class BenchmarkTest(unittest.TestCase):
             "qorl.evaluation.benchmark.run_task",
             return_value={"status": "completed"},
         ) as run_task:
-            claimed, result = run_task_on_worker(
-                pool, task_set, task, policy, agent
-            )
+            claimed, result = run_task_on_worker(pool, task_set, task, policy, agent)
 
         self.assertIs(claimed, slot)
         self.assertEqual(result["worker"], {"slot": 2})
-        run_task.assert_called_once_with(
-            slot.worker, task_set, task, policy, agent
-        )
+        run_task.assert_called_once_with(slot.worker, task_set, task, policy, agent)
 
     def test_run_config_loads_its_shared_policy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -79,9 +75,7 @@ class BenchmarkTest(unittest.TestCase):
     def test_summary_reports_primary_metrics(self) -> None:
         results = [
             {
-                "candidates": [
-                    {"constraints_satisfied": True, "duplicate_of": None}
-                ],
+                "candidates": [{"constraints_satisfied": True, "duplicate_of": None}],
                 "final": {
                     "status": "completed",
                     "score": 2.0,
@@ -90,9 +84,7 @@ class BenchmarkTest(unittest.TestCase):
                 },
             },
             {
-                "candidates": [
-                    {"constraints_satisfied": False, "duplicate_of": None}
-                ],
+                "candidates": [{"constraints_satisfied": False, "duplicate_of": None}],
                 "final": {"status": "no_valid_candidate"},
             },
         ]

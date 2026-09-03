@@ -24,15 +24,15 @@ from qorl.agent.client import ModelError
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
-from qorl.util.hashing import sha256_file
-from qorl.util.io import utc_now, write_json
-from qorl.workload.taskset import TaskSet
-from qorl.measure.rollout import RolloutEvaluator
 from qorl.evaluation.live_validation import (
     adapter_path,
     trace_metrics,
     wait_for_server,
 )
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.util.hashing import sha256_file
+from qorl.util.io import utc_now, write_json
+from qorl.workload.taskset import TaskSet
 
 CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
@@ -290,9 +290,7 @@ def main() -> None:
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(
-        repository, config["task_set"], fixture.data_identity
-    )
+    task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
     if len(seeds) != 4 or len(set(seeds)) != 4:

@@ -9,7 +9,6 @@ import verifiers.v1 as vf
 
 from qorl.workload.taskset import TaskSet
 
-
 SELECTION_SPLITS = {
     "qorl-rl-pilot-v1": {"spike", "train", "validation"},
     "qorl-rl-run-v2": {"train"},
@@ -26,7 +25,7 @@ def selected_items(selection: dict, split: str) -> list[dict[str, str]]:
 
 
 class QorlTasksetConfig(vf.TasksetConfig):
-    repository: Path = Path(".")
+    repository: Path = Path()
     selection: Path = Path("experiments/003-rl-pilot-v1/selection.json")
     split: Literal["spike", "train", "validation"] = "spike"
 
@@ -72,9 +71,7 @@ class QorlTask(vf.Task[QorlTaskData]):
                 and final.get("decision") != "keep_default"
             ),
             "kept_default": float(final.get("decision") == "keep_default"),
-            "final_candidate_timeout": float(
-                final["status"] == "candidate_timeout"
-            ),
+            "final_candidate_timeout": float(final["status"] == "candidate_timeout"),
             "final_speedup": float(final.get("score", 0.0)),
             "model_turns": float(len(trace.calls)),
             "total_tokens": float(trace.num_total_tokens),

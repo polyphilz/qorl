@@ -6,8 +6,9 @@ import json
 import math
 import statistics
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from qorl.util.io import write_json
 
@@ -51,9 +52,8 @@ def rescored_reward(record: dict[str, Any]) -> float:
     if not matches_default(record):
         return original_reward(record)
     final = qorl_result(record)["final"]
-    return (
-        -0.10 * int(final["invalid_attempt_count"])
-        - 0.05 * int(final["duplicate_attempt_count"])
+    return -0.10 * int(final["invalid_attempt_count"]) - 0.05 * int(
+        final["duplicate_attempt_count"]
     )
 
 
@@ -65,29 +65,21 @@ def geometric_mean(values: list[float]) -> float | None:
 
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     original_scores = [
-        row["original_score"]
-        for row in rows
-        if row["original_score"] is not None
+        row["original_score"] for row in rows if row["original_score"] is not None
     ]
     rescored_scores = [
-        row["rescored_score"]
-        for row in rows
-        if row["rescored_score"] is not None
+        row["rescored_score"] for row in rows if row["rescored_score"] is not None
     ]
     matches = [row for row in rows if row["default_fingerprint_match"]]
 
     def advantage_summary(prefix: str) -> dict[str, float]:
         absolute = sum(abs(row[f"{prefix}_advantage"]) for row in rows)
         token_weighted = sum(
-            abs(row[f"{prefix}_advantage"]) * row["output_tokens"]
-            for row in rows
+            abs(row[f"{prefix}_advantage"]) * row["output_tokens"] for row in rows
         )
-        match_absolute = sum(
-            abs(row[f"{prefix}_advantage"]) for row in matches
-        )
+        match_absolute = sum(abs(row[f"{prefix}_advantage"]) for row in matches)
         match_token_weighted = sum(
-            abs(row[f"{prefix}_advantage"]) * row["output_tokens"]
-            for row in matches
+            abs(row[f"{prefix}_advantage"]) * row["output_tokens"] for row in matches
         )
         return {
             "scalar_absolute_mass": absolute,
@@ -112,25 +104,19 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "original": {
             "geometric_mean_speedup": geometric_mean(original_scores),
-            "mean_reward": statistics.fmean(
-                row["original_reward"] for row in rows
-            ),
+            "mean_reward": statistics.fmean(row["original_reward"] for row in rows),
             "advantage": original_advantage,
         },
         "rescored": {
             "geometric_mean_speedup": geometric_mean(rescored_scores),
-            "mean_reward": statistics.fmean(
-                row["rescored_reward"] for row in rows
-            ),
+            "mean_reward": statistics.fmean(row["rescored_reward"] for row in rows),
             "advantage": rescored_advantage,
         },
         "change": {
             "geometric_mean_speedup": (
                 geometric_mean(rescored_scores) - geometric_mean(original_scores)
             ),
-            "mean_reward": statistics.fmean(
-                row["rescored_reward"] for row in rows
-            )
+            "mean_reward": statistics.fmean(row["rescored_reward"] for row in rows)
             - statistics.fmean(row["original_reward"] for row in rows),
             "scalar_absolute_advantage_mass": (
                 rescored_advantage["scalar_absolute_mass"]
@@ -181,9 +167,7 @@ def rescore(run_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 "task_id": result["task_id"],
                 "default_fingerprint_match": default_match,
                 "original_score": (
-                    float(final["score"])
-                    if final["status"] == "completed"
-                    else None
+                    float(final["score"]) if final["status"] == "completed" else None
                 ),
                 "rescored_score": (
                     1.0
@@ -196,9 +180,7 @@ def rescore(run_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 "rescored_reward": rescored_reward(record),
                 "original_advantage": original_advantage,
                 "rescored_advantage": rescored_reward(record) - rescored_mean,
-                "output_tokens": float(
-                    record["trace"]["metrics"]["output_tokens"]
-                ),
+                "output_tokens": float(record["trace"]["metrics"]["output_tokens"]),
             }
         )
 

@@ -10,24 +10,24 @@ import time
 import urllib.error
 import urllib.request
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
+from qorl.adapters.model import model_snapshot
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.protocol import AgentProtocol
-from qorl.adapters.model import model_snapshot
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
-from qorl.measure.rollout import RolloutEvaluator
-
 
 BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
@@ -255,9 +255,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "available_tool_call_rate": ratio(
             totals["available_tool_calls"], totals["tool_calls"]
         ),
-        "valid_tool_call_rate": ratio(
-            totals["valid_tool_calls"], totals["tool_calls"]
-        ),
+        "valid_tool_call_rate": ratio(totals["valid_tool_calls"], totals["tool_calls"]),
         "inspection_argument_validity_rate": ratio(
             totals["valid_inspection_calls"], totals["inspection_calls"]
         ),
@@ -286,18 +284,10 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "repeated_inspection_call_count": totals["repeated_inspection_calls"],
         "duplicate_candidate_count": totals["duplicate_candidates"],
         "unique_normalized_action_count": len(
-            {
-                value
-                for item in metrics
-                for value in item["normalized_action_sha256s"]
-            }
+            {value for item in metrics for value in item["normalized_action_sha256s"]}
         ),
         "unique_novel_plan_count": len(
-            {
-                value
-                for item in metrics
-                for value in item["novel_plan_sha256s"]
-            }
+            {value for item in metrics for value in item["novel_plan_sha256s"]}
         ),
         "median_turn_to_first_candidate": (
             statistics.median(first_turns) if first_turns else None
@@ -368,9 +358,7 @@ def evaluate_policy(
         )
 
     with ThreadPoolExecutor(max_workers=CONCURRENCY) as executor:
-        futures: dict[
-            Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
-        ] = {
+        futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
             executor.submit(
                 evaluate_live_task,
                 pool,
@@ -394,7 +382,9 @@ def evaluate_policy(
                 terminal = (
                     "keep_default"
                     if metrics["keep_default_calls"]
-                    else "finish" if metrics["finish_calls"] else "none"
+                    else "finish"
+                    if metrics["finish_calls"]
+                    else "none"
                 )
                 print(
                     "  "
@@ -460,18 +450,20 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    run_policy = json.loads(
-        (repository / "configs/policy/run-v1.json").read_text()
-    )["policy"]
+    run_policy = json.loads((repository / "configs/policy/run-v1.json").read_text())[
+        "policy"
+    ]
     snapshot = model_snapshot(run_policy)
     adapter = adapter_path(repository) if arguments.policies != "base" else None
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
-    started = datetime.now(timezone.utc)
-    output_dir = repository / "outputs/sft" / started.strftime(
-        "protocol-sft-live-v1-%Y%m%dT%H%M%SZ"
+    started = datetime.now(UTC)
+    output_dir = (
+        repository
+        / "outputs/sft"
+        / started.strftime("protocol-sft-live-v1-%Y%m%dT%H%M%SZ")
     )
     output_dir.mkdir(parents=True, exist_ok=False)
     log_path = output_dir / "vllm.log"
@@ -530,9 +522,7 @@ def main() -> None:
         "database_pool": None,
         "task_count": len(tasks),
         "task_ids": [task["task_id"] for task in tasks],
-        "dataset_manifest_sha256": sha256_file(
-            repository / DATASET / "manifest.json"
-        ),
+        "dataset_manifest_sha256": sha256_file(repository / DATASET / "manifest.json"),
         "dataset_id": dataset["dataset_id"],
         "adapter_manifest_sha256": (
             sha256_file(adapter / "qorl-manifest.json") if adapter else None

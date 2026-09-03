@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -74,16 +75,13 @@ def relation_set(plan: dict[str, Any]) -> frozenset[str]:
     )
 
 
-def matching_join(
-    plan: dict[str, Any], relations: list[str]
-) -> dict[str, Any] | None:
+def matching_join(plan: dict[str, Any], relations: list[str]) -> dict[str, Any] | None:
     target = frozenset(relations)
     return next(
         (
             node
             for node in nodes(plan)
-            if node.get("Node Type") in JOIN_METHODS
-            and relation_set(node) == target
+            if node.get("Node Type") in JOIN_METHODS and relation_set(node) == target
         ),
         None,
     )
@@ -94,8 +92,7 @@ def matching_scan(plan: dict[str, Any], relation: str) -> dict[str, Any] | None:
         (
             node
             for node in nodes(plan)
-            if node.get("Alias") == relation
-            and node.get("Node Type") in SCAN_METHODS
+            if node.get("Alias") == relation and node.get("Node Type") in SCAN_METHODS
         ),
         None,
     )
@@ -175,7 +172,9 @@ def verify_action(
         expected = action_join_tree(action["leading"])
         actual = plan_join_tree(plan)
         if expected != actual:
-            errors.append(f"leading join tree differs: expected={expected} actual={actual}")
+            errors.append(
+                f"leading join tree differs: expected={expected} actual={actual}"
+            )
 
     for item in action.get("joins", []):
         join = matching_join(plan, item["relations"])
@@ -201,9 +200,7 @@ def verify_action(
             continue
         method = SCAN_METHODS[scan["Node Type"]]
         if item["force"] != "auto" and method != item["force"]:
-            errors.append(
-                f"scan {item['relation']} uses {method}, not {item['force']}"
-            )
+            errors.append(f"scan {item['relation']} uses {method}, not {item['force']}")
         if method in item["forbid"]:
             errors.append(f"scan {item['relation']} uses forbidden method {method}")
         if item["indexes"]:
@@ -230,7 +227,9 @@ def verify_action(
     for item in action.get("parallel", []):
         scan = matching_scan(plan, item["relation"])
         if scan is None:
-            errors.append(f"parallel target does not exist in the plan: {item['relation']}")
+            errors.append(
+                f"parallel target does not exist in the plan: {item['relation']}"
+            )
             continue
         parallel = bool(scan.get("Parallel Aware"))
         if item["workers"] == 0 and parallel:

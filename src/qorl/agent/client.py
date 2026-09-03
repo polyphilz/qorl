@@ -25,9 +25,7 @@ class OpenAIModelClient:
         self.timeout_seconds = timeout_seconds
         self.api_key = api_key
 
-    def request(
-        self, path: str, body: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def request(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         api_key = self.api_key or os.environ.get("QORL_MODEL_API_KEY")

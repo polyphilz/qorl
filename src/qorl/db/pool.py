@@ -17,7 +17,6 @@ from qorl.db.resources import (
 )
 from qorl.db.worker import PostgresWorker
 
-
 DEFAULT_POOL_CONFIG = DEFAULT_TRAINING_PROFILE
 
 

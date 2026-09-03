@@ -4,7 +4,6 @@ import hashlib
 import json
 from typing import Any
 
-
 PLAN_FINGERPRINT_VERSION = 3
 
 RUNTIME_PLAN_KEYS = {

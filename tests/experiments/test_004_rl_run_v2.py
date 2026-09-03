@@ -6,7 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -21,9 +20,7 @@ def test_inventory_is_deterministic_balanced_and_new(
     assert actual == builder["build"](source, pilot)
     selected = actual["splits"]["train"]
     prior_ids = {
-        item["task_id"]
-        for split in pilot["splits"].values()
-        for item in split
+        item["task_id"] for split in pilot["splits"].values() for item in split
     }
     assert len(selected) == 400
     assert len({item["task_id"] for item in selected}) == 400

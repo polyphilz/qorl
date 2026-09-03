@@ -31,9 +31,7 @@ class RewardProtocolAuditTest(unittest.TestCase):
         self.assertEqual(direction(0.979, 1.02), "regressed")
 
     def test_summary_distinguishes_strict_and_material_agreement(self) -> None:
-        summary = summarize(
-            [result(1.01, 0.99), result(1.20, 1.10)], 1.02
-        )
+        summary = summarize([result(1.01, 0.99), result(1.20, 1.10)], 1.02)
 
         self.assertEqual(summary["strict_speedup_direction_agreement_count"], 1)
         self.assertEqual(summary["material_direction_agreement_count"], 2)

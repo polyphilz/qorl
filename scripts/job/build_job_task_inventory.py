@@ -17,13 +17,14 @@ from qorl.workload.query_structure import (
     extract_join_structure as extract_structure,
 )
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
 DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "data/raw/job-v1/source"
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "data/job"
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
+
+
 def natural_query_key(path: Path) -> tuple[int, str]:
     match = QUERY_NAME.fullmatch(path.name)
     if not match:
@@ -38,7 +39,9 @@ def query_manifest_sha256(queries: list[Path]) -> str:
     return digest.hexdigest()
 
 
-def build_tasks(source_dir: Path, query_glob: str) -> tuple[list[dict[str, Any]], list[Path]]:
+def build_tasks(
+    source_dir: Path, query_glob: str
+) -> tuple[list[dict[str, Any]], list[Path]]:
     queries = sorted(source_dir.glob(query_glob), key=natural_query_key)
     tasks: list[dict[str, Any]] = []
     for query in queries:
@@ -109,7 +112,9 @@ def build_inventory(
     elif existing_database:
         database = existing_database
     else:
-        raise RuntimeError("a snapshot manifest is required when creating the inventory")
+        raise RuntimeError(
+            "a snapshot manifest is required when creating the inventory"
+        )
 
     template_ids = sorted({task["template_id"] for task in tasks})
     inventory = {
@@ -137,9 +142,13 @@ def build_inventory(
     return inventory, queries
 
 
-def write_inventory(output_dir: Path, inventory: dict[str, Any], queries: list[Path]) -> None:
+def write_inventory(
+    output_dir: Path, inventory: dict[str, Any], queries: list[Path]
+) -> None:
     if output_dir.exists() and any(output_dir.iterdir()):
-        raise RuntimeError(f"refusing to overwrite non-empty output directory: {output_dir}")
+        raise RuntimeError(
+            f"refusing to overwrite non-empty output directory: {output_dir}"
+        )
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
         tempfile.mkdtemp(prefix=f".{output_dir.name}.build.", dir=output_dir.parent)
@@ -173,10 +182,7 @@ def check_inventory(
         snapshot_database = snapshot_data_identity(
             snapshot_manifest_path, sha256_file(source_manifest_path)
         )
-        existing_data = {
-            name: existing["database"][name]
-            for name in snapshot_database
-        }
+        existing_data = {name: existing["database"][name] for name in snapshot_database}
         if existing_data != snapshot_database:
             raise RuntimeError(
                 "checked-in inventory and snapshot contain different data"
@@ -188,7 +194,9 @@ def check_inventory(
         existing_database=existing["database"],
     )
     if existing != expected:
-        raise RuntimeError("checked-in tasks.json does not match the pinned JOB sources")
+        raise RuntimeError(
+            "checked-in tasks.json does not match the pinned JOB sources"
+        )
 
     expected_names = {query.name for query in source_queries}
     query_dir = output_dir / "queries"
@@ -202,7 +210,9 @@ def check_inventory(
     for source_query in source_queries:
         checked_in = query_dir / source_query.name
         if source_query.read_bytes() != checked_in.read_bytes():
-            raise RuntimeError(f"checked-in SQL differs from source: {source_query.name}")
+            raise RuntimeError(
+                f"checked-in SQL differs from source: {source_query.name}"
+            )
 
 
 def main() -> None:

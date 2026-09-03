@@ -74,7 +74,9 @@ def main() -> None:
     if forbidden:
         fail(f"non-assistant tokens contribute to loss: {forbidden}")
     assistant_indexes = [
-        index for index, message in enumerate(messages) if message["role"] == "assistant"
+        index
+        for index, message in enumerate(messages)
+        if message["role"] == "assistant"
     ]
     if any(message.get("reasoning_content") for message in messages):
         fail("demonstration contains reasoning despite thinking being disabled")

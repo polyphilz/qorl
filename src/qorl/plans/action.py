@@ -70,10 +70,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
         "uniqueItems": True,
     }
     settings = {
-        **{
-            name: {"type": "boolean"}
-            for name in sorted(BOOLEAN_SETTINGS)
-        },
+        **{name: {"type": "boolean"} for name in sorted(BOOLEAN_SETTINGS)},
         **{
             name: {"type": "number", "minimum": bounds[0], "maximum": bounds[1]}
             for name, bounds in sorted(NUMERIC_SETTINGS.items())
@@ -237,7 +234,7 @@ def plan_action_schema(relations: list[str] | None = None) -> dict[str, Any]:
                     relation,
                     {"$ref": "#/$defs/join_node"},
                 ]
-            }
+            },
         },
     }
 
@@ -335,7 +332,10 @@ def require_indexes(
     value: Any, relation: str, catalog: TaskCatalog, label: str
 ) -> list[str]:
     indexes = require_list(value, label)
-    if any(not isinstance(index, str) or not IDENTIFIER.fullmatch(index) for index in indexes):
+    if any(
+        not isinstance(index, str) or not IDENTIFIER.fullmatch(index)
+        for index in indexes
+    ):
         raise ActionError(f"{label} contains an invalid index name")
     if len(indexes) != len(set(indexes)):
         raise ActionError(f"{label} contains duplicate indexes")
@@ -348,9 +348,7 @@ def require_indexes(
 def normalize_leading(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
     leaves: list[str] = []
 
-    def visit(
-        node: Any, label: str
-    ) -> tuple[str | dict[str, Any], frozenset[str]]:
+    def visit(node: Any, label: str) -> tuple[str | dict[str, Any], frozenset[str]]:
         if isinstance(node, str):
             relation = require_relation(node, catalog, label)
             leaves.append(relation)
@@ -361,8 +359,7 @@ def normalize_leading(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         left, left_relations = visit(item["left"], f"{label}.left")
         right, right_relations = visit(item["right"], f"{label}.right")
         if not any(
-            catalog.adjacency[relation] & right_relations
-            for relation in left_relations
+            catalog.adjacency[relation] & right_relations for relation in left_relations
         ):
             raise ActionError(f"{label} joins disconnected subtrees")
         return (
@@ -381,7 +378,11 @@ def normalize_leading(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
 
 
 def normalize_settings(value: Any) -> dict[str, bool | int | float]:
-    settings = require_object(value or {}, "settings", BOOLEAN_SETTINGS | NUMERIC_SETTINGS.keys() | INTEGER_SETTINGS.keys())
+    settings = require_object(
+        value or {},
+        "settings",
+        BOOLEAN_SETTINGS | NUMERIC_SETTINGS.keys() | INTEGER_SETTINGS.keys(),
+    )
     normalized: dict[str, bool | int | float] = {}
     for name, setting in settings.items():
         if name in BOOLEAN_SETTINGS:
@@ -430,23 +431,34 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
     for index, raw in enumerate(require_list(action.get("joins"), "joins")):
         label = f"joins[{index}]"
         item = require_object(raw, label, {"relations", "force", "forbid", "memoize"})
-        relations = catalog.require_relations(item.get("relations"), f"{label}.relations")
+        relations = catalog.require_relations(
+            item.get("relations"), f"{label}.relations"
+        )
         target = tuple(relations)
         if target in join_targets:
             raise ActionError(f"{label} duplicates another join target")
         join_targets.add(target)
-        force = require_enum(item.get("force", "auto"), JOIN_METHODS | {"auto"}, f"{label}.force")
-        forbid = require_enum_list(
-            item.get("forbid"), JOIN_METHODS, f"{label}.forbid"
+        force = require_enum(
+            item.get("force", "auto"), JOIN_METHODS | {"auto"}, f"{label}.force"
         )
+        forbid = require_enum_list(item.get("forbid"), JOIN_METHODS, f"{label}.forbid")
         if set(forbid) == JOIN_METHODS:
             raise ActionError(f"{label}.forbid cannot disable every join method")
         if force in forbid:
             raise ActionError(f"{label} both forces and forbids {force}")
-        memoize = require_enum(item.get("memoize", "auto"), {"auto", "force", "forbid"}, f"{label}.memoize")
+        memoize = require_enum(
+            item.get("memoize", "auto"), {"auto", "force", "forbid"}, f"{label}.memoize"
+        )
         if force == "auto" and not forbid and memoize == "auto":
             raise ActionError(f"{label} does not request any steering")
-        joins.append({"relations": relations, "force": force, "forbid": sorted(forbid), "memoize": memoize})
+        joins.append(
+            {
+                "relations": relations,
+                "force": force,
+                "forbid": sorted(forbid),
+                "memoize": memoize,
+            }
+        )
     if joins:
         normalized["joins"] = sorted(joins, key=lambda item: item["relations"])
 
@@ -459,20 +471,29 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
         if relation in scan_relations:
             raise ActionError(f"{label} duplicates another scan target")
         scan_relations.add(relation)
-        force = require_enum(item.get("force", "auto"), SCAN_METHODS | {"auto"}, f"{label}.force")
-        forbid = require_enum_list(
-            item.get("forbid"), SCAN_METHODS, f"{label}.forbid"
+        force = require_enum(
+            item.get("force", "auto"), SCAN_METHODS | {"auto"}, f"{label}.force"
         )
+        forbid = require_enum_list(item.get("forbid"), SCAN_METHODS, f"{label}.forbid")
         if set(forbid) == SCAN_METHODS:
             raise ActionError(f"{label}.forbid cannot disable every scan method")
         if force in forbid:
             raise ActionError(f"{label} both forces and forbids {force}")
-        indexes = require_indexes(item.get("indexes"), relation, catalog, f"{label}.indexes")
+        indexes = require_indexes(
+            item.get("indexes"), relation, catalog, f"{label}.indexes"
+        )
         if indexes and force not in {"index", "index_only", "bitmap"}:
             raise ActionError(f"{label}.indexes requires an index-based forced scan")
         if force == "auto" and not forbid:
             raise ActionError(f"{label} does not request any steering")
-        scans.append({"relation": relation, "force": force, "forbid": sorted(forbid), "indexes": indexes})
+        scans.append(
+            {
+                "relation": relation,
+                "force": force,
+                "forbid": sorted(forbid),
+                "indexes": indexes,
+            }
+        )
     if scans:
         normalized["scans"] = sorted(scans, key=lambda item: item["relation"])
 
@@ -500,17 +521,29 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
 
     corrections: list[dict[str, Any]] = []
     correction_targets: set[tuple[str, ...]] = set()
-    for index, raw in enumerate(require_list(action.get("row_corrections"), "row_corrections")):
+    for index, raw in enumerate(
+        require_list(action.get("row_corrections"), "row_corrections")
+    ):
         label = f"row_corrections[{index}]"
         item = require_object(raw, label, {"relations", "mode", "value"})
-        relations = catalog.require_relations(item.get("relations"), f"{label}.relations")
+        relations = catalog.require_relations(
+            item.get("relations"), f"{label}.relations"
+        )
         target = tuple(relations)
         if target in correction_targets:
             raise ActionError(f"{label} duplicates another row-correction target")
         correction_targets.add(target)
-        mode = require_enum(item.get("mode"), {"absolute", "add", "subtract", "multiply"}, f"{label}.mode")
+        mode = require_enum(
+            item.get("mode"),
+            {"absolute", "add", "subtract", "multiply"},
+            f"{label}.mode",
+        )
         number = item.get("value")
-        if isinstance(number, bool) or not isinstance(number, (int, float)) or not math.isfinite(number):
+        if (
+            isinstance(number, bool)
+            or not isinstance(number, (int, float))
+            or not math.isfinite(number)
+        ):
             raise ActionError(f"{label}.value must be finite and numeric")
         upper = 1_000.0 if mode == "multiply" else 1_000_000_000_000.0
         lower = 0.001 if mode == "multiply" else 1.0
@@ -518,7 +551,9 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label}.value is outside [{lower}, {upper}]")
         corrections.append({"relations": relations, "mode": mode, "value": number})
     if corrections:
-        normalized["row_corrections"] = sorted(corrections, key=lambda item: item["relations"])
+        normalized["row_corrections"] = sorted(
+            corrections, key=lambda item: item["relations"]
+        )
 
     parallel: list[dict[str, Any]] = []
     parallel_relations: set[str] = set()
@@ -530,7 +565,11 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
             raise ActionError(f"{label} duplicates another parallel target")
         parallel_relations.add(relation)
         workers = item.get("workers")
-        if isinstance(workers, bool) or not isinstance(workers, int) or not 0 <= workers <= 2:
+        if (
+            isinstance(workers, bool)
+            or not isinstance(workers, int)
+            or not 0 <= workers <= 2
+        ):
             raise ActionError(f"{label}.workers must be an integer from 0 through 2")
         mode = require_enum(item.get("mode", "soft"), {"soft", "hard"}, f"{label}.mode")
         parallel.append({"relation": relation, "workers": workers, "mode": mode})
@@ -553,11 +592,15 @@ def normalize_action(value: Any, catalog: TaskCatalog) -> dict[str, Any]:
     for item in joins:
         setting = join_setting.get(item["force"])
         if setting and settings.get(setting) is False:
-            raise ActionError(f"action both forces {item['force']} and disables {setting}")
+            raise ActionError(
+                f"action both forces {item['force']} and disables {setting}"
+            )
     for item in scans:
         setting = scan_setting.get(item["force"])
         if setting and settings.get(setting) is False:
-            raise ActionError(f"action both forces {item['force']} and disables {setting}")
+            raise ActionError(
+                f"action both forces {item['force']} and disables {setting}"
+            )
         disabled = next(
             (
                 set(target["indexes"])
@@ -646,7 +689,11 @@ def compile_action(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], st
         hints.append(f"Parallel({item['relation']} {item['workers']} {item['mode']})")
 
     for name, value in action.get("settings", {}).items():
-        rendered = ("on" if value else "off") if isinstance(value, bool) else format_number(value)
+        rendered = (
+            ("on" if value else "off")
+            if isinstance(value, bool)
+            else format_number(value)
+        )
         hints.append(f"Set({name} {rendered})")
 
     comment = f"/*+ {' '.join(hints)} */" if hints else ""

@@ -5,7 +5,7 @@ import os
 import platform
 import statistics
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,12 +18,13 @@ from qorl.util.hashing import sha256_file
 from qorl.util.io import display_path, utc_now, write_json
 from qorl.workload.taskset import TaskSet
 
-
 MEASUREMENT_RUNS = 20
 MIN_WARMUP_RUNS = 2
 MAX_WARMUP_RUNS = 5
 BUFFER_STABILITY_TOLERANCE = 0.02
 STATEMENT_TIMEOUT_MS = 120_000
+
+
 def observation(explain: dict[str, Any], run_number: int) -> dict[str, Any]:
     plan = explain["Plan"]
     return {
@@ -58,10 +59,7 @@ def calibrate_task(
             worker.explain_analyze(sql, STATEMENT_TIMEOUT_MS), run_number
         )
         warmups.append(result)
-        if (
-            run_number >= MIN_WARMUP_RUNS
-            and buffers_stable(warmups[-2], warmups[-1])
-        ):
+        if run_number >= MIN_WARMUP_RUNS and buffers_stable(warmups[-2], warmups[-1]):
             break
 
     measurements: list[dict[str, Any]] = []
@@ -129,9 +127,7 @@ def selected_tasks(
         raise RuntimeError("calibration selection contains duplicate task IDs")
     missing = sorted(set(task_ids) - set(by_id))
     if missing:
-        raise RuntimeError(
-            f"calibration selection contains unknown task: {missing[0]}"
-        )
+        raise RuntimeError(f"calibration selection contains unknown task: {missing[0]}")
     return selection, split, [by_id[task_id] for task_id in task_ids]
 
 
@@ -168,9 +164,7 @@ def calibrate(
     if selection_path is None and split is not None:
         raise RuntimeError("--split requires --selection")
 
-    task_set = TaskSet.load(
-        repository, task_set_ids[workload], fixture.data_identity
-    )
+    task_set = TaskSet.load(repository, task_set_ids[workload], fixture.data_identity)
     selection: dict[str, Any] | None = None
     selected_split: str | None = None
     if selection_path is None:
@@ -188,10 +182,8 @@ def calibrate(
         calibration_name = selection["inventory_id"]
     worker_count = 4
 
-    started_at = datetime.now(timezone.utc)
-    calibration_id = started_at.strftime(
-        f"{calibration_name}-%Y%m%dT%H%M%SZ"
-    )
+    started_at = datetime.now(UTC)
+    calibration_id = started_at.strftime(f"{calibration_name}-%Y%m%dT%H%M%SZ")
     output_dir = repository / "outputs/calibration" / calibration_id
     output_dir.mkdir(parents=True, exist_ok=False)
     task_dir = output_dir / "tasks"
@@ -260,9 +252,7 @@ def calibrate(
             )
 
         with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
-            futures: dict[
-                Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
-            ] = {
+            futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
                 executor.submit(calibrate_on_worker, pool, task_set, task): task
                 for task in tasks
             }

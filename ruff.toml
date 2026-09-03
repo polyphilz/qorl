@@ -1,0 +1,25 @@
+target-version = "py312"
+line-length = 88
+src = ["src", "training/src"]
+
+[lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "RUF",
+    "N",
+    "PTH",
+]
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["qorl", "qorl_training", "scripts"]
+
+[format]
+docstring-code-format = true

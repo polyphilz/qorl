@@ -13,7 +13,6 @@ from qorl.db.resources import (
     validate_host_topology,
 )
 
-
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -81,9 +80,8 @@ class WorkerPoolTest(unittest.TestCase):
         )
         pool = WorkerPool(slots, "test-pool", "test-sha")  # type: ignore[arg-type]
 
-        with pool.claim_worker() as first:
-            with pool.claim_worker() as second:
-                self.assertNotEqual(first.resources.index, second.resources.index)
+        with pool.claim_worker() as first, pool.claim_worker() as second:
+            self.assertNotEqual(first.resources.index, second.resources.index)
         with pool.claim_worker() as next_slot:
             self.assertEqual(next_slot.resources.index, 2)
 

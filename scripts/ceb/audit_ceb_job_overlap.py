@@ -17,7 +17,6 @@ from qorl.workload.query_structure import (
     task_join_fingerprints,
 )
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
 TEMPLATE_NAME = re.compile(r"^(?P<template>[0-9]+[a-z])", re.IGNORECASE)
@@ -75,7 +74,9 @@ def read_ceb_sql(source_dir: Path, source_kind: str) -> list[dict[str, Any]]:
     return queries
 
 
-def job_fingerprints(inventory: dict[str, Any]) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+def job_fingerprints(
+    inventory: dict[str, Any],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     graphs: dict[str, set[str]] = defaultdict(set)
     topologies: dict[str, set[str]] = defaultdict(set)
     for task in inventory["tasks"]:
@@ -105,9 +106,7 @@ def build_report(
     excluded = 0
     for ceb_template, members in sorted(by_template.items()):
         graph_hashes = sorted({member["join_graph_sha256"] for member in members})
-        topology_hashes = sorted(
-            {member["join_topology_sha256"] for member in members}
-        )
+        topology_hashes = sorted({member["join_topology_sha256"] for member in members})
         exact_matches = sorted(
             {
                 job_template

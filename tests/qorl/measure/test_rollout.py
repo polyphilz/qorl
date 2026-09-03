@@ -5,7 +5,7 @@ import unittest
 from copy import deepcopy
 from typing import Any
 
-from qorl.plans.fingerprint import plan_sha256
+from qorl.db.worker import ExplainResult, QueryTimeout
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RL_TRAINING_PROTOCOL_V1,
@@ -16,7 +16,7 @@ from qorl.measure.rollout import (
     score,
     task_timeout_ms,
 )
-from qorl.db.worker import ExplainResult, QueryTimeout
+from qorl.plans.fingerprint import plan_sha256
 from qorl.workload.timeouts import TaskTimeout
 
 TASK = {

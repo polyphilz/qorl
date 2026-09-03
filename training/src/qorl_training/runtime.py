@@ -10,9 +10,8 @@ from qorl.db.pool import (
     WorkerSlot,
     start_pool,
 )
-from qorl.workload.timeouts import CalibratedTimeouts
 from qorl.workload.taskset import TaskSet
-
+from qorl.workload.timeouts import CalibratedTimeouts
 
 TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"
 
@@ -27,9 +26,7 @@ class QorlRuntime(WorkerPool):
         pool_config_path: str | None = None,
         calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
-        super().__init__(
-            workers, pool_id, pool_config_sha256, pool_config_path
-        )
+        super().__init__(workers, pool_id, pool_config_sha256, pool_config_path)
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
         self.data_identity = task_set.data_identity

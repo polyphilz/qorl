@@ -8,7 +8,6 @@ from tempfile import TemporaryDirectory
 from qorl.measure.calibration import buffers_stable, observation, selected_tasks
 from qorl.workload.taskset import TaskSet
 
-
 ROOT = Path(__file__).resolve().parents[3]
 
 

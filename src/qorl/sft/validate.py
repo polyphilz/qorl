@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-from qorl.plans.action import TaskCatalog, compile_action
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import AgentProtocol, RESERVED_DECISION_TURNS
+from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
 from qorl.agent.tools import agent_tools
 from qorl.db.fixture import data_identity
-from qorl.plans.fingerprint import plan_sha256
-from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import MAX_CANDIDATES
+from qorl.plans.action import TaskCatalog, compile_action
+from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.verify import verify_action
+from qorl.workload.taskset import TaskSet
 
 
 class DemoValidationError(ValueError):
@@ -75,8 +75,7 @@ def validate_protocol_demo(
     )
     require(task["partition"] == partition, "demo task partition mismatch")
     require(
-        data_identity(metadata.get("data_identity", {}))
-        == task_set.data_identity,
+        data_identity(metadata.get("data_identity", {})) == task_set.data_identity,
         "demo data identity differs from its task inventory",
     )
     require(
@@ -149,7 +148,10 @@ def validate_protocol_demo(
         tool_result = tail[offset + 1]
         require(assistant.get("role") == "assistant", f"turn {turn}: not assistant")
         calls = assistant.get("tool_calls")
-        require(isinstance(calls, list) and len(calls) == 1, f"turn {turn}: expected one tool call")
+        require(
+            isinstance(calls, list) and len(calls) == 1,
+            f"turn {turn}: expected one tool call",
+        )
         call = calls[0]
         require(call.get("type") == "function", f"turn {turn}: invalid call type")
         call_id = call.get("id")
@@ -160,7 +162,9 @@ def validate_protocol_demo(
         require(isinstance(function, dict), f"turn {turn}: missing function")
         name = function.get("name")
         arguments = parse_json(function.get("arguments"), f"turn {turn} arguments")
-        require(isinstance(arguments, dict), f"turn {turn}: arguments must be an object")
+        require(
+            isinstance(arguments, dict), f"turn {turn}: arguments must be an object"
+        )
         require(
             name in protocol.available_tool_names(turn, len(issued_candidates)),
             f"turn {turn}: {name} was not available",
@@ -168,28 +172,37 @@ def validate_protocol_demo(
         call_sequence.append(name)
 
         require(tool_result.get("role") == "tool", f"turn {turn}: missing tool result")
-        require(tool_result.get("tool_call_id") == call_id, f"turn {turn}: call ID mismatch")
+        require(
+            tool_result.get("tool_call_id") == call_id, f"turn {turn}: call ID mismatch"
+        )
         require(tool_result.get("name") == name, f"turn {turn}: tool name mismatch")
         result = parse_json(tool_result.get("content"), f"turn {turn} result")
         require(isinstance(result, dict), f"turn {turn}: result must be an object")
-        require(result.get("_turn_budget") == protocol.budget(turn), f"turn {turn}: budget mismatch")
+        require(
+            result.get("_turn_budget") == protocol.budget(turn),
+            f"turn {turn}: budget mismatch",
+        )
         require("error" not in result, f"turn {turn}: tool returned an error")
 
         if name == "evaluate_candidate":
             expected_id = f"candidate-{len(issued_candidates) + 1:02d}"
-            require(result.get("candidate_id") == expected_id, f"turn {turn}: candidate ID mismatch")
+            require(
+                result.get("candidate_id") == expected_id,
+                f"turn {turn}: candidate ID mismatch",
+            )
             raw_action = arguments.get("action")
             action, hint = compile_action(raw_action, catalog)
-            encoded_action = json.dumps(
-                action, sort_keys=True, separators=(",", ":")
-            )
+            encoded_action = json.dumps(action, sort_keys=True, separators=(",", ":"))
             require(
                 encoded_action not in normalized_actions,
                 f"turn {turn}: duplicate normalized action",
             )
             normalized_actions.add(encoded_action)
             require(result.get("action_valid") is True, f"turn {turn}: invalid action")
-            require(result.get("constraints_satisfied") is True, f"turn {turn}: unsatisfied constraints")
+            require(
+                result.get("constraints_satisfied") is True,
+                f"turn {turn}: unsatisfied constraints",
+            )
             require(result.get("compiled_hint") == hint, f"turn {turn}: hint mismatch")
             if metadata.get("measurement_mode") == "plan_validation_only":
                 require(
@@ -207,12 +220,24 @@ def validate_protocol_demo(
                 )
 
             candidate_evidence = evidence.get("candidates", {}).get(expected_id)
-            require(isinstance(candidate_evidence, dict), f"turn {turn}: missing candidate evidence")
-            require(candidate_evidence.get("action") == action, f"turn {turn}: normalized action mismatch")
+            require(
+                isinstance(candidate_evidence, dict),
+                f"turn {turn}: missing candidate evidence",
+            )
+            require(
+                candidate_evidence.get("action") == action,
+                f"turn {turn}: normalized action mismatch",
+            )
             plan = candidate_evidence.get("plain_explain")
-            require(isinstance(plan, dict) and isinstance(plan.get("Plan"), dict), f"turn {turn}: invalid plan evidence")
+            require(
+                isinstance(plan, dict) and isinstance(plan.get("Plan"), dict),
+                f"turn {turn}: invalid plan evidence",
+            )
             fingerprint = plan_sha256(plan["Plan"])
-            require(result.get("plan_sha256") == fingerprint, f"turn {turn}: plan checksum mismatch")
+            require(
+                result.get("plan_sha256") == fingerprint,
+                f"turn {turn}: plan checksum mismatch",
+            )
             verification = verify_action(
                 action,
                 plan["Plan"],
@@ -234,17 +259,20 @@ def validate_protocol_demo(
                 if candidate_id == "default"
                 else evidence["candidates"][candidate_id]["plain_explain"]
             )
-            actual_plan = {key: value for key, value in result.items() if key != "_turn_budget"}
-            require(actual_plan == expected_plan, f"turn {turn}: plan result differs from evidence")
+            actual_plan = {
+                key: value for key, value in result.items() if key != "_turn_budget"
+            }
+            require(
+                actual_plan == expected_plan,
+                f"turn {turn}: plan result differs from evidence",
+            )
         elif name == "finish":
             require(not arguments, f"turn {turn}: finish takes no arguments")
             require(result.get("status") == "finished", f"turn {turn}: finish failed")
             require(offset == len(tail) - 2, "finish must be the final call")
             finished = True
         elif name == "keep_default":
-            require(
-                not arguments, f"turn {turn}: keep_default takes no arguments"
-            )
+            require(not arguments, f"turn {turn}: keep_default takes no arguments")
             require(
                 result.get("status") == "kept_default",
                 f"turn {turn}: keep_default failed",

@@ -4,13 +4,12 @@ import unittest
 from collections import Counter
 from pathlib import Path
 
-from qorl.workload.taskset import TaskSet
 from qorl.sft.assemble import (
     DATASET_SEED,
     action_families,
     select_tasks,
 )
-
+from qorl.workload.taskset import TaskSet
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -25,9 +24,7 @@ class ProtocolDatasetTest(unittest.TestCase):
         self.assertEqual(len(train), 256)
         self.assertEqual(len(validation), 64)
         self.assertTrue(all(task["partition"] == "train" for task in train))
-        self.assertTrue(
-            all(task["partition"] == "validation" for task in validation)
-        )
+        self.assertTrue(all(task["partition"] == "validation" for task in validation))
         self.assertFalse(
             {task["task_id"] for task in train}
             & {task["task_id"] for task in validation}

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -13,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import model_snapshot
-
 
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"
@@ -31,9 +29,9 @@ def run(command: list[str], repository: Path) -> None:
 
 
 def pinned_policy(repository: Path) -> tuple[Path, dict[str, Any]]:
-    config = json.loads(
-        (repository / "configs/policy/run-v1.json").read_text()
-    )["policy"]
+    config = json.loads((repository / "configs/policy/run-v1.json").read_text())[
+        "policy"
+    ]
     return model_snapshot(config), config
 
 
@@ -63,14 +61,10 @@ def training_report(
             (dataset / "render-audit.json").read_text()
         )["packed_sequence_length"],
         "peak_gpu_memory_gib": max(
-            item["perf/peak_memory"]
-            for item in metrics
-            if "perf/peak_memory" in item
+            item["perf/peak_memory"] for item in metrics if "perf/peak_memory" in item
         ),
         "final_training_loss": next(
-            item["loss/mean"]
-            for item in reversed(metrics)
-            if "loss/mean" in item
+            item["loss/mean"] for item in reversed(metrics) if "loss/mean" in item
         ),
         "validation_losses": [
             {"step": item["step"], "loss": item["val/loss"]}

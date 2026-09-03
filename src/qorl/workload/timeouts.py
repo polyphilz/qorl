@@ -10,7 +10,6 @@ from qorl.db.fixture import data_identity
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
 
-
 TIMEOUT_FLOOR_MS = 5_000
 TIMEOUT_MULTIPLIER = 3
 GLOBAL_TIMEOUT_MS = 120_000
@@ -99,9 +98,7 @@ class CalibratedTimeouts:
             raise RuntimeError("calibrated-timeout algorithm differs")
 
         entries = manifest.get("tasks")
-        if not isinstance(entries, list) or manifest.get("task_count") != len(
-            entries
-        ):
+        if not isinstance(entries, list) or manifest.get("task_count") != len(entries):
             raise RuntimeError("calibrated-timeout task count differs")
         by_task_id: dict[str, TaskTimeout] = {}
         for entry in entries:

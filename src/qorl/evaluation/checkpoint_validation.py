@@ -20,13 +20,12 @@ from qorl.agent.client import ModelError
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import WorkerError
+from qorl.evaluation.live_validation import trace_metrics, wait_for_server
+from qorl.evaluation.paired_validation import load_tasks, summarize
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
-from qorl.measure.rollout import RolloutEvaluator
-from qorl.evaluation.live_validation import trace_metrics, wait_for_server
-from qorl.evaluation.paired_validation import load_tasks, summarize
-
 
 CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
 START_POLICY = "start"
@@ -183,11 +182,7 @@ def checkpoint_summary(
 ) -> dict[str, Any]:
     summary = summarize(results, planned_rollouts)
     completed = [item for item in results if item["status"] == "completed"]
-    valid = [
-        item
-        for item in completed
-        if item["final"]["status"] == "completed"
-    ]
+    valid = [item for item in completed if item["final"]["status"] == "completed"]
     default_winners = [
         item
         for item in valid
@@ -201,8 +196,7 @@ def checkpoint_summary(
                 len(default_winners) / len(valid) if valid else None
             ),
             "novel_candidate_count": sum(
-                result["protocol_metrics"]["novel_candidates"]
-                for result in completed
+                result["protocol_metrics"]["novel_candidates"] for result in completed
             ),
             "rollout_novel_candidate_rate": (
                 sum(
@@ -234,9 +228,7 @@ def evaluate_once(
         baseline = evaluator.start()
         agent = QoAgentPolicy(replace(base_config, model=model_name, seed=seed))
         trace = agent.search(evaluator)
-        metrics = trace_metrics(
-            evaluator, trace, base_config.maximum_model_turns
-        )
+        metrics = trace_metrics(evaluator, trace, base_config.maximum_model_turns)
         final = evaluator.finish(random.Random(pair_seed))
         result = {
             "schema_version": 1,
@@ -353,9 +345,7 @@ def main() -> None:
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(
-        repository, config["task_set"], fixture.data_identity
-    )
+    task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
     if arguments.preflight:
@@ -363,11 +353,7 @@ def main() -> None:
     policies = [START_POLICY, *(policy_name(step) for step in steps)]
     expected_rollouts = len(tasks) * len(seeds)
     suffix = "-preflight" if arguments.preflight else ""
-    output_dir = (
-        repository
-        / "outputs/rl"
-        / f"{config['evaluation_id']}{suffix}"
-    )
+    output_dir = repository / "outputs/rl" / f"{config['evaluation_id']}{suffix}"
     output_dir.mkdir(parents=True, exist_ok=False)
 
     report: dict[str, Any] = {
@@ -380,9 +366,7 @@ def main() -> None:
         "config_sha256": sha256_file(config_path),
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
-        "snapshot_manifest_sha256": sha256_file(
-            fixture.snapshot_manifest_path
-        ),
+        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "base_model": {
@@ -403,10 +387,7 @@ def main() -> None:
         },
         "task_ids": [task["task_id"] for task in tasks],
         "rollout_seeds": seeds,
-        "policies": {
-            name: {"status": "pending", "summary": None}
-            for name in policies
-        },
+        "policies": {name: {"status": "pending", "summary": None} for name in policies},
         "error": None,
     }
     report_path = output_dir / "report.json"
@@ -448,9 +429,7 @@ def main() -> None:
                 }
             )
             report["model_server"] = QoAgentPolicy(base_config).preflight()
-            pool = start_pool(
-                fixture, f"qorl-v2-checkpoints-{os.getpid()}"
-            )
+            pool = start_pool(fixture, f"qorl-v2-checkpoints-{os.getpid()}")
             report["database_pool"] = pool.manifest()
             for slot in pool.workers:
                 slot.worker.capture_environment(
@@ -499,9 +478,7 @@ def main() -> None:
                     "post",
                 )
             for name in policies:
-                failures = sum(
-                    item["status"] != "completed" for item in results[name]
-                )
+                failures = sum(item["status"] != "completed" for item in results[name])
                 report["policies"][name]["status"] = (
                     "completed" if not failures else "completed_with_failures"
                 )

@@ -8,17 +8,17 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+from qorl.agent import QoAgentConfig, QoAgentPolicy
+from qorl.agent.client import OpenAIModelClient
+from qorl.agent.protocol import AgentProtocol
+from qorl.agent.tool_runtime import AgentEnvironment
+from qorl.agent.tools import agent_tools
 from qorl.plans.action import (
     BOOLEAN_SETTINGS,
     INTEGER_SETTINGS,
     NUMERIC_SETTINGS,
     TaskCatalog,
 )
-from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import OpenAIModelClient
-from qorl.agent.protocol import AgentProtocol
-from qorl.agent.tool_runtime import AgentEnvironment
-from qorl.agent.tools import agent_tools
 
 TASK = {
     "task_id": "job-test",
@@ -163,10 +163,11 @@ class FakeEvaluator:
         def settings(names: set[str]) -> dict[str, str]:
             self.requested_settings = names
             return {
-                **{name: "on" for name in BOOLEAN_SETTINGS},
-                **{name: "1" for name in NUMERIC_SETTINGS},
-                **{name: "1" for name in INTEGER_SETTINGS},
+                **dict.fromkeys(BOOLEAN_SETTINGS, "on"),
+                **dict.fromkeys(NUMERIC_SETTINGS, "1"),
+                **dict.fromkeys(INTEGER_SETTINGS, "1"),
             }
+
         self.task = TASK
         self.sql = "SELECT 1;"
         self.catalog = TaskCatalog.from_task(
@@ -177,7 +178,7 @@ class FakeEvaluator:
             fixture=SimpleNamespace(
                 snapshot={"postgresql": {"server_version_num": "180006"}},
                 repository=repository,
-            )
+            ),
         )
         self.default = {
             "compact_plan": {"Node Type": "Result"},

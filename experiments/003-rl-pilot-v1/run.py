@@ -33,9 +33,9 @@ def run(command: list[str], repository: Path) -> None:
 
 
 def pinned_policy(repository: Path) -> tuple[Path, dict]:
-    policy = json.loads(
-        (repository / "configs/policy/run-v1.json").read_text()
-    )["policy"]
+    policy = json.loads((repository / "configs/policy/run-v1.json").read_text())[
+        "policy"
+    ]
     return model_snapshot(policy), policy
 
 

@@ -14,9 +14,7 @@ class QorlEnvironment(SingleAgentEnv):
     """Own the persistent PostgreSQL worker pool used by QORL episodes."""
 
     async def start(self) -> None:
-        repository = Path(
-            cast(QorlTaskset, self.taskset).config.repository
-        ).resolve()
+        repository = Path(cast(QorlTaskset, self.taskset).config.repository).resolve()
         await asyncio.to_thread(runtime.start, repository)
 
     async def stop(self) -> None:

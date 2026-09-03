@@ -14,7 +14,6 @@ from qorl.db.resources import (
 )
 from qorl_training.runtime import QorlRuntime
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -24,9 +23,7 @@ class FakeWorker:
 
 class WorkerPoolTest(unittest.TestCase):
     def test_resources_are_distinct_and_parameterized(self) -> None:
-        resources = load_runtime_profile(
-            ROOT, DEFAULT_TRAINING_PROFILE
-        ).workers
+        resources = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE).workers
 
         self.assertEqual([item.index for item in resources], [0, 1, 2, 3])
         self.assertEqual(
@@ -52,9 +49,8 @@ class WorkerPoolTest(unittest.TestCase):
             "test-sha",
         )
 
-        with runtime.claim_worker() as first:
-            with runtime.claim_worker() as second:
-                self.assertNotEqual(first.resources.index, second.resources.index)
+        with runtime.claim_worker() as first, runtime.claim_worker() as second:
+            self.assertNotEqual(first.resources.index, second.resources.index)
         with runtime.claim_worker() as next_slot:
             self.assertEqual(next_slot.resources.index, 2)
 

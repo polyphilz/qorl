@@ -8,12 +8,11 @@ import json
 import os
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from qorl.util.hashing import sha256_file
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
@@ -23,8 +22,7 @@ def run(command: list[str]) -> str:
     completed = subprocess.run(
         command,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if completed.returncode != 0:
@@ -72,7 +70,9 @@ def main() -> None:
     if verification["phase"] != "build":
         raise RuntimeError("snapshot requires a build-phase database verification")
     if verification["source_manifest_sha256"] != sha256_file(args.manifest):
-        raise RuntimeError("build verification does not match the current source manifest")
+        raise RuntimeError(
+            "build verification does not match the current source manifest"
+        )
 
     container = inspect_container(args.container)
     if container["State"]["Running"]:
@@ -83,9 +83,7 @@ def main() -> None:
         )
 
     environment = dict(
-        item.split("=", 1)
-        for item in container["Config"]["Env"]
-        if "=" in item
+        item.split("=", 1) for item in container["Config"]["Env"] if "=" in item
     )
     pgdata = PurePosixPath(environment["PGDATA"])
     data_mounts = []
@@ -179,7 +177,7 @@ test -s "$partial"
         "schema_version": 1,
         "snapshot_id": f"job-v1-sha256-{archive_sha256[:16]}",
         "fixture_id": manifest["fixture_id"],
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "created_at_utc": datetime.now(UTC).isoformat(),
         "format": "qorl-pgdata-tar-gzip-v1",
         "archive": {
             "filename": archive.name,

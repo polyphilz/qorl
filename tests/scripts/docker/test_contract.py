@@ -6,7 +6,6 @@ from pathlib import Path
 
 from qorl.plans.action import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
-
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -26,10 +25,9 @@ class DockerContractTest(unittest.TestCase):
 
     def test_contract_defines_every_prompt_visible_planner_setting(self) -> None:
         contract = json.loads(
-            (
-                ROOT
-                / "docker/postgres/contract/benchmark.expected.json"
-            ).read_text(encoding="utf-8")
+            (ROOT / "docker/postgres/contract/benchmark.expected.json").read_text(
+                encoding="utf-8"
+            )
         )
         names = set(BOOLEAN_SETTINGS) | set(INTEGER_SETTINGS) | set(NUMERIC_SETTINGS)
         values = {name: contract["settings"][name] for name in sorted(names)}
@@ -39,10 +37,9 @@ class DockerContractTest(unittest.TestCase):
 
     def test_benchmark_v2_disables_geqo(self) -> None:
         contract = json.loads(
-            (
-                ROOT
-                / "docker/postgres/contract/benchmark.expected.json"
-            ).read_text(encoding="utf-8")
+            (ROOT / "docker/postgres/contract/benchmark.expected.json").read_text(
+                encoding="utf-8"
+            )
         )
         versions = json.loads(
             (ROOT / "docker/postgres/versions.json").read_text(encoding="utf-8")

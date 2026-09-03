@@ -7,8 +7,8 @@ from typing import Any
 
 from qorl.agent.client import ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
-from qorl.agent.protocol import AgentProtocol
 from qorl.agent.prompts import SYSTEM_PROMPT
+from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_json
@@ -45,10 +45,7 @@ class QoAgentPolicy:
                 (item for item in models if item["id"] == model["parent"]),
                 model,
             )
-        if (
-            effective_context_model.get("max_model_len")
-            != self.config.context_length
-        ):
+        if effective_context_model.get("max_model_len") != self.config.context_length:
             raise ModelError(
                 "model context length mismatch: "
                 f"expected={self.config.context_length} "
@@ -77,9 +74,7 @@ class QoAgentPolicy:
             "type": "qo_agent",
             **asdict(self.config),
             "system_prompt": SYSTEM_PROMPT,
-            "system_prompt_sha256": hashlib.sha256(
-                SYSTEM_PROMPT.encode()
-            ).hexdigest(),
+            "system_prompt_sha256": hashlib.sha256(SYSTEM_PROMPT.encode()).hexdigest(),
             "server_identity": self.server_identity,
         }
 
@@ -101,15 +96,13 @@ class QoAgentPolicy:
         }
         if self.config.seed is not None:
             seed_bytes = hashlib.sha256(
-                f"{self.config.seed}:{task_id}:{turn}".encode("utf-8")
+                f"{self.config.seed}:{task_id}:{turn}".encode()
             ).digest()
             body["seed"] = int.from_bytes(seed_bytes[:4], "big")
         return body
 
     def search(self, evaluator: RolloutEvaluator) -> dict[str, Any]:
-        completion_reserve = max(
-            256, int(self.config.sampling.get("max_tokens", 0))
-        )
+        completion_reserve = max(256, int(self.config.sampling.get("max_tokens", 0)))
         protocol = AgentProtocol.from_evaluator(
             evaluator,
             self.config.maximum_model_turns,
@@ -124,9 +117,7 @@ class QoAgentPolicy:
         context_estimate_tokens: int | None = None
 
         for turn in range(1, self.config.maximum_model_turns + 1):
-            available_tools = protocol.available_tools(
-                turn, len(evaluator.candidates)
-            )
+            available_tools = protocol.available_tools(turn, len(evaluator.candidates))
             response = self.client.chat(
                 self.request_body(
                     messages, available_tools, evaluator.task["task_id"], turn

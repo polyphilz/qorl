@@ -6,7 +6,6 @@ from typing import Any
 from qorl.plans.action import ActionError, TaskCatalog, normalize_action
 from qorl.plans.random_tree import random_join_tree
 
-
 SAMPLER_VERSION = 2
 FAMILY_WEIGHTS = {
     "leading": 30,
@@ -58,16 +57,18 @@ def join_targets(tree: str | dict[str, Any]) -> list[list[str]]:
     return targets
 
 
-def add_join(action: dict[str, Any], targets: list[list[str]], rng: random.Random) -> None:
+def add_join(
+    action: dict[str, Any], targets: list[list[str]], rng: random.Random
+) -> None:
     item: dict[str, Any] = {
         "relations": rng.choice(targets),
         "force": "auto",
         "forbid": [],
         "memoize": "auto",
     }
-    directive = rng.choices(
-        ["force", "forbid", "memoize"], weights=[70, 20, 10], k=1
-    )[0]
+    directive = rng.choices(["force", "forbid", "memoize"], weights=[70, 20, 10], k=1)[
+        0
+    ]
     if directive == "force":
         item["force"] = rng.choice(["hash", "merge", "nestloop"])
     elif directive == "forbid":
@@ -91,11 +92,7 @@ def add_scan(action: dict[str, Any], catalog: TaskCatalog, rng: random.Random) -
         "forbid": [] if force else [method],
         "indexes": [],
     }
-    if (
-        force
-        and method in {"index", "index_only", "bitmap"}
-        and rng.random() < 0.5
-    ):
+    if force and method in {"index", "index_only", "bitmap"} and rng.random() < 0.5:
         item["indexes"] = [rng.choice(indexes)]
     action["scans"] = [item]
 

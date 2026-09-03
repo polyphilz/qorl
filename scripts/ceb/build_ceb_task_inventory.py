@@ -16,7 +16,6 @@ from qorl.workload.query_structure import (
     task_join_fingerprints,
 )
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CEB_DIR = REPOSITORY_ROOT / "data/ceb"
 DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
@@ -40,7 +39,8 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
     if set(dispositions) != source_templates:
         raise RuntimeError("overlap report and recovered source templates differ")
     eligible = {
-        template for template, disposition in dispositions.items()
+        template
+        for template, disposition in dispositions.items()
         if disposition == "eligible"
     }
     excluded = source_templates - eligible
@@ -48,9 +48,7 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
     sql_templates: dict[str, set[str]] = defaultdict(set)
     for source in sources["queries"]:
         if source["template_id"] in eligible:
-            source_groups[(source["template_id"], source["sql_sha256"])].append(
-                source
-            )
+            source_groups[(source["template_id"], source["sql_sha256"])].append(source)
             sql_templates[source["sql_sha256"]].add(source["template_id"])
     cross_template_duplicates = {
         sql_sha256: templates
@@ -99,9 +97,7 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
             "join_topology_sha256": topology_sha256,
         }
         if len(group) > 1:
-            task["duplicate_source_ids"] = [
-                member["source_id"] for member in group[1:]
-            ]
+            task["duplicate_source_ids"] = [member["source_id"] for member in group[1:]]
         tasks.append(task)
 
     partition_counts = Counter(task["partition"] for task in tasks)
@@ -123,9 +119,7 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
             "source_manifest": sources["source_manifest"],
             "sources_sha256": sha256_file(sources_path),
             "sql_manifest_sha256": sources["sql_manifest_sha256"],
-            "source_pickle_manifest_sha256": sources[
-                "source_pickle_manifest_sha256"
-            ],
+            "source_pickle_manifest_sha256": sources["source_pickle_manifest_sha256"],
             "author_unique_plans_membership_sha256": sha256_file(unique_path),
         },
         "exact_sql_deduplication": {
@@ -197,9 +191,7 @@ def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ceb-dir", type=Path, default=DEFAULT_CEB_DIR)
-    parser.add_argument(
-        "--job-inventory", type=Path, default=DEFAULT_JOB_INVENTORY
-    )
+    parser.add_argument("--job-inventory", type=Path, default=DEFAULT_JOB_INVENTORY)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     output = args.ceb_dir / "tasks.json"

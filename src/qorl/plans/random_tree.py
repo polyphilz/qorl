@@ -6,9 +6,7 @@ from typing import Any
 from qorl.plans.action import TaskCatalog
 
 
-def random_join_tree(
-    catalog: TaskCatalog, rng: random.Random
-) -> str | dict[str, Any]:
+def random_join_tree(catalog: TaskCatalog, rng: random.Random) -> str | dict[str, Any]:
     components: list[tuple[set[str], str | dict[str, Any]]] = [
         ({relation}, relation) for relation in sorted(catalog.relations)
     ]

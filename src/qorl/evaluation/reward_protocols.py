@@ -16,14 +16,13 @@ from typing import Any
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import ExplainResult, PostgresWorker
-from qorl.util.hashing import sha256_file
-from qorl.util.io import write_json
-from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import (
     RolloutEvaluator,
     TrainingRolloutEvaluatorV1,
 )
-
+from qorl.util.hashing import sha256_file
+from qorl.util.io import write_json
+from qorl.workload.taskset import TaskSet
 
 DEFAULT_CONFIG = Path("experiments/004-rl-run-v2/reward-protocol-audit/config.json")
 
@@ -103,7 +102,10 @@ def build_cases(
     missing = [template_id for template_id in expected if not choices[template_id]]
     if missing:
         raise RuntimeError(f"no completed pilot trajectory for: {missing}")
-    cases = [min(choices[template_id], key=lambda item: item[0])[1] for template_id in expected]
+    cases = [
+        min(choices[template_id], key=lambda item: item[0])[1]
+        for template_id in expected
+    ]
     if len(cases) != config["case_count"]:
         raise RuntimeError("reward audit case count differs from configuration")
     return {
@@ -154,9 +156,7 @@ def replay(
 ) -> dict[str, Any]:
     counted = CountingWorker(worker)
     evaluator_type = (
-        TrainingRolloutEvaluatorV1
-        if protocol == "rl-training-v1"
-        else RolloutEvaluator
+        TrainingRolloutEvaluatorV1 if protocol == "rl-training-v1" else RolloutEvaluator
     )
     evaluator = evaluator_type(  # type: ignore[arg-type]
         counted, task_set, task
@@ -166,9 +166,7 @@ def replay(
     final = evaluator.finish(random.Random(seed))
     return {
         "measurement_protocol": evaluator.measurement_protocol.manifest(),
-        "default_median_execution_time_ms": baseline[
-            "median_execution_time_ms"
-        ],
+        "default_median_execution_time_ms": baseline["median_execution_time_ms"],
         "candidates": [
             {
                 "candidate_id": candidate["candidate_id"],
@@ -205,9 +203,7 @@ def correlation(left: list[float], right: list[float]) -> float | None:
         return None
     left_mean = statistics.fmean(left)
     right_mean = statistics.fmean(right)
-    numerator = sum(
-        (x - left_mean) * (y - right_mean) for x, y in zip(left, right)
-    )
+    numerator = sum((x - left_mean) * (y - right_mean) for x, y in zip(left, right))
     denominator = math.sqrt(
         sum((x - left_mean) ** 2 for x in left)
         * sum((y - right_mean) ** 2 for y in right)
@@ -225,8 +221,7 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
         )
     ]
     cheap_scores = [
-        float(result["rl-training-v1"]["final"]["score"])
-        for result in comparable
+        float(result["rl-training-v1"]["final"]["score"]) for result in comparable
     ]
     full_scores = [
         float(result["rigorous-evaluation-v1"]["final"]["score"])
@@ -250,20 +245,12 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
     ]
     reward_agreements = [
         sign(float(result["rl-training-v1"]["final"]["trajectory_reward"]))
-        == sign(
-            float(
-                result["rigorous-evaluation-v1"]["final"][
-                    "trajectory_reward"
-                ]
-            )
-        )
+        == sign(float(result["rigorous-evaluation-v1"]["final"]["trajectory_reward"]))
         for result in comparable
     ]
     winner_agreements = [
         result["rl-training-v1"]["final"]["winning_candidate_id"]
-        == result["rigorous-evaluation-v1"]["final"][
-            "winning_candidate_id"
-        ]
+        == result["rigorous-evaluation-v1"]["final"]["winning_candidate_id"]
         for result in comparable
     ]
     count = len(comparable)
@@ -305,9 +292,7 @@ def summarize(results: list[dict[str, Any]], material_ratio: float) -> dict[str,
             for result in results
         ),
         "rigorous_explain_analyze_calls": sum(
-            result["rigorous-evaluation-v1"]["database_calls"][
-                "explain_analyze"
-            ]
+            result["rigorous-evaluation-v1"]["database_calls"]["explain_analyze"]
             for result in results
         ),
     }
@@ -325,9 +310,7 @@ def run_audit(
         raise RuntimeError("unexpected reward-protocol case manifest")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(
-        repository, config["task_set"], fixture.data_identity
-    )
+    task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     output_dir.mkdir(parents=True, exist_ok=False)
     report_path = output_dir / "report.json"
@@ -339,9 +322,7 @@ def run_audit(
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
-        "snapshot_manifest_sha256": sha256_file(
-            fixture.snapshot_manifest_path
-        ),
+        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "results": [],
@@ -396,9 +377,7 @@ def run_audit(
 
     report["status"] = "completed"
     report["completed_at_utc"] = datetime.now(UTC).isoformat()
-    report["summary"] = summarize(
-        report["results"], config["material_speedup_ratio"]
-    )
+    report["summary"] = summarize(report["results"], config["material_speedup_ratio"])
     write_json(report_path, report)
     return report_path
 
@@ -421,22 +400,14 @@ def main() -> None:
     case_path = case_path if case_path.is_absolute() else repository / case_path
     if arguments.build_cases:
         trace_root = arguments.trace_root or Path(config["source_traces"])
-        trace_root = (
-            trace_root if trace_root.is_absolute() else repository / trace_root
-        )
+        trace_root = trace_root if trace_root.is_absolute() else repository / trace_root
         write_json(case_path, build_cases(repository, config, trace_root))
         print(case_path)
         return
 
     output_dir = arguments.output or Path("outputs/rl") / config["audit_id"]
-    output_dir = (
-        output_dir if output_dir.is_absolute() else repository / output_dir
-    )
-    print(
-        run_audit(
-            repository, config_path, config, case_path, output_dir
-        )
-    )
+    output_dir = output_dir if output_dir.is_absolute() else repository / output_dir
+    print(run_audit(repository, config_path, config, case_path, output_dir))
 
 
 if __name__ == "__main__":

@@ -8,10 +8,9 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from qorl.sft.validate import validate_protocol_demo
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
-from qorl.sft.validate import validate_protocol_demo
-
 
 DATASET_ID = "protocol-sft-v1"
 DATASET_SEED = 20260830
@@ -55,8 +54,7 @@ def template_quotas(
         raise ValueError("no CEB templates")
     base, remainder = divmod(count, len(templates))
     return {
-        template: base + (index < remainder)
-        for index, template in enumerate(templates)
+        template: base + (index < remainder) for index, template in enumerate(templates)
     }
 
 
@@ -337,9 +335,7 @@ def validate_dataset(repository: Path, output_dir: Path) -> dict[str, Any]:
     if manifest.get("dataset_id") != DATASET_ID:
         raise ValueError("unexpected protocol dataset ID")
     records = load_documents(output_dir)
-    by_path = {
-        item["path"]: item for item in manifest.get("demonstrations", [])
-    }
+    by_path = {item["path"]: item for item in manifest.get("demonstrations", [])}
     counts = Counter()
     for path, document in records:
         relative = path.relative_to(output_dir).as_posix()

@@ -10,11 +10,10 @@ from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
-from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.plans.verify import plan_join_tree
 from qorl.sft.validate import validate_protocol_demo
-
+from qorl.workload.taskset import TaskSet
 
 DEMONSTRATION_ID = "protocol-demo-v1"
 TASK_ID = "ceb-4a-4a434"
@@ -90,9 +89,10 @@ def build_demo(repository: Path) -> dict[str, Any]:
     if task is None:
         raise RuntimeError(f"missing pinned CEB task: {TASK_ID}")
 
-    with contextlib.closing(
-        start_pool(fixture, "qorl-protocol-demo")
-    ) as pool, pool.claim_worker() as slot:
+    with (
+        contextlib.closing(start_pool(fixture, "qorl-protocol-demo")) as pool,
+        pool.claim_worker() as slot,
+    ):
         worker = slot.worker
         evaluator = RolloutEvaluator(worker, task_set, task)
         evaluator.start()
@@ -100,7 +100,9 @@ def build_demo(repository: Path) -> dict[str, Any]:
         environment = AgentEnvironment(evaluator)
         messages = protocol.initial_messages()
 
-        call_tool(messages, environment, protocol, 1, "get_plan", {"candidate_id": "default"})
+        call_tool(
+            messages, environment, protocol, 1, "get_plan", {"candidate_id": "default"}
+        )
         action = leading_action(evaluator.default["plain_explain"]["Plan"])
         candidate, _ = call_tool(
             messages,
@@ -123,9 +125,7 @@ def build_demo(repository: Path) -> dict[str, Any]:
             "get_plan",
             {"candidate_id": candidate_id},
         )
-        _, finished = call_tool(
-            messages, environment, protocol, 4, "finish", {}
-        )
+        _, finished = call_tool(messages, environment, protocol, 4, "finish", {})
         if not finished:
             raise RuntimeError("finish did not end the demonstration")
 

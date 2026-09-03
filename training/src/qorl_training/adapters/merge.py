@@ -12,7 +12,6 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-
 MODEL_FILE = "model.safetensors"
 ADAPTER_FILE = "adapter_model.safetensors"
 MANIFEST_FILE = "qorl-merge.json"
@@ -77,7 +76,9 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
             base_keys = set(base_file.keys())
             missing = sorted(set(pairs) - base_keys)
             if missing:
-                raise RuntimeError(f"LoRA tensors do not match base model: {missing[:3]}")
+                raise RuntimeError(
+                    f"LoRA tensors do not match base model: {missing[:3]}"
+                )
 
             tensors: dict[str, torch.Tensor] = {}
             for index, key in enumerate(base_file.keys(), start=1):
@@ -124,7 +125,13 @@ def main() -> None:
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
-    print(merge(arguments.base.resolve(), arguments.adapter.resolve(), arguments.output.resolve()))
+    print(
+        merge(
+            arguments.base.resolve(),
+            arguments.adapter.resolve(),
+            arguments.output.resolve(),
+        )
+    )
 
 
 if __name__ == "__main__":

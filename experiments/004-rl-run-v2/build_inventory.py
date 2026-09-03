@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "data/ceb/tasks.json"
 PILOT = ROOT / "experiments/003-rl-pilot-v1/selection.json"
@@ -16,9 +15,7 @@ TASK_COUNT = 400
 TASKS_PER_UPDATE = 4
 ROLLOUTS_PER_TASK = 4
 EXCLUDED_TASKS = {
-    "ceb-7a-7a117": (
-        "default PostgreSQL plan exceeded the 120-second calibration cap"
-    ),
+    "ceb-7a-7a117": ("default PostgreSQL plan exceeded the 120-second calibration cap"),
 }
 
 
@@ -32,13 +29,9 @@ def salted_rank(kind: str, identifier: str) -> str:
 
 def build(source: dict[str, Any], pilot: dict[str, Any]) -> dict[str, Any]:
     prior_ids = {
-        item["task_id"]
-        for split in pilot["splits"].values()
-        for item in split
+        item["task_id"] for split in pilot["splits"].values() for item in split
     }
-    prior_train_ids = {
-        item["task_id"] for item in pilot["splits"]["train"]
-    }
+    prior_train_ids = {item["task_id"] for item in pilot["splits"]["train"]}
     by_template: dict[str, list[dict[str, Any]]] = {}
     for task in source["tasks"]:
         if (
@@ -84,7 +77,9 @@ def build(source: dict[str, Any], pilot: dict[str, Any]) -> dict[str, Any]:
         ordered[index : index + TASKS_PER_UPDATE]
         for index in range(0, len(ordered), TASKS_PER_UPDATE)
     ]
-    if any(len({item["template_id"] for item in batch}) != len(batch) for batch in batches):
+    if any(
+        len({item["template_id"] for item in batch}) != len(batch) for batch in batches
+    ):
         raise RuntimeError("an optimizer batch repeats a CEB template")
 
     return {

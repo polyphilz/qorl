@@ -27,9 +27,7 @@ class SnapshotRuntimeTest(unittest.TestCase):
             "Id": "sha256:new",
             "Architecture": "amd64",
             "Os": "linux",
-            "Config": {
-                "Labels": {"io.qorl.benchmark.config-id": "benchmark-v2"}
-            },
+            "Config": {"Labels": {"io.qorl.benchmark.config-id": "benchmark-v2"}},
         }
         with TemporaryDirectory() as temporary:
             path = Path(temporary) / "snapshot.json"
@@ -43,9 +41,7 @@ class SnapshotRuntimeTest(unittest.TestCase):
             {key: value for key, value in document.items() if key != "image"},
         )
         self.assertEqual(refreshed["image"]["id"], "sha256:new")
-        self.assertEqual(
-            refreshed["image"]["benchmark_config_id"], "benchmark-v2"
-        )
+        self.assertEqual(refreshed["image"]["benchmark_config_id"], "benchmark-v2")
 
     def test_refresh_rejects_an_uncontracted_image(self) -> None:
         with TemporaryDirectory() as temporary:

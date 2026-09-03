@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "data/ceb/tasks.json"
 OUTPUT = ROOT / "experiments/003-rl-pilot-v1/selection.json"
@@ -14,9 +13,7 @@ SALT = "qorl-rl-pilot-v1"
 
 
 def rank(task: dict[str, Any], partition: str) -> str:
-    return hashlib.sha256(
-        f"{SALT}:{partition}:{task['task_id']}".encode()
-    ).hexdigest()
+    return hashlib.sha256(f"{SALT}:{partition}:{task['task_id']}".encode()).hexdigest()
 
 
 def build(source: dict[str, Any]) -> dict[str, Any]:

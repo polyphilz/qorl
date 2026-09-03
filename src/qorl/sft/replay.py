@@ -9,10 +9,10 @@ from typing import Any
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.plans.fingerprint import plan_sha256
-from qorl.util.hashing import sha256_file
-from qorl.workload.taskset import TaskSet
 from qorl.sft.assemble import load_documents
 from qorl.sft.build_protocol_dataset import PlanValidationEvaluator
+from qorl.util.hashing import sha256_file
+from qorl.workload.taskset import TaskSet
 
 
 def candidate_actions(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -58,9 +58,10 @@ def main() -> None:
         samples.setdefault(template, document)
 
     records = []
-    with contextlib.closing(
-        start_pool(fixture, "qorl-protocol-sft-replay")
-    ) as pool, pool.claim_worker() as slot:
+    with (
+        contextlib.closing(start_pool(fixture, "qorl-protocol-sft-replay")) as pool,
+        pool.claim_worker() as slot,
+    ):
         worker = slot.worker
         for template, document in sorted(samples.items()):
             task_id = document["metadata"]["task_id"]

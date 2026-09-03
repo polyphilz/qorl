@@ -10,7 +10,6 @@ import pytest
 
 from qorl.util.hashing import sha256_file
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -76,9 +75,7 @@ def test_inventory_is_deterministic_and_template_balanced(
     assert actual == expected
     assert actual["counts"] == {"spike": 1, "train": 48, "validation": 16}
     assert {item["template_id"] for item in actual["splits"]["train"]} == {
-        task["template_id"]
-        for task in source["tasks"]
-        if task["partition"] == "train"
+        task["template_id"] for task in source["tasks"] if task["partition"] == "train"
     }
     assert {item["template_id"] for item in actual["splits"]["validation"]} == {
         task["template_id"]

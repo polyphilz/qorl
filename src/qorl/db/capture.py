@@ -14,7 +14,7 @@ import os
 import platform
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,7 @@ def run(command: list[str], *, check: bool = True) -> str:
     completed = subprocess.run(
         command,
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
     if check and completed.returncode != 0:
@@ -317,7 +316,9 @@ def main() -> None:
     ).strip()
 
     artifact_contents = {
-        f"postgres-identity.{args.phase}.json": capture_postgres(container, "identity-json"),
+        f"postgres-identity.{args.phase}.json": capture_postgres(
+            container, "identity-json"
+        ),
         f"postgres-nondefaults.{args.phase}.json": capture_postgres(
             container, "nondefaults-json"
         ),
@@ -341,11 +342,9 @@ def main() -> None:
 
     environment = {
         "schema_version": 1,
-        "benchmark_config_id": image_info["labels"].get(
-            "io.qorl.benchmark.config-id"
-        ),
+        "benchmark_config_id": image_info["labels"].get("io.qorl.benchmark.config-id"),
         "phase": args.phase,
-        "captured_at_utc": datetime.now(timezone.utc).isoformat(),
+        "captured_at_utc": datetime.now(UTC).isoformat(),
         "assertion_output": assertion_output,
         "runtime_profile": {
             "id": profile["profile_id"],
@@ -366,7 +365,9 @@ def main() -> None:
             "machine": {
                 "sys_vendor": read_text("/sys/devices/virtual/dmi/id/sys_vendor"),
                 "product_name": read_text("/sys/devices/virtual/dmi/id/product_name"),
-                "product_version": read_text("/sys/devices/virtual/dmi/id/product_version"),
+                "product_version": read_text(
+                    "/sys/devices/virtual/dmi/id/product_version"
+                ),
                 "bios_version": read_text("/sys/devices/virtual/dmi/id/bios_version"),
             },
             "cpu": {
@@ -427,9 +428,13 @@ def main() -> None:
         },
     }
 
-    environment_name = "environment.json" if args.phase == "pre" else "environment.post.json"
+    environment_name = (
+        "environment.json" if args.phase == "pre" else "environment.post.json"
+    )
     environment_path = args.output_dir / environment_name
-    write_atomic(environment_path, json.dumps(environment, indent=2, sort_keys=True) + "\n")
+    write_atomic(
+        environment_path, json.dumps(environment, indent=2, sort_keys=True) + "\n"
+    )
 
     print(f"captured {args.phase} benchmark environment in {args.output_dir}")
 

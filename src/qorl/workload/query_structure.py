@@ -6,10 +6,10 @@ import itertools
 import json
 import math
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from qorl.util.hashing import sha256_bytes
-
 
 TABLE_TERM = re.compile(
     r"^\s*(?P<table>[a-z_][a-z0-9_]*)\s+(?:AS\s+)?"
@@ -161,8 +161,7 @@ def extract_join_structure(sql: str, query_name: str) -> dict[str, Any]:
         join_predicates.add((*first_predicate, *second_predicate))
 
     relations = [
-        {"alias": alias, "table": table}
-        for alias, table in sorted(aliases.items())
+        {"alias": alias, "table": table} for alias, table in sorted(aliases.items())
     ]
     tables = sorted(set(aliases.values()))
     edges = sorted(join_edges)
@@ -194,17 +193,12 @@ def extract_join_structure(sql: str, query_name: str) -> dict[str, Any]:
         "table_count": len(tables),
         "relation_count": len(relations),
         "join_predicate_count": len(edges),
-        "join_graph_sha256": canonical_join_graph_sha256(
-            aliases, join_predicates
-        ),
+        "join_graph_sha256": canonical_join_graph_sha256(aliases, join_predicates),
     }
 
 
 def task_join_fingerprints(task: dict[str, Any]) -> tuple[str, str]:
-    aliases = {
-        relation["alias"]: relation["table"]
-        for relation in task["relations"]
-    }
+    aliases = {relation["alias"]: relation["table"] for relation in task["relations"]}
     predicates: set[JoinPredicate] = set()
     for edge in task["join_edges"]:
         match = INVENTORY_JOIN_EDGE.fullmatch(edge)

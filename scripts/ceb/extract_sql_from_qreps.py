@@ -15,35 +15,31 @@ from typing import Any
 from qorl.util.hashing import sha256_bytes, sha256_file
 from qorl.workload.ceb import extract_sql_bytes
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
 DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb"
-DEFAULT_UNIQUE_SOURCE = (
-    REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb-unique-plans"
-)
+DEFAULT_UNIQUE_SOURCE = REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb-unique-plans"
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "data/ceb"
 
 
 def manifest_sha256(records: list[dict[str, Any]], key: str, path_key: str) -> str:
     digest = hashlib.sha256()
     for record in sorted(records, key=lambda item: item[path_key]):
-        digest.update(f"{record[key]}  {record[path_key]}\n".encode("utf-8"))
+        digest.update(f"{record[key]}  {record[path_key]}\n".encode())
     return digest.hexdigest()
 
 
 def source_files(root: Path) -> list[Path]:
-    paths = sorted(root.glob("*/*.pkl"), key=lambda path: path.relative_to(root).as_posix())
+    paths = sorted(
+        root.glob("*/*.pkl"), key=lambda path: path.relative_to(root).as_posix()
+    )
     if not paths:
         raise RuntimeError(f"no qrep files found under {root}")
     return paths
 
 
 def expected_templates(specification: dict[str, Any]) -> dict[str, int]:
-    return {
-        name: int(count)
-        for name, count in specification["templates"].items()
-    }
+    return {name: int(count) for name, count in specification["templates"].items()}
 
 
 def validate_counts(
@@ -74,7 +70,9 @@ def extract_full_tree(
         try:
             sql = extract_sql_bytes(source_bytes)
         except ValueError as error:
-            raise RuntimeError(f"cannot extract SQL from {relative}: {error}") from error
+            raise RuntimeError(
+                f"cannot extract SQL from {relative}: {error}"
+            ) from error
 
         sql_path = Path("queries") / template / f"{source_name}.sql"
         destination = query_dir.parent / sql_path
@@ -112,7 +110,9 @@ def build_unique_membership(
         try:
             sql = extract_sql_bytes(source_bytes)
         except ValueError as error:
-            raise RuntimeError(f"cannot extract SQL from {relative}: {error}") from error
+            raise RuntimeError(
+                f"cannot extract SQL from {relative}: {error}"
+            ) from error
         template_id = f"ceb-{relative.parts[0]}"
         sql_sha256 = sha256_bytes(sql)
         source_id = f"{relative.parts[0]}/{relative.stem}"
@@ -193,9 +193,7 @@ def build(
             "source_pickle_manifest_sha256": manifest_sha256(
                 records, "source_pickle_sha256", "source_pickle_path"
             ),
-            "sql_manifest_sha256": manifest_sha256(
-                records, "sql_sha256", "sql_path"
-            ),
+            "sql_manifest_sha256": manifest_sha256(records, "sql_sha256", "sql_path"),
             "queries": records,
         }
         unique_counts = Counter(member["template_id"] for member in members)
@@ -228,9 +226,7 @@ def build(
         (temporary / "queries").replace(output_dir / "queries")
         (output_dir / "provenance").mkdir(exist_ok=True)
         for name in ("sources.json", "unique-plans.json"):
-            (temporary / "provenance" / name).replace(
-                output_dir / "provenance" / name
-            )
+            (temporary / "provenance" / name).replace(output_dir / "provenance" / name)
         (temporary / "provenance").rmdir()
         temporary.rmdir()
     except BaseException:
@@ -242,9 +238,7 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     provenance = output_dir / "provenance"
     sources = json.loads((provenance / "sources.json").read_text(encoding="utf-8"))
-    unique = json.loads(
-        (provenance / "unique-plans.json").read_text(encoding="utf-8")
-    )
+    unique = json.loads((provenance / "unique-plans.json").read_text(encoding="utf-8"))
     if sources["source_manifest"]["sha256"] != sha256_file(source_manifest_path):
         raise RuntimeError("checked-in sources reference a different source manifest")
     if sources["query_count"] != source_manifest["trees"]["full"]["count"]:
@@ -255,7 +249,9 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
     records = sources["queries"]
     if len(records) != len({record["task_id"] for record in records}):
         raise RuntimeError("full source manifest contains duplicate task IDs")
-    full_counts = Counter(record["template_id"].removeprefix("ceb-") for record in records)
+    full_counts = Counter(
+        record["template_id"].removeprefix("ceb-") for record in records
+    )
     if dict(sorted(full_counts.items())) != expected_templates(
         source_manifest["trees"]["full"]
     ):
@@ -264,7 +260,10 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
     for record in records:
         path = output_dir / record["sql_path"]
         expected_paths.add(record["sql_path"])
-        if path.stat().st_size != record["sql_bytes"] or sha256_file(path) != record["sql_sha256"]:
+        if (
+            path.stat().st_size != record["sql_bytes"]
+            or sha256_file(path) != record["sql_sha256"]
+        ):
             raise RuntimeError(f"checked-in SQL differs from manifest: {path}")
     actual_paths = {
         path.relative_to(output_dir).as_posix()
@@ -292,8 +291,7 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
     ):
         raise RuntimeError("unique-plan SQL differs from its full query")
     unique_counts = Counter(
-        member["template_id"].removeprefix("ceb-")
-        for member in unique["members"]
+        member["template_id"].removeprefix("ceb-") for member in unique["members"]
     )
     if dict(sorted(unique_counts.items())) != expected_templates(
         source_manifest["trees"]["unique_plans"]
@@ -323,7 +321,9 @@ def main() -> None:
         check(args.source_manifest, args.output_dir)
         print("checked-in CEB SQL and source manifests verified")
     else:
-        build(args.source_manifest, args.full_source, args.unique_source, args.output_dir)
+        build(
+            args.source_manifest, args.full_source, args.unique_source, args.output_dir
+        )
         print("extracted CEB SQL without importing or executing pickle")
 
 

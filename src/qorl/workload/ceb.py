@@ -7,7 +7,6 @@ import itertools
 import math
 import re
 
-
 SQL_START = re.compile(r"^\s*SELECT\b", re.IGNORECASE)
 SQL_FROM = re.compile(r"\bFROM\b", re.IGNORECASE)
 SPLIT_SALT = "ceb-v1-template-split-v1"
@@ -54,9 +53,7 @@ def choose_validation_templates(
 
     def score(selected: tuple[str, ...]) -> tuple[float, str]:
         distance = abs(sum(query_counts[name] for name in selected) - target)
-        tie_break = hashlib.sha256(
-            f"{salt}:{','.join(selected)}".encode("utf-8")
-        ).hexdigest()
+        tie_break = hashlib.sha256(f"{salt}:{','.join(selected)}".encode()).hexdigest()
         return distance, tie_break
 
     return min(itertools.combinations(templates, count), key=score)

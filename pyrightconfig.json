@@ -1,0 +1,8 @@
+{
+  "include": ["src", "training/src"],
+  "extraPaths": ["src", "training/src"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "strict",
+  "reportMissingImports": "none",
+  "reportMissingTypeStubs": "none"
+}

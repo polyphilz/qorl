@@ -6,7 +6,7 @@ import os
 import platform
 import random
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +17,6 @@ from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot, start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
-from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
-from qorl.util.hashing import sha256_file
-from qorl.util.io import utc_now, write_json
-from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import (
     DEFAULT_MEASUREMENTS,
     FINAL_PAIRS,
@@ -29,7 +25,10 @@ from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
     RolloutEvaluator,
 )
-
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
+from qorl.util.hashing import sha256_file
+from qorl.util.io import utc_now, write_json
+from qorl.workload.taskset import TaskSet
 
 RUN_SEED = 20260827
 DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
@@ -43,17 +42,13 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     scores = [result["final"]["score"] for result in completed]
     candidate_time = sum(
-        result["final"]["candidate_median_execution_time_ms"]
-        for result in completed
+        result["final"]["candidate_median_execution_time_ms"] for result in completed
     )
     default_time = sum(
-        result["final"]["default_median_execution_time_ms"]
-        for result in completed
+        result["final"]["default_median_execution_time_ms"] for result in completed
     )
     attempts = [
-        candidate
-        for result in results
-        for candidate in result.get("candidates", [])
+        candidate for result in results for candidate in result.get("candidates", [])
     ]
     failures = len(results) - len(completed)
     regressions = sum(value < 1.0 for value in scores)
@@ -98,9 +93,7 @@ def run_task(
     if policy["type"] == "random_structured_action":
         action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
         for _ in range(MAX_CANDIDATES):
-            candidate = evaluator.evaluate(
-                sample_action(evaluator.catalog, action_rng)
-            )
+            candidate = evaluator.evaluate(sample_action(evaluator.catalog, action_rng))
             if candidate["constraints_satisfied"]:
                 print(
                     f"  {candidate['candidate_id']}: "
@@ -193,10 +186,8 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     if policy["type"] == "qo_agent":
         agent = QoAgentPolicy(QoAgentConfig.from_dict(policy))
         agent.preflight()
-    started_at = datetime.now(timezone.utc)
-    benchmark_id = started_at.strftime(
-        f"{config['run_id_prefix']}-%Y%m%dT%H%M%SZ"
-    )
+    started_at = datetime.now(UTC)
+    benchmark_id = started_at.strftime(f"{config['run_id_prefix']}-%Y%m%dT%H%M%SZ")
     output_dir = repository / "outputs/runs" / benchmark_id
     output_dir.mkdir(parents=True, exist_ok=False)
     task_dir = output_dir / "tasks"
@@ -210,9 +201,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
-        "snapshot_manifest_sha256": sha256_file(
-            fixture.snapshot_manifest_path
-        ),
+        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "run_config": {
             "path": str(config_path.relative_to(repository)),
             "sha256": sha256_file(config_path),
@@ -248,8 +237,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             ),
             "global_timeout_ms": GLOBAL_TIMEOUT_MS,
             "task_timeout": (
-                "min(global_timeout_ms, max(5000, "
-                "3 * provisional_default_median_ms))"
+                "min(global_timeout_ms, max(5000, 3 * provisional_default_median_ms))"
             ),
             "score": "clip(default_median / candidate_median, 0.1, 10)",
         },
@@ -262,9 +250,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
     manifest_path = output_dir / "run.json"
     write_json(manifest_path, manifest)
 
-    project_name = (
-        f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
-    )
+    project_name = f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     tasks = task_set.inventory["tasks"]
     results_by_task: dict[str, dict[str, Any]] = {}
     pool: WorkerPool | None = None
@@ -285,9 +271,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
             )
 
         with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
-            futures: dict[
-                Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]
-            ] = {
+            futures: dict[Future[tuple[WorkerSlot, dict[str, Any]]], dict[str, Any]] = {
                 executor.submit(
                     run_task_on_worker, pool, task_set, task, policy, agent
                 ): task
@@ -345,9 +329,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         raise
 
     manifest["status"] = (
-        "completed"
-        if manifest["failed_task_count"] == 0
-        else "completed_with_failures"
+        "completed" if manifest["failed_task_count"] == 0 else "completed_with_failures"
     )
     manifest["completed_at_utc"] = utc_now()
     manifest["summary"] = summarize(

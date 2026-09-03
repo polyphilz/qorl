@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 VERSIONS_PATH = REPOSITORY_ROOT / "docker/postgres/versions.json"
 
@@ -20,8 +19,7 @@ def inspect_image(reference: str) -> dict[str, Any]:
     completed = subprocess.run(
         ["docker", "image", "inspect", reference],
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=False,
     )
     if completed.returncode:

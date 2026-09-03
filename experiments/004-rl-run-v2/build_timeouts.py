@@ -17,7 +17,6 @@ from qorl.workload.timeouts import (
     task_timeout_ms,
 )
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SELECTION = ROOT / "experiments/004-rl-run-v2/selection.json"
 OUTPUT = ROOT / "experiments/004-rl-run-v2/timeouts.json"

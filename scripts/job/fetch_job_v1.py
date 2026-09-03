@@ -14,8 +14,7 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from qorl.util.hashing import sha256_file, sha256_stream
-
+from qorl.util.hashing import sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
@@ -46,11 +45,16 @@ def download(url: str, target: Path, spec: dict[str, Any]) -> None:
 
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.part.{os.getpid()}")
-    request = urllib.request.Request(url, headers={"User-Agent": "qorl-job-v1-loader/1"})
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "qorl-job-v1-loader/1"}
+    )
     downloaded = 0
     next_progress = 128 * 1024 * 1024
     try:
-        with urllib.request.urlopen(request) as response, temporary.open("xb") as output:
+        with (
+            urllib.request.urlopen(request) as response,
+            temporary.open("xb") as output,
+        ):
             while block := response.read(1024 * 1024):
                 output.write(block)
                 downloaded += len(block)
@@ -116,9 +120,7 @@ def extract_dataset(
     print(f"extracted and verified dataset: {target}")
 
 
-def verify_dataset_directory(
-    target: Path, members: dict[str, dict[str, Any]]
-) -> None:
+def verify_dataset_directory(target: Path, members: dict[str, dict[str, Any]]) -> None:
     actual_names = {path.name for path in target.iterdir() if path.is_file()}
     expected_names = set(members)
     if actual_names != expected_names:
@@ -138,12 +140,16 @@ def extract_source(archive: Path, target: Path) -> None:
     temporary = Path(tempfile.mkdtemp(prefix=".source.extract.", dir=target.parent))
     try:
         with tarfile.open(archive, "r:gz") as source:
-            regular_members = [member for member in source.getmembers() if member.isfile()]
+            regular_members = [
+                member for member in source.getmembers() if member.isfile()
+            ]
             roots = {
                 safe_member_path(member.name).parts[0] for member in regular_members
             }
             if len(roots) != 1:
-                raise RuntimeError("JOB source archive must have exactly one root directory")
+                raise RuntimeError(
+                    "JOB source archive must have exactly one root directory"
+                )
             root = next(iter(roots))
             for member in regular_members:
                 path = safe_member_path(member.name)

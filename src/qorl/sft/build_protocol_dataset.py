@@ -8,17 +8,16 @@ import random
 from pathlib import Path
 from typing import Any
 
-from qorl.plans.action import ActionError, TaskCatalog, compile_action
 from qorl.agent.protocol import AgentProtocol
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import candidate_feedback
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import start_pool
 from qorl.db.worker import PostgresWorker, WorkerError
+from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
+from qorl.plans.action import ActionError, TaskCatalog, compile_action
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.random_tree import random_join_tree
-from qorl.workload.taskset import TaskSet
-from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
 from qorl.plans.verify import (
     JOIN_METHODS,
     SCAN_METHODS,
@@ -41,7 +40,7 @@ from qorl.sft.assemble import (
     select_tasks,
 )
 from qorl.sft.validate import validate_protocol_demo
-
+from qorl.workload.taskset import TaskSet
 
 MAXIMUM_MODEL_TURNS = 64
 MAX_ACTION_ATTEMPTS = 4
@@ -156,11 +155,7 @@ def default_derived_actions(
         actions.append(("leading", leading))
 
     joins = sorted(
-        (
-            node
-            for node in nodes(plan)
-            if node.get("Node Type") in JOIN_METHODS
-        ),
+        (node for node in nodes(plan) if node.get("Node Type") in JOIN_METHODS),
         key=lambda node: tuple(sorted(relation_set(node))),
     )
     join_action: dict[str, Any] | None = None
@@ -540,9 +535,7 @@ def build_document(
             "sql_sha256": task["sql_sha256"],
             "data_identity": worker.fixture.data_identity,
             "runtime_identity": worker.fixture.runtime_identity,
-            "in_author_unique_plans_subset": task[
-                "in_author_unique_plans_subset"
-            ],
+            "in_author_unique_plans_subset": task["in_author_unique_plans_subset"],
             "trace_seed": trace_seed(task["task_id"]),
             "maximum_model_turns": MAXIMUM_MODEL_TURNS,
             "inspection_recipe": recipe,
@@ -602,14 +595,10 @@ def main() -> None:
         for partition, count in SPLIT_COUNTS.items()
     }
     planned = [
-        task
-        for partition in ("train", "validation")
-        for task in selected[partition]
+        task for partition in ("train", "validation") for task in selected[partition]
     ]
     ranked = {
-        partition: ranked_tasks(
-            task_set.inventory["tasks"], partition, DATASET_SEED
-        )
+        partition: ranked_tasks(task_set.inventory["tasks"], partition, DATASET_SEED)
         for partition in SPLIT_COUNTS
     }
     existing = existing_documents(repository, output_dir)
@@ -622,15 +611,14 @@ def main() -> None:
         if failure_path.is_file()
         else []
     )
-    attempted_task_ids = used_task_ids | {
-        failure["task_id"] for failure in failures
-    }
+    attempted_task_ids = used_task_ids | {failure["task_id"] for failure in failures}
     missing = [ordinal for ordinal in range(len(planned)) if ordinal not in existing]
 
     if missing:
-        with contextlib.closing(
-            start_pool(fixture, "qorl-protocol-sft-data")
-        ) as pool, pool.claim_worker() as slot:
+        with (
+            contextlib.closing(start_pool(fixture, "qorl-protocol-sft-data")) as pool,
+            pool.claim_worker() as slot,
+        ):
             worker = slot.worker
             for ordinal in missing:
                 requested = planned[ordinal]

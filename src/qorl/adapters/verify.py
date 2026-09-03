@@ -14,7 +14,6 @@ from typing import Any
 
 from qorl.util.hashing import sha256_file
 
-
 BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
 
@@ -154,7 +153,10 @@ def main() -> None:
     keys = set(base["top_logprobs"]) | set(adapted["top_logprobs"])
     shared = keys & set(base["top_logprobs"]) & set(adapted["top_logprobs"])
     largest_shared_delta = max(
-        (abs(base["top_logprobs"][key] - adapted["top_logprobs"][key]) for key in shared),
+        (
+            abs(base["top_logprobs"][key] - adapted["top_logprobs"][key])
+            for key in shared
+        ),
         default=0.0,
     )
     changed = (
@@ -165,7 +167,9 @@ def main() -> None:
     if not changed:
         raise RuntimeError("reloaded adapter did not change the measured distribution")
     if target not in base["top_logprobs"] or target not in adapted["top_logprobs"]:
-        raise RuntimeError(f"target token {target!r} is absent from top log probabilities")
+        raise RuntimeError(
+            f"target token {target!r} is absent from top log probabilities"
+        )
 
     report = {
         "schema_version": 1,

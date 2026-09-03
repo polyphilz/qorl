@@ -1,8 +1,7 @@
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from qorl.db.fixture import DatabaseFixture
-
 
 ROOT = Path(__file__).resolve().parents[3]
 

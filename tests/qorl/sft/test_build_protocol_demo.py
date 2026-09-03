@@ -6,16 +6,15 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from qorl.plans.action import TaskCatalog, compile_action
 from qorl.agent.prompts import SYSTEM_PROMPT
-from qorl.agent.protocol import AgentProtocol, RESERVED_DECISION_TURNS
+from qorl.agent.protocol import RESERVED_DECISION_TURNS, AgentProtocol
 from qorl.agent.tools import agent_tools
-from qorl.plans.fingerprint import plan_sha256
-from qorl.workload.taskset import TaskSet
 from qorl.measure.rollout import MAX_CANDIDATES
+from qorl.plans.action import TaskCatalog, compile_action
+from qorl.plans.fingerprint import plan_sha256
 from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
-
+from qorl.workload.taskset import TaskSet
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -31,7 +30,9 @@ def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
 
 def synthetic_demo() -> dict[str, Any]:
     task_set = TaskSet.load(ROOT, "ceb-v1")
-    task = next(item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID)
+    task = next(
+        item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID
+    )
     aliases = sorted(item["alias"] for item in task["relations"])
     indexes = {alias: [] for alias in aliases}
     catalog = TaskCatalog.from_task(task, {alias: set() for alias in aliases})
@@ -46,9 +47,7 @@ def synthetic_demo() -> dict[str, Any]:
     plan = {"Plan": raw_plan(leading)}
     tools = agent_tools(aliases)
     maximum_turns = 64
-    inspection_limit = min(
-        len(aliases) * 3, maximum_turns - RESERVED_DECISION_TURNS
-    )
+    inspection_limit = min(len(aliases) * 3, maximum_turns - RESERVED_DECISION_TURNS)
     observation = {
         "task_id": task["task_id"],
         "sql": task_set.load_sql(task),
@@ -71,7 +70,9 @@ def synthetic_demo() -> dict[str, Any]:
         {"role": "user", "content": json.dumps(observation, sort_keys=True)},
     ]
 
-    def add(turn: int, name: str, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+    def add(
+        turn: int, name: str, arguments: dict[str, Any], result: dict[str, Any]
+    ) -> None:
         call_id = f"call-{turn:04d}"
         messages.extend(
             [

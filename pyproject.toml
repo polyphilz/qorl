@@ -7,7 +7,11 @@ requires-python = ">=3.12"
 dependencies = []
 
 [dependency-groups]
-dev = ["pytest>=9.0.0,<10"]
+dev = [
+    "pyright>=1.1.405,<2",
+    "pytest>=9.0.0,<10",
+    "ruff>=0.13.0,<1",
+]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

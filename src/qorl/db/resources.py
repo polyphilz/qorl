@@ -6,10 +6,7 @@ from pathlib import Path
 
 from qorl.util.hashing import sha256_file
 
-
-DEFAULT_EVALUATION_PROFILE = Path(
-    "configs/postgres/evaluation-worker-v1.json"
-)
+DEFAULT_EVALUATION_PROFILE = Path("configs/postgres/evaluation-worker-v1.json")
 DEFAULT_TRAINING_PROFILE = Path("configs/postgres/training-pool-v1.json")
 NO_SWAP_BYTES = 0
 

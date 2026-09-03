@@ -4,7 +4,6 @@ import unittest
 
 from qorl.plans.verify import parse_hint_diagnostics, verify_action
 
-
 DIAGNOSTICS = (
     "NOTICE: pg_hint_plan[qno=0x0]: HintStateDump: "
     "{used hints:SeqScan(a)HashJoin(a b)}, "
@@ -99,12 +98,12 @@ class PlanTest(unittest.TestCase):
         result = verify_action(
             {
                 "version": 1,
-                "disabled_indexes": [
-                    {"relation": "b", "indexes": ["b_id_idx"]}
-                ],
+                "disabled_indexes": [{"relation": "b", "indexes": ["b_id_idx"]}],
             },
             PLAN,
             DIAGNOSTICS,
         )
         self.assertFalse(result.valid)
-        self.assertTrue(any("uses disabled indexes" in error for error in result.errors))
+        self.assertTrue(
+            any("uses disabled indexes" in error for error in result.errors)
+        )
