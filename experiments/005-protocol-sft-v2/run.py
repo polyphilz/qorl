@@ -28,7 +28,6 @@ from qorl.sft.schemas import (
     load_record,
     require_float,
     require_int,
-    require_list,
     require_object,
 )
 from qorl.util.hashing import sha256_file
@@ -148,7 +147,7 @@ def prepare(repository: Path) -> tuple[Path, PreparationReport]:
         rendered.get("packed_rows"), "render audit packed_rows"
     )
     steps = require_int(packed_rows.get("train"), "render audit train rows")
-    if require_list(rendered.get("truncated_examples"), "truncated_examples"):
+    if require_int(rendered.get("truncated_examples"), "truncated_examples"):
         raise RuntimeError("render audit found truncated examples")
     template = (repository / TEMPLATE).read_text(encoding="utf-8")
     resolved = (
