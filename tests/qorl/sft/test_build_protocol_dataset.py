@@ -1,151 +1,103 @@
-from __future__ import annotations
-
-import json
 from pathlib import Path
 
-from tests.qorl.sft.factories import measurement, messages
-
-from qorl.sft.build_protocol_dataset import (
-    SourcedRecord,
-    keep_default_messages,
-    select_training,
-    select_validation,
-)
+from qorl.sft.build_protocol_dataset import SourcedRecord, select_training
 from qorl.sft.schemas import (
     ActionFamily,
-    CandidateLabel,
     DatasetConfig,
     ExampleKind,
     ExampleSource,
     FilterRecord,
-    TeacherConfig,
     load_record,
 )
 
 
-def filter_record(task_id: str, family: ActionFamily, sample: int = 1) -> FilterRecord:
+def filter_record(
+    task_id: str,
+    family: ActionFamily,
+    sample: int = 1,
+    *,
+    keep_default: bool = False,
+) -> FilterRecord:
     return FilterRecord(
         task_id=task_id,
         template_id="template-1",
         sample=sample,
         sample_path=f"{task_id}-{sample}.json",
-        accepted=True,
-        rejection_reason=None,
-        plan_sha256=f"{task_id}-{sample}",
-        action_families=[family],
-        syntax_eligible=True,
+        accepted=not keep_default,
+        rejection_reason="keep_default" if keep_default else None,
+        plan_sha256=None if keep_default else f"{task_id}-{sample}",
+        action_families=[] if keep_default else [family],
+        syntax_eligible=not keep_default,
         steered=False,
     )
 
 
-def test_keep_default_graft_preserves_the_inspection_prefix() -> None:
-    original = messages()
-
-    grafted = keep_default_messages(original)
-
-    assert grafted[:4] == original[:4]
-    assert len(grafted) == 6
-    calls = grafted[-2]["tool_calls"]
-    assert isinstance(calls, list)
-    assert calls[0]["function"]["name"] == "keep_default"
-    content = grafted[-1]["content"]
-    assert isinstance(content, str)
-    assert json.loads(content)["status"] == "kept_default"
-
-
-def test_validation_selects_one_document_per_frozen_task() -> None:
-    records = [
-        FilterRecord(
-            task_id=task_id,
-            template_id="template-1",
-            sample=sample,
-            sample_path=f"{task_id}-{sample}.json",
-            accepted=True,
-            rejection_reason=None,
-            plan_sha256=f"{task_id}-{sample}",
-            action_families=[ActionFamily.SETTING],
-            syntax_eligible=True,
-            steered=False,
-        )
-        for task_id in ("task-1", "task-2")
-        for sample in (1, 2)
-    ]
-    config = load_record(
-        Path("experiments/005-protocol-sft-v2/dataset.json"), DatasetConfig
-    )
-    config = config.model_copy(
-        update={
-            "split_counts": config.split_counts.model_copy(update={"validation": 2})
-        }
-    )
-
-    selected = select_validation(records, config)
-
-    assert len(selected) == 2
-    assert {item.record.task_id for item in selected} == {"task-1", "task-2"}
-
-
-def test_training_uses_teacher_for_missing_coverage_then_fills_from_students() -> None:
+def test_training_uses_all_novel_plans_and_natural_keep_default_examples() -> None:
     config = load_record(
         Path("experiments/005-protocol-sft-v2/dataset.json"), DatasetConfig
     )
     config = config.model_copy(
         update={
             "split_counts": config.split_counts.model_copy(update={"train": 4}),
-            "composition": config.composition.model_copy(
-                update={"win_share": 0.5, "keep_default_share": 0.0}
-            ),
-            "gate": config.gate.model_copy(
-                update={
-                    "required_action_families": [
-                        ActionFamily.SETTING,
-                        ActionFamily.PARALLEL,
-                    ]
-                }
-            ),
+            "assembly": config.assembly.model_copy(update={"keep_default_examples": 1}),
         }
     )
-    teacher_config = load_record(
-        Path("experiments/005-protocol-sft-v2/teacher.json"), TeacherConfig
-    ).model_copy(update={"maximum_teacher_share": 0.25})
     records = [
-        *(
-            SourcedRecord(
-                filter_record(f"student-{index}", ActionFamily.SETTING),
-                ExampleSource.STUDENT,
-            )
-            for index in range(3)
+        SourcedRecord(
+            filter_record("student-1", ActionFamily.SETTING),
+            ExampleSource.STUDENT,
         ),
         SourcedRecord(
-            filter_record("teacher-parallel", ActionFamily.PARALLEL),
-            ExampleSource.TEACHER,
+            filter_record("student-2", ActionFamily.SCAN), ExampleSource.STUDENT
         ),
         SourcedRecord(
-            filter_record("teacher-leading", ActionFamily.LEADING),
-            ExampleSource.TEACHER,
+            filter_record("teacher-1", ActionFamily.LEADING), ExampleSource.TEACHER
+        ),
+        SourcedRecord(
+            filter_record("default-1", ActionFamily.SETTING, keep_default=True),
+            ExampleSource.STUDENT,
         ),
     ]
 
-    teacher_win = measurement("teacher-parallel", "teacher-parallel-1", 1.5).model_copy(
-        update={
-            "source": ExampleSource.TEACHER,
-            "candidate_label": CandidateLabel.WIN,
-        }
-    )
-
-    selected = select_training(
-        records,
-        {("teacher-parallel", "teacher-parallel-1"): teacher_win},
-        {},
-        config,
-        teacher_config,
-    )
+    selected = select_training(records, config)
 
     assert len(selected) == 4
-    assert sum(item.source == ExampleSource.TEACHER for item in selected) == 1
-    assert any(
-        item.source == ExampleSource.TEACHER
-        and ActionFamily.PARALLEL in item.record.action_families
-        and item.kind == ExampleKind.SYNTAX
-        for item in selected
+    assert [item.kind for item in selected].count(ExampleKind.SYNTAX) == 3
+    assert [item.kind for item in selected].count(ExampleKind.KEEP_DEFAULT) == 1
+    assert [item.source for item in selected].count(ExampleSource.TEACHER) == 1
+
+
+def test_training_enforces_the_per_query_cap() -> None:
+    config = load_record(
+        Path("experiments/005-protocol-sft-v2/dataset.json"), DatasetConfig
     )
+    config = config.model_copy(
+        update={
+            "split_counts": config.split_counts.model_copy(update={"train": 3}),
+            "assembly": config.assembly.model_copy(update={"keep_default_examples": 1}),
+        }
+    )
+    records = [
+        SourcedRecord(
+            filter_record("task-1", ActionFamily.SETTING, sample),
+            ExampleSource.STUDENT,
+        )
+        for sample in (1, 2, 3)
+    ]
+    records.extend(
+        [
+            SourcedRecord(
+                filter_record("task-1", ActionFamily.SETTING, 4, keep_default=True),
+                ExampleSource.STUDENT,
+            ),
+            SourcedRecord(
+                filter_record("task-2", ActionFamily.SETTING, 1, keep_default=True),
+                ExampleSource.STUDENT,
+            ),
+        ]
+    )
+
+    selected = select_training(records, config)
+
+    assert [item.record.task_id for item in selected].count("task-1") == 2
+    assert any(item.record.task_id == "task-2" for item in selected)

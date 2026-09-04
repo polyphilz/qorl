@@ -57,6 +57,12 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sequence-length", type=int, default=20480)
     parser.add_argument("--seed", type=int, required=True)
+    parser.add_argument(
+        "--splits",
+        nargs="+",
+        choices=("train", "validation"),
+        default=("train", "validation"),
+    )
     arguments = parser.parse_args()
 
     tokenizer = AutoTokenizer.from_pretrained(arguments.model)
@@ -66,14 +72,16 @@ def main() -> None:
     split_counts: Counter[str] = Counter()
     rendered_lengths: list[int] = []
     trainable_lengths: list[int] = []
-    split_lengths: dict[str, list[int]] = {"train": [], "validation": []}
+    split_lengths: dict[str, list[int]] = {
+        partition: [] for partition in arguments.splits
+    }
     records: list[dict[str, Any]] = []
     token_hash = hashlib.sha256()
     mask_hash = hashlib.sha256()
     truncated: list[dict[str, Any]] = []
     probability_probe: dict[str, Any] | None = None
 
-    for partition in ("train", "validation"):
+    for partition in arguments.splits:
         path = arguments.dataset / f"{partition}.jsonl"
         for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
             row = json.loads(line)

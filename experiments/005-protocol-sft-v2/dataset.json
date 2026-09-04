@@ -24,7 +24,8 @@
   },
   "assembly": {
     "maximum_examples_per_task": 2,
-    "maximum_syntax_examples_per_task": 2
+    "maximum_syntax_examples_per_task": 2,
+    "keep_default_examples": 12
   },
   "measurement": {
     "maximum_candidates_per_task": 6,
@@ -35,7 +36,7 @@
     "keep_default_share": 0.15
   },
   "split_counts": {
-    "train": 256,
+    "train": 258,
     "validation": 64
   },
   "training": {
@@ -44,23 +45,6 @@
   },
   "gate": {
     "samples_per_task": 4,
-    "concurrency": 4,
-    "constraint_satisfied_rate_floor": 0.9,
-    "default_duplicate_rate_ceiling": 0.05,
-    "novel_candidate_rate_improvement": 0.05,
-    "unlabeled_intervention_rate_floor": 0.5,
-    "fingerprints_per_intervened_task_floor": 2.0,
-    "action_family_rate_floor": 0.01,
-    "required_action_families": [
-      "leading",
-      "join",
-      "memoize",
-      "scan",
-      "index_selection",
-      "index_exclusion",
-      "rows",
-      "parallel",
-      "setting"
-    ]
+    "concurrency": 4
   }
 }

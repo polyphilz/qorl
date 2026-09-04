@@ -61,12 +61,6 @@ TEACHER_SAMPLE_NUMBER = 5
 INITIAL_MESSAGE_COUNT = 2
 DEFAULT_TEACHER_OUTPUT = Path("experiments/005-protocol-sft-v2/teacher")
 TARGET_FAMILY_ORDER = (
-    ActionFamily.MEMOIZE,
-    ActionFamily.PARALLEL,
-    ActionFamily.LEADING,
-    ActionFamily.JOIN,
-)
-MAIN_TARGET_FAMILIES = (
     ActionFamily.PARALLEL,
     ActionFamily.LEADING,
     ActionFamily.JOIN,
@@ -87,11 +81,6 @@ FAMILY_INSTRUCTIONS = {
         "target binds only to a plan node whose complete leaf-alias set exactly "
         "equals that target. Without Leading, choose a set that is an internal node "
         "in the default plan; with Leading, create that exact node in the tree."
-    ),
-    ActionFamily.MEMOIZE: (
-        "Propose a physically novel memoize constraint for a connected join subtree. "
-        "Use the default Memoize node to identify the relevant relation set and change "
-        "whether that subtree may use Memoize."
     ),
     ActionFamily.PARALLEL: (
         "Propose a physically novel structured parallel action for a relation beneath "
@@ -263,8 +252,6 @@ def eligible_for_family(family: ActionFamily, task: TeacherTask) -> bool:
     default = task.prefix.sample.default
     if default is None:
         return False
-    if family == ActionFamily.MEMOIZE:
-        return contains_node(default.compact_plan, "Memoize")
     if family == ActionFamily.PARALLEL:
         return any(
             contains_node(default.compact_plan, node_type)
@@ -661,26 +648,11 @@ def generation_targets(
         if requested is not None:
             raise ValueError("--families cannot be combined with --smoke")
         return dict.fromkeys(TARGET_FAMILY_ORDER, config.smoke_accepted_per_family)
-    families = requested or MAIN_TARGET_FAMILIES
+    families = requested or TARGET_FAMILY_ORDER
     if len(families) != len(set(families)):
         raise ValueError("--families contains duplicates")
     configured = config.accepted_targets.as_families()
     return {family: configured[family] for family in families}
-
-
-def require_separate_memoize_output(
-    output: Path,
-    default_output: Path,
-    requested: tuple[ActionFamily, ...] | None,
-) -> None:
-    if (
-        requested is not None
-        and ActionFamily.MEMOIZE in requested
-        and output == default_output
-    ):
-        raise ValueError(
-            "an explicit memoize run requires a non-default --output directory"
-        )
 
 
 def record_identities(
@@ -749,10 +721,7 @@ def main() -> None:
         "--families",
         nargs="+",
         choices=tuple(family.value for family in TARGET_FAMILY_ORDER),
-        help=(
-            "Override the main teacher families; use a separate output directory "
-            "when investigating memoize."
-        ),
+        help="Override the teacher families.",
     )
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
@@ -763,11 +732,6 @@ def main() -> None:
         tuple(ActionFamily(value) for value in arguments.families)
         if arguments.families is not None
         else None
-    )
-    require_separate_memoize_output(
-        output,
-        (repository / DEFAULT_TEACHER_OUTPUT).resolve(),
-        requested,
     )
     if arguments.check:
         manifest = verify_records(repository, output)

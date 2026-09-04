@@ -7,7 +7,6 @@ import platform
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 from qorl.adapters.model import (
@@ -25,7 +24,6 @@ from qorl.sft.schemas import (
     JsonObject,
     PreparationReport,
     TrainingReport,
-    ValidationLoss,
     load_json_object,
     load_record,
     require_float,
@@ -69,16 +67,6 @@ def policy(
         load_json_object(repository / config.policy_config).get("policy"), "policy"
     )
     return model_snapshot(value), QoAgentConfig.from_dict(value), value
-
-
-def validation_interval(steps: int, config: DatasetConfig) -> int:
-    return max(
-        1,
-        min(
-            config.training.maximum_validation_interval,
-            steps // config.training.validation_points,
-        ),
-    )
 
 
 def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
@@ -150,6 +138,8 @@ def prepare(repository: Path) -> tuple[Path, PreparationReport]:
             str(policy_config.context_length),
             "--seed",
             str(dataset_config.seed),
+            "--splits",
+            "train",
         ],
         repository,
     )
@@ -161,18 +151,15 @@ def prepare(repository: Path) -> tuple[Path, PreparationReport]:
     if require_list(rendered.get("truncated_examples"), "truncated_examples"):
         raise RuntimeError("render audit found truncated examples")
     template = (repository / TEMPLATE).read_text(encoding="utf-8")
-    resolved = template.replace("__MAX_STEPS__", str(steps)).replace(
-        "__VALIDATION_INTERVAL__", str(validation_interval(steps, dataset_config))
+    resolved = (
+        template.replace("__MAX_STEPS__", str(steps))
+        .replace("__SEQUENCE_LENGTH__", str(policy_config.context_length))
+        .replace("__DATASET_SEED__", str(dataset_config.seed))
     )
-    resolved = resolved.replace(
-        "__SEQUENCE_LENGTH__", str(policy_config.context_length)
-    ).replace("__DATASET_SEED__", str(dataset_config.seed))
     output = repository / RESOLVED_CONFIG
     output.write_text(resolved, encoding="utf-8")
-    config = tomllib.loads(resolved)
     return output, PreparationReport(
         optimizer_steps=steps,
-        validation_interval=config["val"]["interval"],
         render_audit=str(audit),
         resolved_config=str(output),
     )
@@ -202,14 +189,6 @@ def training_report(repository: Path, model: QoAgentConfig, steps: int) -> Path:
             for item in reversed(records)
             if "loss/mean" in item
         ),
-        validation_losses=[
-            ValidationLoss(
-                step=require_int(item.get("step"), "validation step"),
-                loss=require_float(item.get("val/loss"), "validation loss"),
-            )
-            for item in records
-            if "val/loss" in item
-        ],
         dataset_manifest_sha256=sha256_file(dataset / "manifest.json"),
         render_audit_sha256=sha256_file(dataset / "render-audit.json"),
         resolved_config_sha256=sha256_file(dataset / "train.toml"),
@@ -327,8 +306,6 @@ def train(repository: Path) -> Path:
             "--tokenizer.name",
             str(snapshot),
             "--data.name",
-            str(dataset / "prime"),
-            "--val.data.name",
             str(dataset / "prime"),
             "--output-dir",
             str(output),

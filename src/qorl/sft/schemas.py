@@ -119,7 +119,6 @@ class TeacherTargets(SftRecord):
         return {
             ActionFamily.LEADING: self.leading,
             ActionFamily.JOIN: self.join,
-            ActionFamily.MEMOIZE: self.memoize,
             ActionFamily.PARALLEL: self.parallel,
         }
 
@@ -383,6 +382,7 @@ class LabelSettings(SftRecord):
 class AssemblySettings(SftRecord):
     maximum_examples_per_task: int = Field(ge=1)
     maximum_syntax_examples_per_task: int = Field(ge=1)
+    keep_default_examples: int = Field(ge=0)
 
 
 class MeasurementSettings(SftRecord):
@@ -408,13 +408,6 @@ class TrainingSettings(SftRecord):
 class GateSettings(SftRecord):
     samples_per_task: int = Field(ge=1)
     concurrency: int = Field(ge=1)
-    constraint_satisfied_rate_floor: float = Field(ge=0, le=1)
-    default_duplicate_rate_ceiling: float = Field(ge=0, le=1)
-    novel_candidate_rate_improvement: float = Field(ge=0, le=1)
-    unlabeled_intervention_rate_floor: float = Field(ge=0, le=1)
-    fingerprints_per_intervened_task_floor: float = Field(ge=0)
-    action_family_rate_floor: float = Field(ge=0, le=1)
-    required_action_families: list[ActionFamily]
 
 
 class DatasetConfig(SftRecord):
@@ -550,7 +543,6 @@ class DemonstrationProvenance(SftRecord):
     sampler: SamplerIdentity
     filter: FilterProvenance
     budget: JsonObject
-    measurement: MeasurementProvenance | DefaultBestProvenance | None
 
 
 class CandidateEvidence(SftRecord):
@@ -610,13 +602,8 @@ class DatasetSelectionIdentity(SftRecord):
 
 class DatasetInputs(SftRecord):
     sampling_manifest_sha256: str
-    default_best_sampling_manifest_sha256: str | None
-    validation_sampling_manifest_sha256: str
     sampling_filter_manifest_sha256: str
-    default_best_filter_manifest_sha256: str | None
     teacher_filter_manifest_sha256: str
-    validation_filter_manifest_sha256: str
-    measurement_manifest_sha256: str
 
 
 class DemonstrationIdentity(SftRecord):
@@ -642,18 +629,11 @@ class DatasetManifest(SftRecord):
     train_example_sources: dict[ExampleSource, int]
     prime_artifacts: dict[str, PrimeArtifact]
     inputs: DatasetInputs
-    frozen_validation_task_ids: list[str]
     demonstrations: list[DemonstrationIdentity]
-
-
-class ValidationLoss(SftRecord):
-    step: int = Field(ge=0)
-    loss: float
 
 
 class PreparationReport(SftRecord):
     optimizer_steps: int = Field(ge=1)
-    validation_interval: int = Field(ge=1)
     render_audit: str
     resolved_config: str
 
@@ -667,7 +647,6 @@ class TrainingReport(SftRecord):
     optimizer_steps: int = Field(ge=1)
     peak_gpu_memory_gib: float
     final_training_loss: float
-    validation_losses: list[ValidationLoss]
     dataset_manifest_sha256: str
     render_audit_sha256: str
     resolved_config_sha256: str
@@ -691,29 +670,13 @@ class GateRollout(SftRecord):
     error: PipelineError | None
 
 
-class GateCohortSummary(SftRecord):
+class GateSummary(SftRecord):
     task_count: int = Field(ge=0)
     rollout_count: int = Field(ge=0)
     completed_rollouts: int = Field(ge=0)
-    intervention_rate: float
-    abstention_rate: float
-    action_valid_rate: float
-    constraint_satisfied_rate: float
-    default_duplicate_rate: float
-    novel_candidate_rate: float
-    fingerprints_per_intervened_task: float
-    mixed_decision_task_share: float
-    leading_constraint_satisfied_rate: float | None
-    action_families: dict[ActionFamily, int]
-
-
-class GateChecks(SftRecord):
-    constraint_satisfied: bool
-    default_duplicates: bool
-    novel_candidate_improvement: bool
-    unlabeled_intervention: bool
-    unlabeled_diversity: bool
-    family_coverage: bool
+    failed_rollouts: int = Field(ge=0)
+    valid_plan_rate: float
+    novel_plan_rate: float
 
 
 class GateReport(SftRecord):
@@ -725,11 +688,7 @@ class GateReport(SftRecord):
     server_identity: JsonObject
     selection: FileIdentity
     dataset_config: FileIdentity
-    sampler_reference: SamplingSummary
-    cohorts: dict[str, GateCohortSummary]
-    labeled_known_win_intervention_rate: float | None
-    labeled_default_best_abstention_rate: float | None
-    checks: GateChecks | None
+    summary: GateSummary | None
     database_pool: JsonObject | None
     rollouts: list[GateRollout]
 

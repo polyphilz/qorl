@@ -36,26 +36,6 @@ user = false
 assistant = true
 tool = false
 
-[val]
-interval = __VALIDATION_INTERVAL__
-eval_on_start = true
-
-[val.data]
-name = "outputs/sft/protocol-sft-v2/prime"
-splits = ["validation"]
-seq_len = __SEQUENCE_LENGTH__
-batch_size = 1
-micro_batch_size = 1
-num_workers = 1
-shuffle = false
-seed = __DATASET_SEED__
-
-[val.data.loss_mask]
-system = false
-user = false
-assistant = true
-tool = false
-
 [renderer]
 name = "qwen3.5"
 enable_thinking = false

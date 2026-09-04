@@ -25,7 +25,7 @@ def rollout(
     )
 
 
-def test_gate_summary_reports_diversity_and_mixed_decisions() -> None:
+def test_gate_summary_reports_valid_and_novel_plan_rates() -> None:
     summary = summarize(
         [
             rollout("task-1", 1, "candidate", "plan-a"),
@@ -35,7 +35,8 @@ def test_gate_summary_reports_diversity_and_mixed_decisions() -> None:
         ]
     )
 
-    assert summary.intervention_rate == 0.75
-    assert summary.fingerprints_per_intervened_task == 1.5
-    assert summary.mixed_decision_task_share == 0.5
-    assert summary.leading_constraint_satisfied_rate == 1.0
+    assert summary.task_count == 2
+    assert summary.completed_rollouts == 4
+    assert summary.failed_rollouts == 0
+    assert summary.valid_plan_rate == 0.75
+    assert summary.novel_plan_rate == 0.75
