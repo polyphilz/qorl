@@ -8,6 +8,7 @@ from qorl.sft.assemble import select_tasks
 from qorl.sft.schemas import (
     ActionFamily,
     DatasetConfig,
+    TeacherConfig,
     load_json_object,
     load_record,
     require_list,
@@ -79,6 +80,26 @@ def test_dataset_config_pins_v2_policy_and_thresholds(repository_root) -> None:
     assert config.gate.fingerprints_per_intervened_task_floor == 2.0
     assert config.gate.action_family_rate_floor == 0.01
     assert set(config.gate.required_action_families) == set(ActionFamily)
+
+
+def test_teacher_config_pins_fable_and_the_coverage_budget(repository_root) -> None:
+    config = load_record(
+        repository_root / "experiments/005-protocol-sft-v2/teacher.json",
+        TeacherConfig,
+    )
+
+    assert config.model == "claude-fable-5-1"
+    assert config.temperature == 0.3
+    assert config.maximum_attempts_per_task == 3
+    assert config.attempt_budget_multiplier == 3
+    assert config.smoke_accepted_per_family == 2
+    assert config.maximum_teacher_share == 0.2
+    assert config.accepted_targets.as_families() == {
+        ActionFamily.LEADING: 28,
+        ActionFamily.JOIN: 8,
+        ActionFamily.MEMOIZE: 4,
+        ActionFamily.PARALLEL: 4,
+    }
 
 
 def test_training_validation_interval_produces_several_loss_points(

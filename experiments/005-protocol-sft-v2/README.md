@@ -66,12 +66,10 @@ uv run python -m qorl.sft.sample \
   --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 ```
 
-Continue only if `sampling/sampling-manifest.json` reports a distinct novel
-fingerprint yield of at least 11%. Otherwise run the same 100 tasks with the
-pilot SFT sampler into a separate output directory and compare that exact
-metric; the sampler guard prevents accidentally mixing the two policies.
-With the chosen sampler still served, complete the sampling split and draw six
-samples per validation task:
+The selected pilot-SFT sampler cleared the gate at 19.75%; the correctly
+composed RL v2 step-70 sampler reached 18.75% on the same tasks and seeds.
+With the selected sampler still served, complete the sampling split and draw
+six samples per validation task:
 
 ```bash
 uv run python -m qorl.sft.sample \
@@ -84,22 +82,32 @@ uv run python -m qorl.sft.sample \
   --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 ```
 
-Filter both splits, measure the accepted training candidates, assemble the
-dataset, and audit Prime-RL's rendering without beginning training:
+Filter the sampling split, then generate the missing action-family coverage
+with Fable 5.1. The API uses automatic tool choice; every accepted action is
+replayed through the ordinary agent loop and plan validator before it can enter
+the dataset. The smoke test requires two accepted examples from each target
+family. Accepted records and all retry provenance are stored under this
+experiment directory, so later dataset builds do not call the API:
 
 ```bash
 uv run python -m qorl.sft.filter --split sampling
+uv run python -m qorl.sft.teacher --smoke
+uv run python -m qorl.sft.teacher --check
+uv run python -m qorl.sft.teacher
+uv run python -m qorl.sft.teacher --check
+```
+
+The teacher process reads its temporary credential only from
+`ANTHROPIC_API_KEY`. After teacher generation, filter the validation split,
+measure the accepted training candidates, assemble the dataset, and audit
+Prime-RL's rendering without beginning training:
+
+```bash
 uv run python -m qorl.sft.filter --split validation
 uv run python -m qorl.sft.measure
 uv run python -m qorl.sft.build_protocol_dataset
 uv run python experiments/005-protocol-sft-v2/run.py --prepare
 ```
-
-If yield or family coverage is short, use `qorl.sft.sample --task-ids
-<tasks.json> --sample-start 5 --sample-count 2` for the affected tasks, with
-an optional task-to-guidance JSON passed through `--guidance`, then rerun the
-downstream stages. Guided traces retain both the original and
-guidance-stripped transcripts.
 
 The normal syntax pass stops at six samples per task. Searching for defensible
 `keep_default` labels is separate: a small recorded task subset may receive up

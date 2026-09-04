@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "teacher_id": "protocol-sft-v2-fable-5-1",
+  "base_url": "https://api.anthropic.com/v1/",
+  "model": "claude-fable-5-1",
+  "temperature": 0.3,
+  "max_tokens": 4096,
+  "request_timeout_seconds": 300,
+  "maximum_attempts_per_task": 3,
+  "attempt_budget_multiplier": 3,
+  "smoke_accepted_per_family": 2,
+  "maximum_teacher_share": 0.2,
+  "accepted_targets": {
+    "leading": 28,
+    "join": 8,
+    "memoize": 4,
+    "parallel": 4
+  },
+  "priority_templates": [
+    "ceb-3a",
+    "ceb-6a",
+    "ceb-9b",
+    "ceb-2a"
+  ]
+}

@@ -51,6 +51,14 @@ class ActionFamily(StrEnum):
     SETTING = "setting"
 
 
+class TeacherAttemptStatus(StrEnum):
+    PROVIDER_ERROR = "provider_error"
+    RESPONSE_ERROR = "response_error"
+    REPLAY_ERROR = "replay_error"
+    VALIDATION_ERROR = "validation_error"
+    ACCEPTED = "accepted"
+
+
 class SftRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -94,6 +102,106 @@ class SampleRecord(SftRecord):
     policy_trace: JsonObject | None
     training_transcript: list[JsonObject] | None
     error: PipelineError | None
+
+
+class TeacherTargets(SftRecord):
+    leading: int = Field(ge=1)
+    join: int = Field(ge=1)
+    memoize: int = Field(ge=1)
+    parallel: int = Field(ge=1)
+
+    def as_families(self) -> dict[ActionFamily, int]:
+        return {
+            ActionFamily.LEADING: self.leading,
+            ActionFamily.JOIN: self.join,
+            ActionFamily.MEMOIZE: self.memoize,
+            ActionFamily.PARALLEL: self.parallel,
+        }
+
+
+class TeacherConfig(SftRecord):
+    schema_version: Literal[1] = 1
+    teacher_id: str
+    base_url: str
+    model: str
+    temperature: float = Field(ge=0)
+    max_tokens: int = Field(ge=1)
+    request_timeout_seconds: int = Field(ge=1)
+    maximum_attempts_per_task: int = Field(ge=1)
+    attempt_budget_multiplier: int = Field(ge=1)
+    smoke_accepted_per_family: int = Field(ge=1)
+    maximum_teacher_share: float = Field(gt=0, lt=1)
+    accepted_targets: TeacherTargets
+    priority_templates: list[str]
+
+
+class TeacherIdentity(SftRecord):
+    teacher_id: str
+    model: str
+    base_url: str
+    temperature: float
+    config: FileIdentity
+
+
+class TeacherPrefix(SftRecord):
+    sample_path: str
+    sample_sha256: str
+    sample: int = Field(ge=1)
+    assistant_turns: int = Field(ge=0)
+
+
+class TeacherAttempt(SftRecord):
+    attempt: int = Field(ge=1)
+    completed_at_utc: str
+    status: TeacherAttemptStatus
+    prompt: str
+    tool_schema_sha256: str
+    response: JsonObject | None
+    action: JsonObject | None
+    candidate: Candidate | None
+    rejection_reason: str | None
+
+
+class TeacherGenerationRecord(SftRecord):
+    schema_version: Literal[1] = 1
+    task_id: str
+    template_id: str
+    requested_family: ActionFamily
+    teacher: TeacherIdentity
+    prefix: TeacherPrefix
+    attempts: list[TeacherAttempt]
+    accepted_sample: SampleRecord | None
+
+
+class TeacherRecordIdentity(SftRecord):
+    task_id: str
+    template_id: str
+    requested_family: ActionFamily
+    path: str
+    sha256: str
+    accepted: bool
+
+
+class TeacherSummary(SftRecord):
+    tasks_attempted: int = Field(ge=0)
+    api_attempts: int = Field(ge=0)
+    accepted: int = Field(ge=0)
+    accepted_by_family: dict[ActionFamily, int]
+    rejected_by_reason: dict[str, int]
+
+
+class TeacherManifest(SftRecord):
+    schema_version: Literal[1] = 1
+    generation_id: str
+    status: RunStatus
+    started_at_utc: str
+    completed_at_utc: str | None
+    teacher: TeacherIdentity
+    source_filter: FileIdentity
+    targets: dict[ActionFamily, int]
+    database_pool: JsonObject | None
+    summary: TeacherSummary
+    records: list[TeacherRecordIdentity]
 
 
 class SamplingSummary(SftRecord):

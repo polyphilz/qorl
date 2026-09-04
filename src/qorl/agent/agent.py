@@ -5,7 +5,7 @@ import json
 from dataclasses import asdict
 from typing import Any
 
-from qorl.agent.client import ModelError, OpenAIModelClient
+from qorl.agent.client import ModelClient, ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
 from qorl.agent.interface import AgentInterface
 from qorl.agent.prompts import system_prompt
@@ -29,7 +29,7 @@ class QoAgentPolicy:
     def __init__(
         self,
         config: QoAgentConfig,
-        client: OpenAIModelClient | None = None,
+        client: ModelClient | None = None,
     ) -> None:
         self.config = config
         self.client = client or OpenAIModelClient(

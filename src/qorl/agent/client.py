@@ -5,11 +5,19 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Protocol
 
 
 class ModelError(RuntimeError):
     pass
+
+
+class ModelClient(Protocol):
+    def models(self) -> dict[str, Any]: ...
+
+    def version(self) -> dict[str, Any]: ...
+
+    def chat(self, body: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class OpenAIModelClient:
