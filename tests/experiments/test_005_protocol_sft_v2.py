@@ -94,6 +94,14 @@ def test_training_validation_interval_produces_several_loss_points(
     assert runner["validation_interval"](60, config) == 15
 
 
+def test_sampler_uses_the_verified_step_70_adapter(load_experiment) -> None:
+    runner = load_experiment("experiments/005-protocol-sft-v2/run.py")
+
+    assert str(runner["DEFAULT_SAMPLER_ADAPTER"]) == (
+        "outputs/rl/rl-run-v2/evaluation-adapters/step-070"
+    )
+
+
 def test_training_template_matches_the_sampling_context(repository_root) -> None:
     template = (
         repository_root / "experiments/005-protocol-sft-v2/train.toml.template"
