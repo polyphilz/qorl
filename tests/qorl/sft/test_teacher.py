@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from tests.qorl.sft.factories import baseline, candidate, sample
 
-from qorl.agent.client import ModelError
+from qorl.agent.client import ModelError, ModelRequestError
 from qorl.agent.types import ToolName
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -125,7 +125,8 @@ def test_teacher_request_uses_fable_auto_tool_choice_without_a_seed(
     request = teacher_request(teacher_config, ActionFamily.LEADING, prefix(), None)
 
     assert request["model"] == "claude-fable-5-1"
-    assert request["temperature"] == 0.3
+    assert request["max_tokens"] == 16_384
+    assert "temperature" not in request
     assert request["tool_choice"] == "auto"
     assert "seed" not in request
     assert len(request["tools"]) == 2
@@ -246,6 +247,28 @@ def test_generation_stops_the_task_after_a_replay_error(
     assert len(client.requests) == 1
 
 
+def test_generation_stops_the_run_after_a_fatal_provider_error(
+    teacher_config: TeacherConfig,
+) -> None:
+    client = ScriptedTeacherClient([ModelRequestError("unsupported parameter")])
+
+    def replay(_decision: TeacherDecision) -> SampleRecord:
+        raise AssertionError("a rejected request cannot be replayed")
+
+    with pytest.raises(ModelRequestError, match="unsupported parameter"):
+        generate_attempts(
+            ActionFamily.LEADING,
+            teacher_config,
+            prefix(),
+            client,
+            replay,
+            20_480,
+            3,
+        )
+
+    assert len(client.requests) == 1
+
+
 def test_generation_records_provider_and_response_errors_before_accepting(
     teacher_config: TeacherConfig,
 ) -> None:
@@ -256,6 +279,7 @@ def test_generation_records_provider_and_response_errors_before_accepting(
     client = ScriptedTeacherClient(
         [ModelError("temporary outage"), malformed, teacher_response(arguments)]
     )
+    pauses: list[float] = []
 
     def replay(decision: TeacherDecision) -> SampleRecord:
         return replayed_sample(decision.action, valid=True)
@@ -268,6 +292,7 @@ def test_generation_records_provider_and_response_errors_before_accepting(
         replay,
         20_480,
         3,
+        pauses.append,
     )
 
     assert [attempt.status for attempt in result.attempts] == [
@@ -278,6 +303,7 @@ def test_generation_records_provider_and_response_errors_before_accepting(
     final_prompt = client.requests[-1]["messages"][-1]["content"]
     assert isinstance(final_prompt, str)
     assert "exactly one tool call" in final_prompt
+    assert pauses == [5]
 
 
 def test_generation_rejects_an_action_missing_the_requested_family(

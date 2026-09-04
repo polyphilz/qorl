@@ -124,9 +124,10 @@ class TeacherConfig(SftRecord):
     teacher_id: str
     base_url: str
     model: str
-    temperature: float = Field(ge=0)
+    decoding: Literal["provider_default"]
     max_tokens: int = Field(ge=1)
     request_timeout_seconds: int = Field(ge=1)
+    provider_retry_delay_seconds: int = Field(ge=0)
     maximum_attempts_per_task: int = Field(ge=1)
     attempt_budget_multiplier: int = Field(ge=1)
     smoke_accepted_per_family: int = Field(ge=1)
@@ -139,7 +140,7 @@ class TeacherIdentity(SftRecord):
     teacher_id: str
     model: str
     base_url: str
-    temperature: float
+    decoding: Literal["provider_default"]
     config: FileIdentity
 
 

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -11,7 +12,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import ModelClient, ModelError, OpenAIModelClient
+from qorl.agent.client import (
+    ModelClient,
+    ModelError,
+    ModelRequestError,
+    OpenAIModelClient,
+)
 from qorl.agent.types import ToolName
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot
@@ -234,7 +240,7 @@ def teacher_identity(
         teacher_id=config.teacher_id,
         model=config.model,
         base_url=config.base_url,
-        temperature=config.temperature,
+        decoding=config.decoding,
         config=FileIdentity(
             path=config_path.relative_to(repository).as_posix(),
             sha256=sha256_file(config_path),
@@ -334,7 +340,6 @@ def teacher_request(
             "tools": prefix_tools(prefix),
             "tool_choice": "auto",
             "max_tokens": config.max_tokens,
-            "temperature": config.temperature,
         }
     )
 
@@ -456,6 +461,7 @@ def generate_attempts(
     replay: Callable[[TeacherDecision], SampleRecord],
     context_length: int,
     maximum_attempts: int,
+    pause: Callable[[float], None] = time.sleep,
 ) -> AttemptResult:
     attempts: list[TeacherAttempt] = []
     feedback: str | None = None
@@ -465,6 +471,8 @@ def generate_attempts(
         request = teacher_request(config, family, prefix, feedback)
         try:
             response = JSON_OBJECT_ADAPTER.validate_python(client.chat(request))
+        except ModelRequestError:
+            raise
         except ModelError as error:
             attempts.append(
                 TeacherAttempt(
@@ -479,6 +487,8 @@ def generate_attempts(
                     rejection_reason=str(error),
                 )
             )
+            if attempt_number < maximum_attempts:
+                pause(config.provider_retry_delay_seconds)
             continue
         try:
             decision = response_decision(response)

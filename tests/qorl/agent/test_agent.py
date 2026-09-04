@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import urllib.error
+import urllib.request
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import OpenAIModelClient
+from qorl.agent.client import ModelError, ModelRequestError, OpenAIModelClient
 from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
@@ -334,6 +337,49 @@ class TestQoAgent:
         client = OpenAIModelClient("http://example.test/v1", 10, "secret")
 
         assert client.api_key == "secret"
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+    def test_model_client_treats_non_rate_limit_4xx_as_fatal(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        error = urllib.error.HTTPError(
+            "http://example.test/v1/chat/completions",
+            status,
+            "rejected",
+            None,
+            io.BytesIO(b'{"error":"bad request"}'),
+        )
+
+        def reject(_request: urllib.request.Request, timeout: int) -> None:
+            del timeout
+            raise error
+
+        monkeypatch.setattr(urllib.request, "urlopen", reject)
+
+        with pytest.raises(ModelRequestError, match=f"HTTP {status}"):
+            OpenAIModelClient("http://example.test/v1", 10).chat({})
+
+    @pytest.mark.parametrize("status", [429, 500])
+    def test_model_client_leaves_retryable_http_failures_as_model_errors(
+        self, monkeypatch: pytest.MonkeyPatch, status: int
+    ) -> None:
+        error = urllib.error.HTTPError(
+            "http://example.test/v1/chat/completions",
+            status,
+            "temporary",
+            None,
+            io.BytesIO(b'{"error":"retry"}'),
+        )
+
+        def reject(_request: urllib.request.Request, timeout: int) -> None:
+            del timeout
+            raise error
+
+        monkeypatch.setattr(urllib.request, "urlopen", reject)
+
+        with pytest.raises(ModelError) as caught:
+            OpenAIModelClient("http://example.test/v1", 10).chat({})
+        assert not isinstance(caught.value, ModelRequestError)
 
     def test_request_seed_can_be_left_to_the_rollout_server(self) -> None:
         policy = QoAgentPolicy(replace(config(), seed=None), FakeClient())

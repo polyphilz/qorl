@@ -97,7 +97,8 @@ uv run python -m qorl.sft.teacher
 uv run python -m qorl.sft.teacher --check
 ```
 
-The teacher process reads its temporary credential only from
+Fable 5.1 uses provider-default decoding because its API rejects a temperature
+parameter. The teacher process reads its temporary credential only from
 `ANTHROPIC_API_KEY`. After teacher generation, filter the validation split,
 measure the accepted training candidates, assemble the dataset, and audit
 Prime-RL's rendering without beginning training:

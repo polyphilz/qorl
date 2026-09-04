@@ -89,7 +89,10 @@ def test_teacher_config_pins_fable_and_the_coverage_budget(repository_root) -> N
     )
 
     assert config.model == "claude-fable-5-1"
-    assert config.temperature == 0.3
+    assert config.decoding == "provider_default"
+    assert config.max_tokens == 16_384
+    assert config.request_timeout_seconds == 600
+    assert config.provider_retry_delay_seconds == 5
     assert config.maximum_attempts_per_task == 3
     assert config.attempt_budget_multiplier == 3
     assert config.smoke_accepted_per_family == 2

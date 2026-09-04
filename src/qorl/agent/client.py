@@ -5,11 +5,16 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from http import HTTPStatus
 from typing import Any, Protocol
 
 
 class ModelError(RuntimeError):
     pass
+
+
+class ModelRequestError(ModelError):
+    """A non-retryable HTTP request rejected by the model provider."""
 
 
 class ModelClient(Protocol):
@@ -52,7 +57,15 @@ class OpenAIModelClient:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")[:2_000]
-            raise ModelError(
+            error_type = (
+                ModelRequestError
+                if HTTPStatus.BAD_REQUEST
+                <= error.code
+                < HTTPStatus.INTERNAL_SERVER_ERROR
+                and error.code != HTTPStatus.TOO_MANY_REQUESTS
+                else ModelError
+            )
+            raise error_type(
                 f"model server returned HTTP {error.code}: {detail}"
             ) from error
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
