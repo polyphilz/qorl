@@ -57,10 +57,6 @@ Then merge and serve the resulting adapter and run four attempts on each of the
 uv run python experiments/005-protocol-sft-v2/run.py --gate
 ```
 
-Compare the valid-plan and novel-plan rates with the pilot model on the same
-queries. SFT v2 becomes the RL v3 starting checkpoint if validity clearly rises
-from the pilot's roughly 52% rate while novelty does not fall from roughly 18%.
-
 ## Frozen provenance
 
 - Selection identity: `qorl-protocol-sft-v2-selection-v1`

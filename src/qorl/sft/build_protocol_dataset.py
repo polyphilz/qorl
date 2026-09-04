@@ -45,7 +45,7 @@ from qorl.workload.taskset import TaskSet
 DATASET_ID = "protocol-sft-v2"
 STUDENT_TEACHER_ID = "iterated_rejection_sampling_v1"
 FABLE_TEACHER_ID = "protocol-sft-v2-fable-5-1"
-MEASUREMENT_MODE = "plan_validation_only"
+MEASUREMENT_MODE = "rejection_sampling_plan_validation"
 
 
 @dataclass(frozen=True)
