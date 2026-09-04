@@ -18,7 +18,8 @@ from qorl.measure.schemas import MeasurementStatus, ToolResultStatus
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
-from qorl.plans.verify import verify_action
+from qorl.plans.verify import compact_plan, verify_action
+from qorl.sft.schemas import JSON_OBJECT_ADAPTER
 from qorl.workload.taskset import TaskSet
 
 
@@ -273,11 +274,17 @@ def validate_protocol_demo(
             key = (name, json.dumps(arguments, sort_keys=True))
             require(key not in inspections, f"turn {turn}: repeated inspection")
             inspections.add(key)
-            expected_plan = (
+            expected_explain = JSON_OBJECT_ADAPTER.validate_python(
                 evidence.get("default_plan")
                 if candidate_id == "default"
                 else evidence["candidates"][candidate_id]["plain_explain"]
             )
+            require(
+                isinstance(expected_explain, dict)
+                and isinstance(expected_explain.get("Plan"), dict),
+                f"turn {turn}: invalid plan evidence",
+            )
+            expected_plan = {"Plan": compact_plan(expected_explain["Plan"])}
             actual_plan = {
                 key: value for key, value in result.items() if key != TURN_BUDGET_FIELD
             }

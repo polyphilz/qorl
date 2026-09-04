@@ -13,6 +13,7 @@ from qorl.measure.rollout import MAX_CANDIDATES
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
+from qorl.plans.verify import compact_plan
 from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
 from qorl.workload.taskset import TaskSet
@@ -46,7 +47,8 @@ def synthetic_demo(
     }
     plan_action = PlanAction.from_raw({"version": 1, "leading": leading}, catalog)
     action, hint = plan_action.to_wire(), plan_action.compile()
-    plan = {"Plan": raw_plan(leading)}
+    plan = {"Plan": {**raw_plan(leading), "Startup Cost": 1.0}}
+    visible_plan = {"Plan": compact_plan(plan["Plan"])}
     tools = agent_tools(aliases)
     maximum_turns = 64
     reserved_decision_turns = candidate_attempts + 1
@@ -103,7 +105,7 @@ def synthetic_demo(
             ]
         )
 
-    add(1, "get_plan", {"candidate_id": "default"}, plan)
+    add(1, "get_plan", {"candidate_id": "default"}, visible_plan)
     add(
         2,
         "evaluate_candidate",
@@ -118,7 +120,7 @@ def synthetic_demo(
     )
     call_sequence = ["get_plan", "evaluate_candidate"]
     if candidate_attempts > 1:
-        add(3, "get_plan", {"candidate_id": "candidate-01"}, plan)
+        add(3, "get_plan", {"candidate_id": "candidate-01"}, visible_plan)
         add(4, "finish", {}, {"status": "finished"})
         call_sequence.extend(["get_plan", "finish"])
     else:
