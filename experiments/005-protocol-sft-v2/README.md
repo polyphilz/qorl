@@ -1,6 +1,6 @@
 # 005 — Tool-use SFT v2
 
-**Status:** inventory and pipeline frozen; teacher smoke complete, full generation pending
+**Status:** teacher generation and filtering complete; measurement pending
 
 This experiment will build expert-iteration SFT data by rejection-sampling
 real one-candidate agent trajectories, then train a fresh LoRA from the pinned
@@ -92,6 +92,11 @@ Accepted records and all retry provenance are stored under this
 experiment directory, so later dataset builds do not call the API. Teacher
 documents remain syntax examples even if measurement later finds them faster;
 measured-win labels are reserved for student samples:
+
+The completed run accepted all 40 requested examples: 28 Leading, eight join,
+and four parallel. It used 64 API attempts across 44 tasks. Every accepted
+record passed replay validation and is stored in this experiment directory.
+The subsequent filter accepted all 40 as distinct novel syntax candidates.
 
 ```bash
 uv run python -m qorl.sft.filter --split sampling

@@ -1,0 +1,787 @@
+{
+  "accepted_sample": null,
+  "attempts": [
+    {
+      "action": {
+        "joins": [
+          {
+            "force": "nestloop",
+            "memoize": "forbid",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n",
+              "pi"
+            ]
+          }
+        ],
+        "leading": {
+          "left": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": "mi1",
+                        "right": "it1"
+                      },
+                      "right": "t"
+                    },
+                    "right": "kt"
+                  },
+                  "right": "ci"
+                },
+                "right": "rt"
+              },
+              "right": "n"
+            },
+            "right": "pi"
+          },
+          "right": "it2"
+        },
+        "parallel": [
+          {
+            "mode": "soft",
+            "relation": "mi1",
+            "workers": 2
+          }
+        ],
+        "row_corrections": [
+          {
+            "mode": "multiply",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci"
+            ],
+            "value": 4
+          }
+        ],
+        "version": 1
+      },
+      "attempt": 1,
+      "candidate": {
+        "action": {
+          "joins": [
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "pi",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "forbid",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "rt",
+                "t"
+              ]
+            }
+          ],
+          "leading": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "left": "mi1",
+                          "right": "it1"
+                        },
+                        "right": "t"
+                      },
+                      "right": "kt"
+                    },
+                    "right": "ci"
+                  },
+                  "right": "rt"
+                },
+                "right": "n"
+              },
+              "right": "pi"
+            },
+            "right": "it2"
+          },
+          "parallel": [
+            {
+              "mode": "soft",
+              "relation": "mi1",
+              "workers": 2
+            }
+          ],
+          "row_corrections": [
+            {
+              "mode": "multiply",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "t"
+              ],
+              "value": 4
+            }
+          ],
+          "version": 1
+        },
+        "action_valid": true,
+        "attempts_remaining": 0,
+        "candidate_id": "candidate-01",
+        "compact_plan": null,
+        "compiled_hint": "/*+ Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2)) NestLoop(ci it1 kt mi1 n pi rt t) NestLoop(ci it1 kt mi1 n rt t) NoMemoize(ci it1 kt mi1 n rt t) Rows(ci it1 kt mi1 t *4) Parallel(mi1 2 soft) */",
+        "constraints_satisfied": false,
+        "duplicate_of": null,
+        "errors_or_diagnostics": [
+          "pg_hint_plan reported not used hints: NoMemoize(ci it1 kt mi1 n rt t)"
+        ],
+        "execution_timed_out": false,
+        "measured_explain_analyze": null,
+        "measurement_status": null,
+        "pg_hint_plan": {
+          "duplicate": "(none)",
+          "error": "(none)",
+          "not_used": "NoMemoize(ci it1 kt mi1 n rt t)",
+          "used": "NestLoop(ci it1 kt mi1 n rt t)NestLoop(ci it1 kt mi1 n pi rt t)Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2))Rows(ci it1 kt mi1 t *4)Parallel(mi1 2 soft)"
+        },
+        "plain_explain": null,
+        "plan_sha256": null,
+        "provisional_measurements": [],
+        "provisional_median_execution_time_ms": null,
+        "provisional_speedup": 0.0,
+        "timeout_ms": null,
+        "warmup": null
+      },
+      "completed_at_utc": "2026-09-04T07:21:06.611987+00:00",
+      "prompt": "Call evaluate_candidate exactly once now; do not emit prose or call another tool.\nPass its action argument as a JSON object, never as text or an array.\nPropose a physically novel join order. The leading tree must include every query alias exactly once, and each internal join must combine two subtrees connected by a query join predicate.\nGround the proposal in the observed plan and statistics. For a new join order, start from the most selective filtered relation. Keep PostgreSQL's default join methods unless row estimates justify changing one, and never force a nested loop over a large unfiltered relation.\nUse only relations, indexes, join edges, and planner settings present in the task observation.",
+      "rejection_reason": "constraints_not_satisfied",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "index": 0,
+            "message": {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"action\": {\"version\": 1, \"leading\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": \"mi1\", \"right\": \"it1\"}, \"right\": \"t\"}, \"right\": \"kt\"}, \"right\": \"ci\"}, \"right\": \"rt\"}, \"right\": \"n\"}, \"right\": \"pi\"}, \"right\": \"it2\"}, \"joins\": [{\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\"], \"force\": \"nestloop\", \"memoize\": \"forbid\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\", \"pi\"], \"force\": \"nestloop\"}], \"row_corrections\": [{\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\"], \"mode\": \"multiply\", \"value\": 4}], \"parallel\": [{\"relation\": \"mi1\", \"workers\": 2, \"mode\": \"soft\"}]}}",
+                    "name": "evaluate_candidate"
+                  },
+                  "id": "toolu_01WgchpFodMs9YVnWqnQw9zP",
+                  "type": "function"
+                }
+              ]
+            }
+          }
+        ],
+        "created": 1788506466,
+        "id": "msg_011CehzfqtqriFQYixGK74yY",
+        "model": "claude-fable-5-1",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 363,
+          "prompt_tokens": 8458,
+          "total_tokens": 8821
+        }
+      },
+      "status": "validation_error",
+      "tool_schema_sha256": "3e25dccbed6ada4d07f1f1e520dbdb535c82f0da38e798514e4f37b969bb15ed"
+    },
+    {
+      "action": {
+        "joins": [
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t"
+            ]
+          },
+          {
+            "force": "hash",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci"
+            ]
+          },
+          {
+            "force": "hash",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n",
+              "pi"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n",
+              "pi",
+              "it2"
+            ]
+          }
+        ],
+        "leading": {
+          "left": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": "mi1",
+                        "right": "it1"
+                      },
+                      "right": "t"
+                    },
+                    "right": "kt"
+                  },
+                  "right": "ci"
+                },
+                "right": "rt"
+              },
+              "right": "n"
+            },
+            "right": "pi"
+          },
+          "right": "it2"
+        },
+        "scans": [
+          {
+            "force": "bitmap",
+            "indexes": [
+              "info_type_id_movie_info"
+            ],
+            "relation": "mi1"
+          }
+        ],
+        "version": 1
+      },
+      "attempt": 2,
+      "candidate": {
+        "action": {
+          "joins": [
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "it2",
+                "kt",
+                "mi1",
+                "n",
+                "pi",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "pi",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "hash",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "hash",
+              "memoize": "auto",
+              "relations": [
+                "it1",
+                "kt",
+                "mi1",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "it1",
+                "mi1"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "it1",
+                "mi1",
+                "t"
+              ]
+            }
+          ],
+          "leading": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "left": "mi1",
+                          "right": "it1"
+                        },
+                        "right": "t"
+                      },
+                      "right": "kt"
+                    },
+                    "right": "ci"
+                  },
+                  "right": "rt"
+                },
+                "right": "n"
+              },
+              "right": "pi"
+            },
+            "right": "it2"
+          },
+          "scans": [
+            {
+              "forbid": [],
+              "force": "bitmap",
+              "indexes": [
+                "info_type_id_movie_info"
+              ],
+              "relation": "mi1"
+            }
+          ],
+          "version": 1
+        },
+        "action_valid": true,
+        "attempts_remaining": 0,
+        "candidate_id": "candidate-01",
+        "compact_plan": null,
+        "compiled_hint": "/*+ Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2)) NestLoop(ci it1 it2 kt mi1 n pi rt t) NestLoop(ci it1 kt mi1 n pi rt t) NestLoop(ci it1 kt mi1 n rt t) HashJoin(ci it1 kt mi1 rt t) NestLoop(ci it1 kt mi1 t) HashJoin(it1 kt mi1 t) NestLoop(it1 mi1) NestLoop(it1 mi1 t) BitmapScan(mi1 info_type_id_movie_info) */",
+        "constraints_satisfied": false,
+        "duplicate_of": null,
+        "errors_or_diagnostics": [
+          "scan mi1 uses seq, not bitmap; scan mi1 uses unexpected indexes: []"
+        ],
+        "execution_timed_out": false,
+        "measured_explain_analyze": null,
+        "measurement_status": null,
+        "pg_hint_plan": {
+          "duplicate": "(none)",
+          "error": "(none)",
+          "not_used": "(none)",
+          "used": "BitmapScan(mi1 info_type_id_movie_info)NestLoop(it1 mi1)NestLoop(it1 mi1 t)HashJoin(it1 kt mi1 t)NestLoop(ci it1 kt mi1 t)HashJoin(ci it1 kt mi1 rt t)NestLoop(ci it1 kt mi1 n rt t)NestLoop(ci it1 kt mi1 n pi rt t)NestLoop(ci it1 it2 kt mi1 n pi rt t)Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2))"
+        },
+        "plain_explain": null,
+        "plan_sha256": null,
+        "provisional_measurements": [],
+        "provisional_median_execution_time_ms": null,
+        "provisional_speedup": 0.0,
+        "timeout_ms": null,
+        "warmup": null
+      },
+      "completed_at_utc": "2026-09-04T07:21:14.844452+00:00",
+      "prompt": "Call evaluate_candidate exactly once now; do not emit prose or call another tool.\nPass its action argument as a JSON object, never as text or an array.\nPropose a physically novel join order. The leading tree must include every query alias exactly once, and each internal join must combine two subtrees connected by a query join predicate.\nGround the proposal in the observed plan and statistics. For a new join order, start from the most selective filtered relation. Keep PostgreSQL's default join methods unless row estimates justify changing one, and never force a nested loop over a large unfiltered relation.\nUse only relations, indexes, join edges, and planner settings present in the task observation.\nThe previous action was rejected: pg_hint_plan reported not used hints: NoMemoize(ci it1 kt mi1 n rt t)",
+      "rejection_reason": "constraints_not_satisfied",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "index": 0,
+            "message": {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"action\": {\"version\": 1, \"leading\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": \"mi1\", \"right\": \"it1\"}, \"right\": \"t\"}, \"right\": \"kt\"}, \"right\": \"ci\"}, \"right\": \"rt\"}, \"right\": \"n\"}, \"right\": \"pi\"}, \"right\": \"it2\"}, \"scans\": [{\"relation\": \"mi1\", \"force\": \"bitmap\", \"indexes\": [\"info_type_id_movie_info\"]}], \"joins\": [{\"relations\": [\"mi1\", \"it1\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\"], \"force\": \"hash\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\"], \"force\": \"hash\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\", \"pi\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\", \"pi\", \"it2\"], \"force\": \"nestloop\"}]}}",
+                    "name": "evaluate_candidate"
+                  },
+                  "id": "toolu_01WCuNyAhWcaYRQL4jBBF5iW",
+                  "type": "function"
+                }
+              ]
+            }
+          }
+        ],
+        "created": 1788506474,
+        "id": "msg_011CehzgPhmgT7hqSZCaiHkT",
+        "model": "claude-fable-5-1",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 534,
+          "prompt_tokens": 8506,
+          "total_tokens": 9040
+        }
+      },
+      "status": "validation_error",
+      "tool_schema_sha256": "3e25dccbed6ada4d07f1f1e520dbdb535c82f0da38e798514e4f37b969bb15ed"
+    },
+    {
+      "action": {
+        "joins": [
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci",
+              "rt",
+              "n",
+              "pi"
+            ]
+          },
+          {
+            "force": "nestloop",
+            "memoize": "forbid",
+            "relations": [
+              "mi1",
+              "it1",
+              "t",
+              "kt",
+              "ci"
+            ]
+          }
+        ],
+        "leading": {
+          "left": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": "mi1",
+                        "right": "it1"
+                      },
+                      "right": "t"
+                    },
+                    "right": "kt"
+                  },
+                  "right": "ci"
+                },
+                "right": "rt"
+              },
+              "right": "n"
+            },
+            "right": "pi"
+          },
+          "right": "it2"
+        },
+        "settings": {
+          "enable_material": false
+        },
+        "version": 1
+      },
+      "attempt": 3,
+      "candidate": {
+        "action": {
+          "joins": [
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "pi",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "auto",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "n",
+                "rt",
+                "t"
+              ]
+            },
+            {
+              "forbid": [],
+              "force": "nestloop",
+              "memoize": "forbid",
+              "relations": [
+                "ci",
+                "it1",
+                "kt",
+                "mi1",
+                "t"
+              ]
+            }
+          ],
+          "leading": {
+            "left": {
+              "left": {
+                "left": {
+                  "left": {
+                    "left": {
+                      "left": {
+                        "left": {
+                          "left": "mi1",
+                          "right": "it1"
+                        },
+                        "right": "t"
+                      },
+                      "right": "kt"
+                    },
+                    "right": "ci"
+                  },
+                  "right": "rt"
+                },
+                "right": "n"
+              },
+              "right": "pi"
+            },
+            "right": "it2"
+          },
+          "settings": {
+            "enable_material": false
+          },
+          "version": 1
+        },
+        "action_valid": true,
+        "attempts_remaining": 0,
+        "candidate_id": "candidate-01",
+        "compact_plan": null,
+        "compiled_hint": "/*+ Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2)) NestLoop(ci it1 kt mi1 n pi rt t) NestLoop(ci it1 kt mi1 n rt t) NestLoop(ci it1 kt mi1 t) NoMemoize(ci it1 kt mi1 t) Set(enable_material off) */",
+        "constraints_satisfied": false,
+        "duplicate_of": null,
+        "errors_or_diagnostics": [
+          "pg_hint_plan reported not used hints: NoMemoize(ci it1 kt mi1 t)"
+        ],
+        "execution_timed_out": false,
+        "measured_explain_analyze": null,
+        "measurement_status": null,
+        "pg_hint_plan": {
+          "duplicate": "(none)",
+          "error": "(none)",
+          "not_used": "NoMemoize(ci it1 kt mi1 t)",
+          "used": "NestLoop(ci it1 kt mi1 t)NestLoop(ci it1 kt mi1 n rt t)NestLoop(ci it1 kt mi1 n pi rt t)Leading(((((((((mi1 it1) t) kt) ci) rt) n) pi) it2))Set(enable_material off)"
+        },
+        "plain_explain": null,
+        "plan_sha256": null,
+        "provisional_measurements": [],
+        "provisional_median_execution_time_ms": null,
+        "provisional_speedup": 0.0,
+        "timeout_ms": null,
+        "warmup": null
+      },
+      "completed_at_utc": "2026-09-04T07:21:21.257842+00:00",
+      "prompt": "Call evaluate_candidate exactly once now; do not emit prose or call another tool.\nPass its action argument as a JSON object, never as text or an array.\nPropose a physically novel join order. The leading tree must include every query alias exactly once, and each internal join must combine two subtrees connected by a query join predicate.\nGround the proposal in the observed plan and statistics. For a new join order, start from the most selective filtered relation. Keep PostgreSQL's default join methods unless row estimates justify changing one, and never force a nested loop over a large unfiltered relation.\nUse only relations, indexes, join edges, and planner settings present in the task observation.\nThe previous action was rejected: scan mi1 uses seq, not bitmap; scan mi1 uses unexpected indexes: []",
+      "rejection_reason": "constraints_not_satisfied",
+      "response": {
+        "choices": [
+          {
+            "finish_reason": "tool_calls",
+            "index": 0,
+            "message": {
+              "content": "",
+              "role": "assistant",
+              "tool_calls": [
+                {
+                  "function": {
+                    "arguments": "{\"action\": {\"version\": 1, \"leading\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": {\"left\": \"mi1\", \"right\": \"it1\"}, \"right\": \"t\"}, \"right\": \"kt\"}, \"right\": \"ci\"}, \"right\": \"rt\"}, \"right\": \"n\"}, \"right\": \"pi\"}, \"right\": \"it2\"}, \"joins\": [{\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\", \"rt\", \"n\", \"pi\"], \"force\": \"nestloop\"}, {\"relations\": [\"mi1\", \"it1\", \"t\", \"kt\", \"ci\"], \"force\": \"nestloop\", \"memoize\": \"forbid\"}], \"settings\": {\"enable_material\": false}}}",
+                    "name": "evaluate_candidate"
+                  },
+                  "id": "toolu_01KNAnWn3x8ZHHHEeqphHxWy",
+                  "type": "function"
+                }
+              ]
+            }
+          }
+        ],
+        "created": 1788506481,
+        "id": "msg_011Cehzgzx5cW4fsrUmocur3",
+        "model": "claude-fable-5-1",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 330,
+          "prompt_tokens": 8502,
+          "total_tokens": 8832
+        }
+      },
+      "status": "validation_error",
+      "tool_schema_sha256": "3e25dccbed6ada4d07f1f1e520dbdb535c82f0da38e798514e4f37b969bb15ed"
+    }
+  ],
+  "prefix": {
+    "assistant_turns": 1,
+    "sample": 1,
+    "sample_path": "samples/sampling/ceb-9b-ad45a1785950502e00a8835f74c23dba2bdf60c6/sample-01.json",
+    "sample_sha256": "9fb2d7069776e626d1404f7189f6d3fd7e2af668b4ffc6343708017cfcc958c2"
+  },
+  "requested_family": "leading",
+  "schema_version": 1,
+  "task_id": "ceb-9b-ad45a1785950502e00a8835f74c23dba2bdf60c6",
+  "teacher": {
+    "base_url": "https://api.anthropic.com/v1/",
+    "config": {
+      "path": "experiments/005-protocol-sft-v2/teacher.json",
+      "sha256": "fd7b0dfc5c7f22cc6c5663deb9972037c7d3138361b06d207348f2f9f1dba16e"
+    },
+    "decoding": "provider_default",
+    "model": "claude-fable-5-1",
+    "teacher_id": "protocol-sft-v2-fable-5-1"
+  },
+  "template_id": "ceb-9b"
+}

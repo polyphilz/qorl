@@ -1,5 +1,5 @@
 {
-  "completed_at_utc": "2026-09-04T06:28:35.526081+00:00",
+  "completed_at_utc": "2026-09-04T07:25:23.034723+00:00",
   "database_pool": {
     "config_sha256": "792f0d8cb9185c43e83385c3623073eb25f1a43278260c14c420c7cc97c2197e",
     "id": "qorl-postgres-pool-v1",
@@ -60,6 +60,38 @@
   "records": [
     {
       "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-2a-2a204.json",
+      "requested_family": "join",
+      "sha256": "4160ddd45106cd4c92e25af5114a4030b8abed47d60509272453045d8a45a3cb",
+      "task_id": "ceb-2a-2a204",
+      "template_id": "ceb-2a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-2a-2a303.json",
+      "requested_family": "join",
+      "sha256": "f1694dbbef7154d75e9da128c5c9afdb679962779a19ed0f505d9ac60faa317a",
+      "task_id": "ceb-2a-2a303",
+      "template_id": "ceb-2a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-2a-2a814.json",
+      "requested_family": "join",
+      "sha256": "ec88450d757e5993e6b04ac3c461695dabeb6cf73c8f3b34b452c44b93bfbf93",
+      "task_id": "ceb-2a-2a814",
+      "template_id": "ceb-2a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-2a-2a84.json",
+      "requested_family": "join",
+      "sha256": "7efe13eeaebf91c49a23966c1ccafdcaab6c0d5ea6113a59c084211f66e7a709",
+      "task_id": "ceb-2a-2a84",
+      "template_id": "ceb-2a"
+    },
+    {
+      "accepted": true,
       "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-3a-3a835.json",
       "requested_family": "join",
       "sha256": "5b4f37ff57d6c45700450105d793eb10121a03744818be64def6afa9e4b9065a",
@@ -75,6 +107,78 @@
       "template_id": "ceb-3a"
     },
     {
+      "accepted": false,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-9b-3dc5665c0071e8299b3f862123284633a9b94499.json",
+      "requested_family": "join",
+      "sha256": "b61fcfc2691cfc2a020c94466df5301d9ad0d54273919543bf116673ef718576",
+      "task_id": "ceb-9b-3dc5665c0071e8299b3f862123284633a9b94499",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-9b-c4db8d43dc68a74aab7ac60fc5379eb903fd1b3a.json",
+      "requested_family": "join",
+      "sha256": "8d309740459540509753bfe3d80fbadce8f9ccf915ea1c839a387dbbff3bd4f8",
+      "task_id": "ceb-9b-c4db8d43dc68a74aab7ac60fc5379eb903fd1b3a",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-9b-d9a9aa21f83528472ed5458fa327e62f58f2caf2.json",
+      "requested_family": "join",
+      "sha256": "87282cb43ca1e4906360f60657ab1c8790235e23fe37d18bf5507d57742a2a91",
+      "task_id": "ceb-9b-d9a9aa21f83528472ed5458fa327e62f58f2caf2",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a1108.json",
+      "requested_family": "leading",
+      "sha256": "411a665f6cb3fd218ad65f33601a51fff9ef05cc6d9f9e64de07434e647bc3c7",
+      "task_id": "ceb-3a-3a1108",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a1130.json",
+      "requested_family": "leading",
+      "sha256": "3b09fbe5574e9b3ad60bffc91156d77dabb10a4af444e31c26436b5688dba3cf",
+      "task_id": "ceb-3a-3a1130",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a1141.json",
+      "requested_family": "leading",
+      "sha256": "7041a600655e8e3cf8be945d5d35abaee4e68c10f9e160efd27ae4ff207b212c",
+      "task_id": "ceb-3a-3a1141",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a2.json",
+      "requested_family": "leading",
+      "sha256": "c21362af0ea9841b407cfd4259aaf2acf140d025f06bad593248ce2f251cf819",
+      "task_id": "ceb-3a-3a2",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a298.json",
+      "requested_family": "leading",
+      "sha256": "9a79ebdcf7f7eeb7b793ffeca1bf6b9aebc80d5e1350eab9a0796b8bc53556b6",
+      "task_id": "ceb-3a-3a298",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a544.json",
+      "requested_family": "leading",
+      "sha256": "896e33451786c5864a219430fc3cfa4be3fad5a8a5b957d1297e689a17167b45",
+      "task_id": "ceb-3a-3a544",
+      "template_id": "ceb-3a"
+    },
+    {
       "accepted": true,
       "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a58.json",
       "requested_family": "leading",
@@ -84,11 +188,179 @@
     },
     {
       "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a639.json",
+      "requested_family": "leading",
+      "sha256": "e6e754b19d920c3ce00ffa9e66f77c8d4c3c440fda8ff5db4f7fc6cec1c25499",
+      "task_id": "ceb-3a-3a639",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
       "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a686.json",
       "requested_family": "leading",
       "sha256": "3e7456a62bed90b9b8fb9a6a227953d9515ce0f85c4352615fa13223e6598e6a",
       "task_id": "ceb-3a-3a686",
       "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a803.json",
+      "requested_family": "leading",
+      "sha256": "cceaccaaddcb7e8a021d64db08637bceafe75649af5a8b29d6edd4d0adea5469",
+      "task_id": "ceb-3a-3a803",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a864.json",
+      "requested_family": "leading",
+      "sha256": "dbeebda3e08171b494f96a359e7852281d0efd9dd94ff79419e1be4ae86076c6",
+      "task_id": "ceb-3a-3a864",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a181.json",
+      "requested_family": "leading",
+      "sha256": "88c61dd973fa0e2cfd629c9adcd25f7b22963ef83608fef7293ec4ab994b7d3b",
+      "task_id": "ceb-6a-6a181",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a253.json",
+      "requested_family": "leading",
+      "sha256": "82ba10632e587c3fd04720cd37c779a460d7fa7b4c5be3ad04ab0a5292725579",
+      "task_id": "ceb-6a-6a253",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a330.json",
+      "requested_family": "leading",
+      "sha256": "110fbf507b8c85b531267dd76d000c5122b529763c99d8635d16441273023894",
+      "task_id": "ceb-6a-6a330",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a355.json",
+      "requested_family": "leading",
+      "sha256": "8885fde334b29d32f6129f44c03ff03bc367366111a9ace466b8b33edfec4939",
+      "task_id": "ceb-6a-6a355",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a417.json",
+      "requested_family": "leading",
+      "sha256": "1400ee03068d4fbb9c623f1977706926d067e4dbfda8c688eba3bc5b60a6429e",
+      "task_id": "ceb-6a-6a417",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a45.json",
+      "requested_family": "leading",
+      "sha256": "2e18dcec249ce7861b1f5bfcfbcfc74a166fb5efa54a98fbe367077df497eb9f",
+      "task_id": "ceb-6a-6a45",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-6a-6a534.json",
+      "requested_family": "leading",
+      "sha256": "b6a3f3c4a9abe20d1699a0bfb4c2bec9c6ee3ecaa0cd07b69fec9dbfb9061a28",
+      "task_id": "ceb-6a-6a534",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-13c70682a0c82394e2804cd41ce3606c3bf500a9.json",
+      "requested_family": "leading",
+      "sha256": "0b9b45522591e94835ef67d930cda8f47d7e399e599474eeae693b52f6fc0875",
+      "task_id": "ceb-9b-13c70682a0c82394e2804cd41ce3606c3bf500a9",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-46a25f401d03de3f12ed2f0687a4a3514af3506d.json",
+      "requested_family": "leading",
+      "sha256": "4e3cbd618cfa3f6219ae1cfcfa6aa955d97793a8c2edc587e1efd373ff0e5eca",
+      "task_id": "ceb-9b-46a25f401d03de3f12ed2f0687a4a3514af3506d",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-4c699cb0cc0669cdbbfa44889510732d649a32db.json",
+      "requested_family": "leading",
+      "sha256": "191ada303aa77ec21e91c67bc7296ec964226935e2c77c0820073b04f667d281",
+      "task_id": "ceb-9b-4c699cb0cc0669cdbbfa44889510732d649a32db",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-7346a470069c3cc569756b09a9fb55960f1f9a69.json",
+      "requested_family": "leading",
+      "sha256": "d440e4def4ceb6f09a7ef52ea02184df4d790a219e5f43e6d73070159e493817",
+      "task_id": "ceb-9b-7346a470069c3cc569756b09a9fb55960f1f9a69",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-7b4fd8123bd3e02940d8f1c8316473ca7f0ebe12.json",
+      "requested_family": "leading",
+      "sha256": "9ec68f4a73b1ae2f7aa4cee5909cb7abd59b3a22ef88721c2a078e55d52aee5e",
+      "task_id": "ceb-9b-7b4fd8123bd3e02940d8f1c8316473ca7f0ebe12",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-8aff6700f86da4c2f07ea12df2d167e8edeb22af.json",
+      "requested_family": "leading",
+      "sha256": "10a1538e93a56368ce6e18ea0e01d7980ba31d25d772b6f07470c4d48b9a82d4",
+      "task_id": "ceb-9b-8aff6700f86da4c2f07ea12df2d167e8edeb22af",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-8c7b5e11b7f6f5fb5ef67e46a8d0d88f462afbf2.json",
+      "requested_family": "leading",
+      "sha256": "24e855c283517c519cccac2458e9decf50bc318794162f43c9e1e16c1ab23dc0",
+      "task_id": "ceb-9b-8c7b5e11b7f6f5fb5ef67e46a8d0d88f462afbf2",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-8efa59d69d53b686972113368b6e6cd0f339486d.json",
+      "requested_family": "leading",
+      "sha256": "c7b1e18dffa4bd84273ca2139b2691d5987a6ccd6a75c7867bc81133508bfb26",
+      "task_id": "ceb-9b-8efa59d69d53b686972113368b6e6cd0f339486d",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": false,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-ad45a1785950502e00a8835f74c23dba2bdf60c6.json",
+      "requested_family": "leading",
+      "sha256": "829232aec265e0b0c3228eec5e96b2e4fb4f9fc2c567e4e0ebe1420da00bbb2a",
+      "task_id": "ceb-9b-ad45a1785950502e00a8835f74c23dba2bdf60c6",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-ae8245226f555470bec172534cfdf5c7fd503e64.json",
+      "requested_family": "leading",
+      "sha256": "2734847cd633f9495e3b7c11e3c4920a8ecdfea24de4080ee41c03a835e39fb8",
+      "task_id": "ceb-9b-ae8245226f555470bec172534cfdf5c7fd503e64",
+      "template_id": "ceb-9b"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-9b-cae020ce2ddd32095969db013cbc553ccc8acdd4.json",
+      "requested_family": "leading",
+      "sha256": "f063cd5295aecdf9f4eae0f8c63ae060a5b85dfa42d0c2d7ef7774e0f3fa998b",
+      "task_id": "ceb-9b-cae020ce2ddd32095969db013cbc553ccc8acdd4",
+      "template_id": "ceb-9b"
     },
     {
       "accepted": false,
@@ -108,6 +380,14 @@
     },
     {
       "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/parallel/ceb-6a-6a19.json",
+      "requested_family": "parallel",
+      "sha256": "af19a4be2de61cf0620e7faf4552aabe1366346ad9099a53e02726e45c67d554",
+      "task_id": "ceb-6a-6a19",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
       "path": "experiments/005-protocol-sft-v2/teacher/records/parallel/ceb-6a-6a267.json",
       "requested_family": "parallel",
       "sha256": "0a4a5c76eb1fb9f80c117f570895cea59339d74e8112fb52dac48645c2c6bebf",
@@ -121,6 +401,14 @@
       "sha256": "52629b88103c873adb6fb7566a9895234ece7c6f6dbf10dbd93d3af293b787a2",
       "task_id": "ceb-6a-6a428",
       "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/parallel/ceb-6a-6a462.json",
+      "requested_family": "parallel",
+      "sha256": "93aab72795548569e6947f5861f382cee9bbb0d34f3e5f0ed6b99f624a5910bc",
+      "task_id": "ceb-6a-6a462",
+      "template_id": "ceb-6a"
     }
   ],
   "schema_version": 1,
@@ -129,27 +417,27 @@
     "sha256": "3a3b8ed2cba201db0b7ae12d821cefcef0b2e5652719e91197d5cc2d3227b1d8"
   },
   "started_at_utc": "2026-09-04T06:23:26.305700+00:00",
-  "status": "completed_with_failures",
+  "status": "completed",
   "summary": {
-    "accepted": 6,
+    "accepted": 40,
     "accepted_by_family": {
-      "join": 2,
-      "leading": 2,
-      "parallel": 2
+      "join": 8,
+      "leading": 28,
+      "parallel": 4
     },
-    "api_attempts": 17,
+    "api_attempts": 64,
     "rejected_by_reason": {
-      "constraints_not_satisfied": 9,
+      "constraints_not_satisfied": 21,
       "default_duplicate": 1,
-      "evaluate_candidate.action must be an object": 1
+      "evaluate_candidate.action must be an object": 1,
+      "malformed_action": 1
     },
-    "tasks_attempted": 8
+    "tasks_attempted": 44
   },
   "targets": {
-    "join": 2,
-    "leading": 2,
-    "memoize": 2,
-    "parallel": 2
+    "join": 8,
+    "leading": 28,
+    "parallel": 4
   },
   "teacher": {
     "base_url": "https://api.anthropic.com/v1/",
