@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 repository="$(cd "$(dirname "$0")/../.." && pwd)"
-model="${1:-$repository/outputs/sft/protocol-sft-v2-sampler-step70}"
+model="${1:-$repository/outputs/sft/protocol-sft-v2-sampler-pilot-sft}"
 export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export PATH="$repository/.venv-vllm/bin:$PATH"
 export VLLM_USE_FLASHINFER_SAMPLER=0

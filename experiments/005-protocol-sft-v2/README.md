@@ -6,6 +6,11 @@ This experiment will build expert-iteration SFT data by rejection-sampling
 real one-candidate agent trajectories, then train a fresh LoRA from the pinned
 base model.
 
+The selected sampler is the frozen adapter from experiment 001. A controlled
+100-task comparison produced a 19.75% distinct-novel-fingerprint yield versus
+18.75% for the correctly composed RL v2 step-70 adapter. Both step-70 runs are
+retained as diagnostics; the first used the wrong base and is invalid.
+
 `selection.json` reserves 300 CEB train tasks for sampling, 64 different train
 tasks for the post-SFT live gate, and the same 64 validation-template tasks
 used by SFT v1. RL v3 selections exclude the first two splits.
@@ -37,7 +42,7 @@ uv run python experiments/005-protocol-sft-v2/build_timeouts.py --check
 
 ## Host sequence
 
-Merge and verify the step-70 sampler. The runner derives the base from the
+Merge and verify the selected pilot-SFT sampler. The runner derives the base from the
 adapter's recorded training base and rejects mismatched weights; this is
 separate from the raw base used to train SFT v2:
 
@@ -58,7 +63,7 @@ Sample the template-balanced 100-task gate first:
 uv run python -m qorl.sft.sample \
   --split sampling --limit 100 \
   --model qorl-sft-v2-sampler \
-  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-step70/qorl-merge.json
+  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 ```
 
 Continue only if `sampling/sampling-manifest.json` reports a distinct novel
@@ -72,11 +77,11 @@ samples per validation task:
 uv run python -m qorl.sft.sample \
   --split sampling \
   --model qorl-sft-v2-sampler \
-  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-step70/qorl-merge.json
+  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 uv run python -m qorl.sft.sample \
   --split validation --sample-count 6 \
   --model qorl-sft-v2-sampler \
-  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-step70/qorl-merge.json
+  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 ```
 
 Filter both splits, measure the accepted training candidates, assemble the
@@ -109,7 +114,7 @@ uv run python -m qorl.sft.sample \
   --task-ids outputs/sft/protocol-sft-v2/default-best-tasks.json \
   --sample-start 7 --sample-count 24 \
   --model qorl-sft-v2-sampler \
-  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-step70/qorl-merge.json
+  --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
 ```
 
 Training is a separate, explicit action:

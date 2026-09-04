@@ -43,8 +43,10 @@ RUN_DIR = Path("outputs/sft") / RUN_NAME
 TEMPLATE = Path("experiments/005-protocol-sft-v2/train.toml.template")
 RESOLVED_CONFIG = DATASET / "train.toml"
 PRIME_RL_VERSION = "0.9.0"
-DEFAULT_SAMPLER_ADAPTER = Path("outputs/rl/rl-run-v2/evaluation-adapters/step-070")
-DEFAULT_SAMPLER_MODEL = Path("outputs/sft/protocol-sft-v2-sampler-step70")
+DEFAULT_SAMPLER_ADAPTER = Path(
+    "outputs/sft/protocol-sft-train-v1/checkpoints/step_159/adapter"
+)
+DEFAULT_SAMPLER_MODEL = Path("outputs/sft/protocol-sft-v2-sampler-pilot-sft")
 GATE_MODEL = "qorl-protocol-sft-v2"
 GATE_PORT = 8000
 MODEL_STARTUP_TIMEOUT_SECONDS = 600

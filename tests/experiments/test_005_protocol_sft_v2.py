@@ -94,11 +94,14 @@ def test_training_validation_interval_produces_several_loss_points(
     assert runner["validation_interval"](60, config) == 15
 
 
-def test_sampler_uses_the_verified_step_70_adapter(load_experiment) -> None:
+def test_sampler_uses_the_selected_pilot_sft_adapter(load_experiment) -> None:
     runner = load_experiment("experiments/005-protocol-sft-v2/run.py")
 
     assert str(runner["DEFAULT_SAMPLER_ADAPTER"]) == (
-        "outputs/rl/rl-run-v2/evaluation-adapters/step-070"
+        "outputs/sft/protocol-sft-train-v1/checkpoints/step_159/adapter"
+    )
+    assert str(runner["DEFAULT_SAMPLER_MODEL"]) == (
+        "outputs/sft/protocol-sft-v2-sampler-pilot-sft"
     )
 
 
