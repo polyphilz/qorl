@@ -106,6 +106,8 @@ class TaskRun:
                     yield TaskCompletion(ordinal, item, result=future.result())
                 except BaseException as error:
                     if not isinstance(error, handled_errors):
+                        for pending in futures:
+                            pending.cancel()
                         raise
                     yield TaskCompletion(ordinal, item, error=error)
 

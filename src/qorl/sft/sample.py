@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import ModelError
 from qorl.agent.types import StopReason
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
@@ -236,7 +235,7 @@ def evaluate_request(
             trace = JSON_OBJECT_ADAPTER.validate_python(raw_trace)
             status = RunStatus.COMPLETED
             error = None
-        except (ModelError, WorkerError, RuntimeError) as caught:
+        except Exception as caught:
             baseline = evaluator.default
             trace = None
             status = RunStatus.FAILED

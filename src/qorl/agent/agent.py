@@ -194,11 +194,15 @@ class QoAgentPolicy:
                 )
                 if index == 0:
                     if name == ToolName.EVALUATE_CANDIDATE and "candidate_id" in result:
-                        label = (
-                            f"{result['provisional_speedup']:.3f}x"
-                            if result["constraints_satisfied"]
-                            else "invalid"
-                        )
+                        speedup = result.get("provisional_speedup")
+                        if not result["constraints_satisfied"]:
+                            label = "invalid"
+                        elif isinstance(speedup, int | float) and not isinstance(
+                            speedup, bool
+                        ):
+                            label = f"{speedup:.3f}x"
+                        else:
+                            label = "validated"
                         print(f"  {result['candidate_id']}: {label}", flush=True)
                     elif name != ToolName.FINISH:
                         print(f"  turn-{turn:02d}: {name}", flush=True)

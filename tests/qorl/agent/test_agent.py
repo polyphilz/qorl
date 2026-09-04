@@ -6,6 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.agent.interface import AgentInterface
@@ -13,7 +15,7 @@ from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import Baseline, Candidate, Measurement
+from qorl.measure.schemas import Baseline, Candidate, Measurement, MeasurementStatus
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.schemas import (
     BOOLEAN_SETTINGS,
@@ -236,6 +238,23 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
         return {"status": "kept_default"}
 
 
+class ValidationOnlyEvaluator(FakeEvaluator):
+    def evaluate(self, action: object) -> Candidate:
+        candidate = (
+            super()
+            .evaluate(action)
+            .model_copy(
+                update={
+                    "provisional_measurements": [],
+                    "provisional_speedup": None,
+                    "measurement_status": MeasurementStatus.NOT_MEASURED,
+                }
+            )
+        )
+        self.candidates[-1] = candidate
+        return candidate
+
+
 def config() -> QoAgentConfig:
     return QoAgentConfig.from_dict(
         {
@@ -381,6 +400,16 @@ class TestQoAgent:
         assert "finish" in second_tools
         assert "keep_default" not in second_tools
         assert not client.requests[0]["chat_template_kwargs"]["enable_thinking"]
+
+    def test_validation_only_candidate_prints_without_a_speedup(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        evaluator = ValidationOnlyEvaluator(tmp_path)
+
+        trace = QoAgentPolicy(config(), FakeClient()).search(evaluator)
+
+        assert trace["stop_reason"] == "model_finish"
+        assert "candidate-01: validated" in capsys.readouterr().out
 
     def test_keep_default_ends_without_a_candidate(self, tmp_path: Path) -> None:
         client = KeepDefaultClient()

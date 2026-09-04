@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from concurrent.futures import Future
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import ClassVar
+
+import pytest
 
 from qorl.measure import run
 from qorl.measure.run import TaskRun
@@ -39,8 +42,31 @@ class FakePool:
             container.close()
 
 
+class ImmediateExecutor:
+    futures: ClassVar[list[Future[int]]] = []
+
+    def __init__(self, *, max_workers: int) -> None:
+        del max_workers
+        self.futures = []
+        ImmediateExecutor.futures = self.futures
+
+    def __enter__(self) -> ImmediateExecutor:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        pass
+
+    def submit(self, function: object, pool: object, item: int) -> Future[int]:
+        del function, pool
+        future: Future[int] = Future()
+        if item == 1:
+            future.set_exception(ValueError("unexpected task failure"))
+        self.futures.append(future)
+        return future
+
+
 def test_task_run_owns_pool_capture_manifest_and_loop(
-    tmp_path: Path, monkeypatch: Any
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = FakePool()
     monkeypatch.setattr(run, "start_pool", lambda *_: pool)
@@ -71,7 +97,7 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
 
 
 def test_task_run_can_leave_capture_to_each_policy(
-    tmp_path: Path, monkeypatch: Any
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = FakePool()
     monkeypatch.setattr(run, "start_pool", lambda *_: pool)
@@ -90,3 +116,26 @@ def test_task_run_can_leave_capture_to_each_policy(
 
     assert all(not container.captures for container in pool.containers)
     assert all(container.closed for container in pool.containers)
+
+
+def test_task_run_cancels_pending_tasks_after_an_unhandled_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool = FakePool()
+    monkeypatch.setattr(run, "start_pool", lambda *_: pool)
+    monkeypatch.setattr(run, "ThreadPoolExecutor", ImmediateExecutor)
+    monkeypatch.setattr(run, "as_completed", lambda futures: iter(futures))
+    task_run = TaskRun(
+        SimpleNamespace(),
+        "test-run",
+        tmp_path,
+        tmp_path / "report.json",
+        {},
+        pool_field="database_pool",
+        capture_environment=False,
+    )
+
+    with task_run, pytest.raises(ValueError, match="unexpected task failure"):
+        list(task_run.map([1, 2, 3], lambda _, value: value))
+
+    assert all(future.cancelled() for future in ImmediateExecutor.futures[1:])
