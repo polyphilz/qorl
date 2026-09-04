@@ -25,7 +25,9 @@ from qorl.sft.teacher import (
     eligible_for_family,
     generate_attempts,
     generation_prompt,
+    generation_targets,
     inspection_prefix,
+    require_separate_memoize_output,
     response_decision,
     scripted_messages,
     teacher_request,
@@ -133,6 +135,43 @@ def test_teacher_request_uses_fable_auto_tool_choice_without_a_seed(
     assert request["messages"][-1]["role"] == "user"
     assert "every query alias exactly once" in generation_prompt(
         ActionFamily.LEADING, None
+    )
+    prompt = generation_prompt(ActionFamily.JOIN, None)
+    assert "action argument as a JSON object" in prompt
+    assert "most selective filtered relation" in prompt
+    assert "complete leaf-alias set exactly equals that target" in prompt
+    assert "never force a nested loop over a large unfiltered relation" in prompt
+
+
+def test_full_teacher_run_excludes_memoize_but_allows_a_separate_override(
+    teacher_config: TeacherConfig,
+) -> None:
+    assert generation_targets(teacher_config, smoke=False) == {
+        ActionFamily.PARALLEL: 4,
+        ActionFamily.LEADING: 28,
+        ActionFamily.JOIN: 8,
+    }
+    assert generation_targets(
+        teacher_config,
+        smoke=False,
+        requested=(ActionFamily.MEMOIZE,),
+    ) == {ActionFamily.MEMOIZE: 4}
+
+
+def test_explicit_memoize_run_requires_a_separate_output() -> None:
+    default = Path("teacher")
+
+    with pytest.raises(ValueError, match="non-default --output"):
+        require_separate_memoize_output(
+            default,
+            default,
+            (ActionFamily.MEMOIZE,),
+        )
+
+    require_separate_memoize_output(
+        Path("teacher-memoize"),
+        default,
+        (ActionFamily.MEMOIZE,),
     )
 
 

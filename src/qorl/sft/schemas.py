@@ -39,6 +39,11 @@ class ExampleKind(StrEnum):
     KEEP_DEFAULT = "keep_default"
 
 
+class ExampleSource(StrEnum):
+    STUDENT = "student"
+    TEACHER = "teacher"
+
+
 class ActionFamily(StrEnum):
     LEADING = "leading"
     JOIN = "join"
@@ -91,8 +96,8 @@ class SampleRecord(SftRecord):
     sample: int = Field(ge=1)
     seed: int
     sampling_mode: SamplingMode
-    steered: bool
-    guidance: str | None
+    steered: Literal[False]
+    guidance: None
     worker: JsonObject
     data_identity: JsonObject
     runtime_identity: JsonObject
@@ -237,7 +242,7 @@ class SamplingInvocation(SftRecord):
     sample_count: int
     sampling_mode: SamplingMode
     sampler: SamplerIdentity
-    guidance: FileIdentity | None
+    guidance: None
     summary: SamplingSummary
 
 
@@ -254,7 +259,7 @@ class SamplingManifest(SftRecord):
     sampler: SamplerIdentity
     sampler_manifest_path: str
     sampler_manifest: JsonObject
-    guidance: FileIdentity | None
+    guidance: None
     data_identity: JsonObject
     runtime_identity: JsonObject
     plan_fingerprint_version: int
@@ -274,7 +279,7 @@ class FilterRecord(SftRecord):
     plan_sha256: str | None
     action_families: list[ActionFamily]
     syntax_eligible: bool
-    steered: bool
+    steered: Literal[False]
 
 
 class FilterSummary(SftRecord):
@@ -285,13 +290,14 @@ class FilterSummary(SftRecord):
     tasks_reaching_default_best_budget: int
     rejection_reasons: dict[str, int]
     action_families: dict[ActionFamily, int]
-    steered_accepted: int
 
 
 class FilterManifest(SftRecord):
     schema_version: Literal[1] = 1
     filter_id: str
     split: str
+    source: ExampleSource
+    source_manifest: FileIdentity | None
     config_sha256: str
     records_sha256: str
     summary: FilterSummary
@@ -315,6 +321,7 @@ class CandidateMeasurement(SftRecord):
     schema_version: Literal[1] = 1
     task_id: str
     template_id: str
+    source: ExampleSource
     plan_sha256: str
     sample_path: str
     attempts: list[MeasurementAttempt]
@@ -358,6 +365,9 @@ class SamplingSettings(SftRecord):
     initial_samples_per_task: int = Field(ge=1)
     normal_maximum_samples_per_task: int = Field(ge=1)
     default_best_search_maximum_samples_per_task: int = Field(ge=1)
+    default_best_search_minimum_measured_fingerprints: int = Field(ge=1)
+    default_best_search_maximum_observed_speedup: float = Field(gt=0)
+    default_best_search_task_limit: int = Field(ge=1)
     fallback_check_task_count: int = Field(ge=1)
     fallback_yield_floor: float = Field(ge=0, le=1)
 
@@ -373,7 +383,6 @@ class LabelSettings(SftRecord):
 class AssemblySettings(SftRecord):
     maximum_examples_per_task: int = Field(ge=1)
     maximum_syntax_examples_per_task: int = Field(ge=1)
-    maximum_steered_share_per_family: float = Field(ge=0, le=1)
 
 
 class MeasurementSettings(SftRecord):
@@ -536,6 +545,7 @@ class DefaultBestProvenance(SftRecord):
 
 
 class DemonstrationProvenance(SftRecord):
+    source: ExampleSource
     sample: int = Field(ge=1)
     sampler: SamplerIdentity
     filter: FilterProvenance
@@ -572,8 +582,6 @@ class DemonstrationMetadata(SftRecord):
     measurement_mode: str
     selection_used_speed: bool
     example_kind: ExampleKind
-    steered: bool
-    guidance: str | None
     call_sequence: list[str]
 
 
@@ -602,8 +610,11 @@ class DatasetSelectionIdentity(SftRecord):
 
 class DatasetInputs(SftRecord):
     sampling_manifest_sha256: str
+    default_best_sampling_manifest_sha256: str | None
     validation_sampling_manifest_sha256: str
     sampling_filter_manifest_sha256: str
+    default_best_filter_manifest_sha256: str | None
+    teacher_filter_manifest_sha256: str
     validation_filter_manifest_sha256: str
     measurement_manifest_sha256: str
 
@@ -628,7 +639,7 @@ class DatasetManifest(SftRecord):
     composition: dict[str, dict[ExampleKind, int]]
     templates: dict[str, dict[str, int]]
     train_action_families: dict[ActionFamily, int]
-    train_steered_action_families: dict[ActionFamily, int]
+    train_example_sources: dict[ExampleSource, int]
     prime_artifacts: dict[str, PrimeArtifact]
     inputs: DatasetInputs
     frozen_validation_task_ids: list[str]

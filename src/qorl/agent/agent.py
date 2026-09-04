@@ -116,8 +116,6 @@ class QoAgentPolicy:
     def search(
         self,
         evaluator: RolloutEvaluator[InspectionExecutor],
-        *,
-        guidance: str | None = None,
     ) -> dict[str, Any]:
         completion_reserve = max(
             MIN_COMPLETION_RESERVE_TOKENS,
@@ -130,8 +128,6 @@ class QoAgentPolicy:
             completion_reserve,
         )
         messages = interface.initial_messages()
-        if guidance is not None:
-            messages.append({"role": "user", "content": guidance})
         responses: list[dict[str, Any]] = []
         events: list[dict[str, Any]] = []
         environment = AgentEnvironment(evaluator)

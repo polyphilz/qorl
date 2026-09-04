@@ -51,7 +51,6 @@ from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts, TaskTimeout
 
-INITIAL_MESSAGE_COUNT = 2
 SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v1"
 
 
@@ -63,7 +62,6 @@ class SampleRequest:
     sample: int
     seed: int
     sampling_mode: SamplingMode
-    guidance: str | None
 
 
 class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
@@ -194,20 +192,11 @@ def selected_tasks(
         raise RuntimeError(f"selection contains an unknown task: {error}") from error
 
 
-def stripped_transcript(trace: JsonObject, guidance: str | None) -> list[JsonObject]:
-    messages = [
+def training_transcript(trace: JsonObject) -> list[JsonObject]:
+    return [
         require_object(item, "policy_trace.transcript[]")
         for item in require_list(trace.get("transcript"), "policy_trace.transcript")
     ]
-    if guidance is None:
-        return messages
-    expected: JsonObject = {"role": "user", "content": guidance}
-    if (
-        len(messages) <= INITIAL_MESSAGE_COUNT
-        or messages[INITIAL_MESSAGE_COUNT] != expected
-    ):
-        raise RuntimeError("guided rollout does not contain its guidance message")
-    return [*messages[:INITIAL_MESSAGE_COUNT], *messages[INITIAL_MESSAGE_COUNT + 1 :]]
 
 
 def evaluate_request(
@@ -230,7 +219,7 @@ def evaluate_request(
         try:
             baseline = evaluator.start()
             raw_trace = QoAgentPolicy(replace(config, seed=request.seed)).search(
-                evaluator, guidance=request.guidance
+                evaluator
             )
             trace = JSON_OBJECT_ADAPTER.validate_python(raw_trace)
             status = RunStatus.COMPLETED
@@ -248,8 +237,8 @@ def evaluate_request(
             sample=request.sample,
             seed=request.seed,
             sampling_mode=request.sampling_mode,
-            steered=request.guidance is not None,
-            guidance=request.guidance,
+            steered=False,
+            guidance=None,
             worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
             data_identity=JSON_OBJECT_ADAPTER.validate_python(
                 slot.worker.fixture.data_identity
@@ -261,7 +250,7 @@ def evaluate_request(
             default=baseline,
             candidates=evaluator.candidates,
             policy_trace=trace,
-            training_transcript=stripped_transcript(trace, request.guidance)
+            training_transcript=training_transcript(trace)
             if trace is not None
             else None,
             error=error,
@@ -356,13 +345,6 @@ def file_identity(repository: Path, path: Path) -> FileIdentity:
     return FileIdentity(path=display_path(repository, path), sha256=sha256_file(path))
 
 
-def parse_guidance(path: Path | None) -> dict[str, str]:
-    if path is None:
-        return {}
-    value = load_json_object(path)
-    return {key: require_string(item, f"guidance.{key}") for key, item in value.items()}
-
-
 def sample_limit(
     config: DatasetConfig,
     mode: SamplingMode,
@@ -417,7 +399,6 @@ def main() -> None:
     parser.add_argument("--sample-count", type=int)
     parser.add_argument("--default-best", action="store_true")
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--guidance", type=Path)
     parser.add_argument("--task-ids", type=Path)
     arguments = parser.parse_args()
 
@@ -481,12 +462,6 @@ def main() -> None:
             QoAgentPolicy(base_config).preflight()
         ),
     )
-    guidance_path = (
-        (repository / arguments.guidance).resolve()
-        if arguments.guidance is not None
-        else None
-    )
-    guidance = parse_guidance(guidance_path)
     requests = [
         SampleRequest(
             task=task,
@@ -497,7 +472,6 @@ def main() -> None:
                 config.seed, require_string(task.get("task_id"), "task.task_id"), sample
             ),
             sampling_mode=sampling_mode,
-            guidance=guidance.get(require_string(task.get("task_id"), "task.task_id")),
         )
         for task in tasks
         for sample in range(arguments.sample_start, sample_end + 1)
@@ -507,7 +481,12 @@ def main() -> None:
         for request in requests
         if not sample_path(output, arguments.split, request).is_file()
     ]
-    manifest_path = output / "sampling" / f"{arguments.split}-manifest.json"
+    manifest_name = (
+        "default-best-manifest.json"
+        if sampling_mode == SamplingMode.DEFAULT_BEST
+        else f"{arguments.split}-manifest.json"
+    )
+    manifest_path = output / "sampling" / manifest_name
     previous = (
         load_record(manifest_path, SamplingManifest)
         if manifest_path.is_file()
@@ -543,7 +522,7 @@ def main() -> None:
         sampler=sampler_identity,
         sampler_manifest_path=display_path(repository, sampler_manifest_path),
         sampler_manifest=sampler_manifest,
-        guidance=file_identity(repository, guidance_path) if guidance_path else None,
+        guidance=None,
         data_identity=JSON_OBJECT_ADAPTER.validate_python(fixture.data_identity),
         runtime_identity=JSON_OBJECT_ADAPTER.validate_python(fixture.runtime_identity),
         plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
@@ -627,7 +606,7 @@ def main() -> None:
         sample_count=sample_count,
         sampling_mode=sampling_mode,
         sampler=sampler_identity,
-        guidance=file_identity(repository, guidance_path) if guidance_path else None,
+        guidance=None,
         summary=invocation_summary,
     )
     final = manifest.model_copy(

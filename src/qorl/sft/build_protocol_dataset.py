@@ -10,6 +10,7 @@ from pathlib import Path
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.measure.schemas import ToolResultStatus
 from qorl.sft.assemble import canonical_json
+from qorl.sft.filter import load_filtered_sample
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     JSON_OBJECT_LIST_ADAPTER,
@@ -29,6 +30,7 @@ from qorl.sft.schemas import (
     DemonstrationMetadata,
     DemonstrationProvenance,
     ExampleKind,
+    ExampleSource,
     FileIdentity,
     FilterProvenance,
     FilterRecord,
@@ -38,6 +40,7 @@ from qorl.sft.schemas import (
     PrimeArtifact,
     SampleRecord,
     TaskLabel,
+    TeacherConfig,
     load_json_lines,
     load_record,
     require_list,
@@ -52,18 +55,30 @@ from qorl.workload.taskset import TaskSet
 DATASET_ID = "protocol-sft-v2"
 KEEP_DEFAULT_CALL_ID = "sft-v2-keep-default"
 TEACHER_ID = "iterated_rejection_sampling_v1"
+FABLE_TEACHER_ID = "protocol-sft-v2-fable-5-1"
 MEASUREMENT_MODE = "rejection_sampling_plan_validation"
 
 
 @dataclass(frozen=True)
 class SelectedExample:
     record: FilterRecord
+    source: ExampleSource
     kind: ExampleKind
     measurement: CandidateMeasurement | DefaultBestProvenance | None
 
 
-def stable_rank(seed: int, label: str, record: FilterRecord) -> str:
-    identity = f"{seed}:{label}:{record.task_id}:{record.plan_sha256}:{record.sample}"
+@dataclass(frozen=True)
+class SourcedRecord:
+    record: FilterRecord
+    source: ExampleSource
+
+
+def stable_rank(seed: int, label: str, item: SourcedRecord) -> str:
+    record = item.record
+    identity = (
+        f"{seed}:{label}:{item.source.value}:{record.task_id}:"
+        f"{record.plan_sha256}:{record.sample}"
+    )
     return hashlib.sha256(identity.encode()).hexdigest()
 
 
@@ -190,7 +205,9 @@ def build_document(
         metadata=DemonstrationMetadata(
             demonstration_id=f"{DATASET_ID}-{ordinal + 1:04d}",
             ordinal=ordinal,
-            teacher=TEACHER_ID,
+            teacher=FABLE_TEACHER_ID
+            if selected.source == ExampleSource.TEACHER
+            else TEACHER_ID,
             task_set_id=task_set.task_set_id,
             task_id=sample.task_id,
             template_id=sample.template_id,
@@ -209,11 +226,10 @@ def build_document(
             selection_used_speed=selected.kind
             in {ExampleKind.WIN, ExampleKind.KEEP_DEFAULT},
             example_kind=selected.kind,
-            steered=sample.steered,
-            guidance=sample.guidance,
             call_sequence=tool_sequence(messages),
         ),
         provenance=DemonstrationProvenance(
+            source=selected.source,
             sample=sample.sample,
             sampler=sample.sampler,
             filter=FilterProvenance(
@@ -256,87 +272,108 @@ def measured_lower(measurement: CandidateMeasurement) -> float:
 
 
 def select_training(
-    records: list[FilterRecord],
+    records: list[SourcedRecord],
     measurements: dict[tuple[str, str], CandidateMeasurement],
     task_labels: dict[str, TaskLabel],
     config: DatasetConfig,
+    teacher_config: TeacherConfig,
 ) -> list[SelectedExample]:
     target = config.split_counts.train
     desired_wins = round(target * config.composition.win_share)
     desired_defaults = round(target * config.composition.keep_default_share)
+    maximum_teacher_examples = int(target * teacher_config.maximum_teacher_share)
     wins = [
-        (record, measurement)
-        for record in records
-        if record.accepted
-        and (measurement := candidate_measurement(record, measurements)) is not None
+        (item, measurement)
+        for item in records
+        if item.source == ExampleSource.STUDENT
+        and item.record.accepted
+        and (measurement := candidate_measurement(item.record, measurements))
+        is not None
         and measurement.candidate_label == CandidateLabel.WIN
         and measurement.score_interval is not None
     ]
     wins.sort(
         key=lambda item: (
-            item[0].steered,
             -measured_lower(item[1]),
             stable_rank(config.seed, "win", item[0]),
         )
     )
-    default_samples: list[FilterRecord] = []
+    default_samples: list[SourcedRecord] = []
     seen_default_tasks: set[str] = set()
-    for record in sorted(
+    for item in sorted(
         records,
-        key=lambda item: (item.steered, stable_rank(config.seed, "default", item)),
+        key=lambda value: stable_rank(config.seed, "default", value),
     ):
+        record = item.record
         if (
-            record.accepted
+            item.source == ExampleSource.STUDENT
+            and record.accepted
             and task_labels.get(record.task_id) == TaskLabel.DEFAULT_BEST
             and record.task_id not in seen_default_tasks
         ):
-            default_samples.append(record)
+            default_samples.append(item)
             seen_default_tasks.add(record.task_id)
 
     selected: list[SelectedExample] = []
     selected_per_task: Counter[str] = Counter()
     family_totals: Counter[ActionFamily] = Counter()
-    steered_totals: Counter[ActionFamily] = Counter()
+    source_totals: Counter[ExampleSource] = Counter()
 
-    def allowed(record: FilterRecord, kind: ExampleKind) -> bool:
+    def allowed(item: SourcedRecord) -> bool:
+        record = item.record
+        if len(selected) >= target:
+            return False
         if (
             selected_per_task[record.task_id]
             >= config.assembly.maximum_examples_per_task
         ):
             return False
-        if not record.steered or kind == ExampleKind.KEEP_DEFAULT:
-            return True
-        cap = config.assembly.maximum_steered_share_per_family
-        return all(
-            (steered_totals[family] + 1) / (family_totals[family] + 1) <= cap
-            for family in record.action_families
+        return not (
+            item.source == ExampleSource.TEACHER
+            and source_totals[ExampleSource.TEACHER] >= maximum_teacher_examples
         )
 
     def add(
-        record: FilterRecord,
+        item: SourcedRecord,
         kind: ExampleKind,
         measurement: CandidateMeasurement | DefaultBestProvenance | None,
     ) -> bool:
-        if not allowed(record, kind):
+        if not allowed(item):
             return False
-        selected.append(SelectedExample(record, kind, measurement))
+        record = item.record
+        selected.append(SelectedExample(record, item.source, kind, measurement))
         selected_per_task[record.task_id] += 1
+        source_totals[item.source] += 1
         if kind != ExampleKind.KEEP_DEFAULT:
             family_totals.update(record.action_families)
-            if record.steered:
-                steered_totals.update(record.action_families)
         return True
 
-    for record, measurement in wins:
+    def measured_kind(item: SourcedRecord) -> ExampleKind:
+        if item.source == ExampleSource.TEACHER:
+            return ExampleKind.SYNTAX
+        measurement = candidate_measurement(item.record, measurements)
+        selected_wins = sum(
+            selected_item.kind == ExampleKind.WIN for selected_item in selected
+        )
+        if (
+            measurement is not None
+            and measurement.candidate_label == CandidateLabel.WIN
+            and selected_wins < desired_wins
+        ):
+            return ExampleKind.WIN
+        return ExampleKind.SYNTAX
+
+    for item, measurement in wins:
         if sum(item.kind == ExampleKind.WIN for item in selected) >= desired_wins:
             break
-        add(record, ExampleKind.WIN, measurement)
-    for record in default_samples:
+        add(item, ExampleKind.WIN, measurement)
+    for item in default_samples:
         if (
             sum(item.kind == ExampleKind.KEEP_DEFAULT for item in selected)
             >= desired_defaults
         ):
             break
+        record = item.record
         task_measurements = [
             measurement
             for (task_id, _), measurement in measurements.items()
@@ -345,7 +382,7 @@ def select_training(
         if not task_measurements:
             continue
         add(
-            record,
+            item,
             ExampleKind.KEEP_DEFAULT,
             DefaultBestProvenance(
                 task_label=TaskLabel.DEFAULT_BEST,
@@ -359,56 +396,104 @@ def select_training(
         )
     used = {(item.record.task_id, item.record.sample) for item in selected}
     syntax = [
-        record
-        for record in records
-        if record.accepted
-        and record.syntax_eligible
-        and (record.task_id, record.sample) not in used
+        item
+        for item in records
+        if item.record.accepted
+        and item.record.syntax_eligible
+        and (item.record.task_id, item.record.sample) not in used
         and (
-            (measurement := candidate_measurement(record, measurements)) is None
+            (measurement := candidate_measurement(item.record, measurements)) is None
             or measurement.candidate_label != CandidateLabel.KNOWN_REGRESSION
         )
     ]
     syntax.sort(
-        key=lambda record: (record.steered, stable_rank(config.seed, "syntax", record))
+        key=lambda item: (
+            item.source == ExampleSource.TEACHER,
+            stable_rank(config.seed, "syntax", item),
+        )
     )
-    selected_families = {
-        family
-        for item in selected
-        if item.kind != ExampleKind.KEEP_DEFAULT
-        for family in item.record.action_families
-    }
-    available_families = {
-        family for record in syntax for family in record.action_families
-    }
-    for family in sorted(available_families - selected_families):
-        record = next(
+    for family in sorted(config.gate.required_action_families):
+        if family_totals[family]:
+            continue
+        item = next(
             (
-                item
-                for item in syntax
-                if family in item.action_families
-                and (item.task_id, item.sample) not in used
-                and allowed(item, ExampleKind.SYNTAX)
+                candidate
+                for candidate in syntax
+                if candidate.source == ExampleSource.STUDENT
+                and family in candidate.record.action_families
+                and (candidate.record.task_id, candidate.record.sample) not in used
+                and allowed(candidate)
             ),
             None,
         )
-        if record is None:
-            raise RuntimeError(
-                f"action family cannot be represented within steering cap: {family.value}"
+        if item is not None:
+            kind = measured_kind(item)
+            add(
+                item,
+                kind,
+                candidate_measurement(item.record, measurements),
             )
-        add(record, ExampleKind.SYNTAX, candidate_measurement(record, measurements))
-        used.add((record.task_id, record.sample))
-    for record in syntax:
+            used.add((item.record.task_id, item.record.sample))
+
+    for family in sorted(config.gate.required_action_families):
+        if family_totals[family]:
+            continue
+        item = next(
+            (
+                candidate
+                for candidate in syntax
+                if candidate.source == ExampleSource.TEACHER
+                and family in candidate.record.action_families
+                and (candidate.record.task_id, candidate.record.sample) not in used
+                and allowed(candidate)
+            ),
+            None,
+        )
+        if item is not None:
+            kind = measured_kind(item)
+            add(
+                item,
+                kind,
+                candidate_measurement(item.record, measurements),
+            )
+            used.add((item.record.task_id, item.record.sample))
+
+    for item in syntax:
+        if item.source != ExampleSource.TEACHER:
+            continue
+        identity = (item.record.task_id, item.record.sample)
+        kind = measured_kind(item)
+        if identity not in used and add(
+            item,
+            kind,
+            candidate_measurement(item.record, measurements),
+        ):
+            used.add(identity)
+
+    missing_families = [
+        family
+        for family in config.gate.required_action_families
+        if not family_totals[family]
+    ]
+    if missing_families:
+        names = ", ".join(family.value for family in missing_families)
+        raise RuntimeError(f"action families have no eligible example: {names}")
+
+    for item in syntax:
         if len(selected) >= target:
             break
-        identity = (record.task_id, record.sample)
+        if item.source != ExampleSource.STUDENT:
+            continue
+        identity = (item.record.task_id, item.record.sample)
         if identity not in used and add(
-            record, ExampleKind.SYNTAX, candidate_measurement(record, measurements)
+            item,
+            ExampleKind.SYNTAX,
+            candidate_measurement(item.record, measurements),
         ):
             used.add(identity)
     if len(selected) != target:
         raise RuntimeError(
-            f"only {len(selected)} of {target} training documents are available after applying the steering cap"
+            f"only {len(selected)} of {target} training documents are available"
         )
     return selected
 
@@ -423,17 +508,27 @@ def select_validation(
     selected = [
         min(
             task_records,
-            key=lambda record: stable_rank(config.seed, "validation", record),
+            key=lambda record: stable_rank(
+                config.seed,
+                "validation",
+                SourcedRecord(record, ExampleSource.STUDENT),
+            ),
         )
         for _, task_records in sorted(eligible.items())
     ]
-    selected.sort(key=lambda record: stable_rank(config.seed, "validation", record))
+    selected.sort(
+        key=lambda record: stable_rank(
+            config.seed,
+            "validation",
+            SourcedRecord(record, ExampleSource.STUDENT),
+        )
+    )
     if len(selected) < config.split_counts.validation:
         raise RuntimeError(
             f"only {len(selected)} of {config.split_counts.validation} validation tasks produced a document"
         )
     return [
-        SelectedExample(record, ExampleKind.SYNTAX, None)
+        SelectedExample(record, ExampleSource.STUDENT, ExampleKind.SYNTAX, None)
         for record in selected[: config.split_counts.validation]
     ]
 
@@ -479,18 +574,36 @@ def main() -> None:
     parser.add_argument(
         "--dataset", type=Path, default=Path("outputs/sft/protocol-sft-v2")
     )
+    parser.add_argument(
+        "--teacher-config",
+        type=Path,
+        default=Path("experiments/005-protocol-sft-v2/teacher.json"),
+    )
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
     dataset = (repository / arguments.dataset).resolve()
     config_path = (repository / arguments.config).resolve()
     config = load_record(config_path, DatasetConfig)
+    teacher_config = load_record(
+        (repository / arguments.teacher_config).resolve(), TeacherConfig
+    )
     selection_path = (repository / config.selection).resolve()
     selection = load_record(selection_path, DatasetSelection)
     task_set = TaskSet.load(repository, "ceb-v1")
     measurements, task_labels = load_measurements(dataset)
-    train_records = load_json_lines(
+    student_records = load_json_lines(
         dataset / "filter/sampling/records.jsonl", FilterRecord
     )
+    default_best_filter = dataset / "filter/default_best/records.jsonl"
+    if default_best_filter.is_file():
+        student_records.extend(load_json_lines(default_best_filter, FilterRecord))
+    teacher_records = load_json_lines(
+        dataset / "filter/teacher/records.jsonl", FilterRecord
+    )
+    train_records = [
+        *(SourcedRecord(record, ExampleSource.STUDENT) for record in student_records),
+        *(SourcedRecord(record, ExampleSource.TEACHER) for record in teacher_records),
+    ]
     validation_records = load_json_lines(
         dataset / "filter/validation/records.jsonl", FilterRecord
     )
@@ -499,12 +612,14 @@ def main() -> None:
     validation_ids = {record.task_id for record in selection.splits.validation}
     if sampling_ids & live_gate_ids:
         raise RuntimeError("sampling and live-gate task selections overlap")
-    if any(record.task_id not in sampling_ids for record in train_records):
+    if any(item.record.task_id not in sampling_ids for item in train_records):
         raise RuntimeError("training filter contains a task outside the sampling split")
     if any(record.task_id not in validation_ids for record in validation_records):
         raise RuntimeError("validation filter contains a task outside its frozen split")
     selections = {
-        "train": select_training(train_records, measurements, task_labels, config),
+        "train": select_training(
+            train_records, measurements, task_labels, config, teacher_config
+        ),
         "validation": select_validation(validation_records, config),
     }
     documents: dict[str, list[DemonstrationDocument]] = defaultdict(list)
@@ -513,7 +628,9 @@ def main() -> None:
         directory = dataset / "demonstrations" / split
         directory.mkdir(parents=True, exist_ok=True)
         for selected in selections[split]:
-            sample = load_record(dataset / selected.record.sample_path, SampleRecord)
+            sample = load_filtered_sample(
+                repository, dataset, selected.record, selected.source
+            )
             document = build_document(repository, task_set, sample, selected, ordinal)
             path = directory / f"{ordinal + 1:04d}-{sample.task_id}.json"
             write_json(path, document.to_wire())
@@ -543,12 +660,7 @@ def main() -> None:
         if selected.kind != ExampleKind.KEEP_DEFAULT
         for family in selected.record.action_families
     )
-    steered_families = Counter(
-        family
-        for selected in selections["train"]
-        if selected.kind != ExampleKind.KEEP_DEFAULT and selected.record.steered
-        for family in selected.record.action_families
-    )
+    sources = Counter(selected.source for selected in selections["train"])
     frozen_validation_task_ids = [
         document.metadata.task_id for document in documents["validation"]
     ]
@@ -593,17 +705,30 @@ def main() -> None:
         composition=composition,
         templates=templates,
         train_action_families=dict(sorted(families.items())),
-        train_steered_action_families=dict(sorted(steered_families.items())),
+        train_example_sources=dict(sorted(sources.items())),
         prime_artifacts=prime_artifacts,
         inputs=DatasetInputs(
             sampling_manifest_sha256=sha256_file(
                 dataset / "sampling/sampling-manifest.json"
             ),
+            default_best_sampling_manifest_sha256=sha256_file(
+                dataset / "sampling/default-best-manifest.json"
+            )
+            if (dataset / "sampling/default-best-manifest.json").is_file()
+            else None,
             validation_sampling_manifest_sha256=sha256_file(
                 dataset / "sampling/validation-manifest.json"
             ),
             sampling_filter_manifest_sha256=sha256_file(
                 dataset / "filter/sampling/manifest.json"
+            ),
+            default_best_filter_manifest_sha256=sha256_file(
+                dataset / "filter/default_best/manifest.json"
+            )
+            if (dataset / "filter/default_best/manifest.json").is_file()
+            else None,
+            teacher_filter_manifest_sha256=sha256_file(
+                dataset / "filter/teacher/manifest.json"
             ),
             validation_filter_manifest_sha256=sha256_file(
                 dataset / "filter/validation/manifest.json"

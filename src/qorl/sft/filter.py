@@ -13,11 +13,17 @@ from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     ActionFamily,
     DatasetConfig,
+    ExampleSource,
+    FileIdentity,
     FilterManifest,
     FilterRecord,
     FilterSummary,
     JsonObject,
     SampleRecord,
+    SamplingMode,
+    TeacherGenerationRecord,
+    TeacherManifest,
+    load_json_lines,
     load_json_object,
     load_record,
     require_list,
@@ -26,7 +32,47 @@ from qorl.sft.schemas import (
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 
-FILTER_ID = "qorl-protocol-sft-v2-filter-v1"
+FILTER_ID = "qorl-protocol-sft-v2-filter-v2"
+
+
+def load_filtered_sample(
+    repository: Path,
+    dataset: Path,
+    record: FilterRecord,
+    source: ExampleSource,
+) -> SampleRecord:
+    if source == ExampleSource.STUDENT:
+        return load_record(dataset / record.sample_path, SampleRecord)
+    generation = load_record(repository / record.sample_path, TeacherGenerationRecord)
+    if generation.accepted_sample is None:
+        raise RuntimeError("teacher filter record refers to a rejected generation")
+    return generation.accepted_sample
+
+
+def load_teacher_records(
+    repository: Path, teacher_dir: Path
+) -> tuple[TeacherManifest, list[tuple[Path, TeacherGenerationRecord]]]:
+    manifest = load_record(teacher_dir / "manifest.json", TeacherManifest)
+    paths = sorted((teacher_dir / "records").glob("*/*.json"))
+    by_path = {path.relative_to(repository).as_posix(): path for path in paths}
+    if set(by_path) != {record.path for record in manifest.records}:
+        raise RuntimeError("teacher manifest record inventory differs")
+    records: list[tuple[Path, TeacherGenerationRecord]] = []
+    for identity in manifest.records:
+        path = by_path[identity.path]
+        if sha256_file(path) != identity.sha256:
+            raise RuntimeError(f"teacher record checksum differs: {identity.path}")
+        record = load_record(path, TeacherGenerationRecord)
+        if (
+            record.task_id != identity.task_id
+            or record.template_id != identity.template_id
+            or record.requested_family != identity.requested_family
+            or (record.accepted_sample is not None) != identity.accepted
+            or record.teacher != manifest.teacher
+        ):
+            raise RuntimeError(f"teacher record identity differs: {identity.path}")
+        records.append((path, record))
+    return manifest, records
 
 
 def tool_calls(trace: JsonObject) -> tuple[list[tuple[str, JsonObject]], str | None]:
@@ -124,10 +170,16 @@ def filter_records(
     samples: list[tuple[Path, SampleRecord]],
     context_length: int,
     syntax_examples_per_task: int,
+    existing: list[FilterRecord] | None = None,
 ) -> list[FilterRecord]:
     results: list[FilterRecord] = []
-    seen: set[tuple[str, str]] = set()
-    accepted_by_task: Counter[str] = Counter()
+    existing = existing or []
+    seen = {
+        (record.task_id, record.plan_sha256)
+        for record in existing
+        if record.accepted and record.plan_sha256 is not None
+    }
+    accepted_by_task = Counter(record.task_id for record in existing if record.accepted)
     for path, sample in sorted(
         samples, key=lambda item: (item[1].task_id, item[1].sample)
     ):
@@ -200,7 +252,6 @@ def summarize(
         ),
         rejection_reasons=dict(sorted(reasons.items())),
         action_families=dict(sorted(families.items())),
-        steered_accepted=sum(record.accepted and record.steered for record in records),
     )
 
 
@@ -215,7 +266,16 @@ def main() -> None:
     parser.add_argument(
         "--input", type=Path, default=Path("outputs/sft/protocol-sft-v2")
     )
-    parser.add_argument("--split", choices=("sampling", "validation"), required=True)
+    parser.add_argument(
+        "--split",
+        choices=("sampling", "default_best", "teacher", "validation"),
+        required=True,
+    )
+    parser.add_argument(
+        "--teacher-records",
+        type=Path,
+        default=Path("experiments/005-protocol-sft-v2/teacher"),
+    )
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
@@ -226,12 +286,58 @@ def main() -> None:
         load_json_object(repository / config.policy_config).get("policy"), "policy"
     )
     context_length = QoAgentConfig.from_dict(policy).context_length
-    paths = sorted((input_dir / "samples" / arguments.split).glob("*/sample-*.json"))
-    samples = [
-        (path.relative_to(input_dir), load_record(path, SampleRecord)) for path in paths
-    ]
+    source = ExampleSource.STUDENT
+    source_manifest: FileIdentity | None = None
+    existing: list[FilterRecord] = []
+    samples: list[tuple[Path, SampleRecord]]
+    syntax_examples_per_task = config.assembly.maximum_syntax_examples_per_task
+    if arguments.split == "teacher":
+        source = ExampleSource.TEACHER
+        teacher_dir = (repository / arguments.teacher_records).resolve()
+        _, generation_records = load_teacher_records(repository, teacher_dir)
+        teacher_manifest_path = teacher_dir / "manifest.json"
+        source_manifest = FileIdentity(
+            path=teacher_manifest_path.relative_to(repository).as_posix(),
+            sha256=sha256_file(teacher_manifest_path),
+        )
+        samples = []
+        for path, generation in generation_records:
+            if generation.accepted_sample is not None:
+                samples.append(
+                    (path.relative_to(repository), generation.accepted_sample)
+                )
+    else:
+        sample_split = (
+            "sampling" if arguments.split == "default_best" else arguments.split
+        )
+        paths = sorted((input_dir / "samples" / sample_split).glob("*/sample-*.json"))
+        samples = [
+            (path.relative_to(input_dir), load_record(path, SampleRecord))
+            for path in paths
+        ]
+        if arguments.split == "default_best":
+            samples = [
+                (path, sample)
+                for path, sample in samples
+                if sample.sampling_mode == SamplingMode.DEFAULT_BEST
+            ]
+            syntax_examples_per_task = 0
+        sampling_manifest_name = (
+            "default-best-manifest.json"
+            if arguments.split == "default_best"
+            else f"{arguments.split}-manifest.json"
+        )
+        sampling_manifest_path = input_dir / "sampling" / sampling_manifest_name
+        source_manifest = FileIdentity(
+            path=sampling_manifest_path.relative_to(repository).as_posix(),
+            sha256=sha256_file(sampling_manifest_path),
+        )
+    if arguments.split in {"default_best", "teacher"}:
+        existing = load_json_lines(
+            input_dir / "filter/sampling/records.jsonl", FilterRecord
+        )
     records = filter_records(
-        samples, context_length, config.assembly.maximum_syntax_examples_per_task
+        samples, context_length, syntax_examples_per_task, existing
     )
 
     output_dir = input_dir / "filter" / arguments.split
@@ -246,6 +352,8 @@ def main() -> None:
     manifest = FilterManifest(
         filter_id=FILTER_ID,
         split=arguments.split,
+        source=source,
+        source_manifest=source_manifest,
         config_sha256=sha256_file(config_path),
         records_sha256=sha256_file(records_path),
         summary=summarize(records, config.labels.default_best_minimum_fingerprints),

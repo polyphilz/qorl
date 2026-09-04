@@ -14,6 +14,7 @@ from qorl.measure.schemas import (
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     CandidateMeasurement,
+    ExampleSource,
     JsonObject,
     MeasurementAttempt,
     SampleRecord,
@@ -167,6 +168,7 @@ def measurement(task_id: str, plan_sha256: str, *scores: float) -> CandidateMeas
     return CandidateMeasurement(
         task_id=task_id,
         template_id="template-1",
+        source=ExampleSource.STUDENT,
         plan_sha256=plan_sha256,
         sample_path=f"samples/{task_id}.json",
         attempts=attempts,

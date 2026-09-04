@@ -130,6 +130,13 @@ def contains_node(plan: dict[str, Any], node_type: str) -> bool:
     return any(node.get("Node Type") == node_type for node in nodes(plan))
 
 
+def memoized_inner(join: dict[str, Any]) -> bool:
+    children = join.get("Plans", [])
+    return (
+        len(children) >= MIN_JOIN_CHILDREN and children[1].get("Node Type") == "Memoize"
+    )
+
+
 def index_names(plan: dict[str, Any]) -> set[str]:
     return {
         node["Index Name"]
@@ -194,7 +201,7 @@ def verify_action(
             errors.append(f"join {label} uses {method}, not {item['force']}")
         if method in item["forbid"]:
             errors.append(f"join {label} uses forbidden method {method}")
-        memoized = contains_node(join, "Memoize")
+        memoized = memoized_inner(join)
         if item["memoize"] == MemoizeMode.FORCE and not memoized:
             errors.append(f"join {label} is not memoized")
         if item["memoize"] == MemoizeMode.FORBID and memoized:

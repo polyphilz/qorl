@@ -59,8 +59,14 @@ from qorl.workload.timeouts import CalibratedTimeouts
 GENERATION_ID = "qorl-protocol-sft-v2-teacher-v1"
 TEACHER_SAMPLE_NUMBER = 5
 INITIAL_MESSAGE_COUNT = 2
+DEFAULT_TEACHER_OUTPUT = Path("experiments/005-protocol-sft-v2/teacher")
 TARGET_FAMILY_ORDER = (
     ActionFamily.MEMOIZE,
+    ActionFamily.PARALLEL,
+    ActionFamily.LEADING,
+    ActionFamily.JOIN,
+)
+MAIN_TARGET_FAMILIES = (
     ActionFamily.PARALLEL,
     ActionFamily.LEADING,
     ActionFamily.JOIN,
@@ -77,9 +83,10 @@ FAMILY_INSTRUCTIONS = {
         "connected by a query join predicate."
     ),
     ActionFamily.JOIN: (
-        "Propose a physically novel join-method constraint on a connected relation "
-        "set. Choose the force or forbid operation and relation set from the query's "
-        "join graph and default physical plan."
+        "Propose a physically novel join-method constraint. A joins[].relations "
+        "target binds only to a plan node whose complete leaf-alias set exactly "
+        "equals that target. Without Leading, choose a set that is an internal node "
+        "in the default plan; with Leading, create that exact node in the tree."
     ),
     ActionFamily.MEMOIZE: (
         "Propose a physically novel memoize constraint for a connected join subtree. "
@@ -226,10 +233,7 @@ def choose_prefix(paths: list[Path]) -> PrefixCandidate | None:
         return None
     return min(
         candidates,
-        key=lambda item: (
-            abs(item.assistant_turns - 1),
-            item.sample.sample,
-        ),
+        key=lambda item: item.sample.sample,
     )
 
 
@@ -315,7 +319,12 @@ def prefix_tools(prefix: PrefixCandidate) -> list[JsonObject]:
 def generation_prompt(family: ActionFamily, feedback: str | None) -> str:
     parts = [
         "Call evaluate_candidate exactly once now; do not emit prose or call another tool.",
+        "Pass its action argument as a JSON object, never as text or an array.",
         FAMILY_INSTRUCTIONS[family],
+        "Ground the proposal in the observed plan and statistics. For a new join "
+        "order, start from the most selective filtered relation. Keep PostgreSQL's "
+        "default join methods unless row estimates justify changing one, and never "
+        "force a nested loop over a large unfiltered relation.",
         "Use only relations, indexes, join edges, and planner settings present in the task observation.",
     ]
     if feedback is not None:
@@ -642,6 +651,38 @@ def summarize(records: list[TeacherGenerationRecord]) -> TeacherSummary:
     )
 
 
+def generation_targets(
+    config: TeacherConfig,
+    *,
+    smoke: bool,
+    requested: tuple[ActionFamily, ...] | None = None,
+) -> dict[ActionFamily, int]:
+    if smoke:
+        if requested is not None:
+            raise ValueError("--families cannot be combined with --smoke")
+        return dict.fromkeys(TARGET_FAMILY_ORDER, config.smoke_accepted_per_family)
+    families = requested or MAIN_TARGET_FAMILIES
+    if len(families) != len(set(families)):
+        raise ValueError("--families contains duplicates")
+    configured = config.accepted_targets.as_families()
+    return {family: configured[family] for family in families}
+
+
+def require_separate_memoize_output(
+    output: Path,
+    default_output: Path,
+    requested: tuple[ActionFamily, ...] | None,
+) -> None:
+    if (
+        requested is not None
+        and ActionFamily.MEMOIZE in requested
+        and output == default_output
+    ):
+        raise ValueError(
+            "an explicit memoize run requires a non-default --output directory"
+        )
+
+
 def record_identities(
     repository: Path, records: list[tuple[Path, TeacherGenerationRecord]]
 ) -> list[TeacherRecordIdentity]:
@@ -701,14 +742,33 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("experiments/005-protocol-sft-v2/teacher"),
+        default=DEFAULT_TEACHER_OUTPUT,
     )
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument(
+        "--families",
+        nargs="+",
+        choices=tuple(family.value for family in TARGET_FAMILY_ORDER),
+        help=(
+            "Override the main teacher families; use a separate output directory "
+            "when investigating memoize."
+        ),
+    )
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
     output = (repository / arguments.output).resolve()
+    requested = (
+        tuple(ActionFamily(value) for value in arguments.families)
+        if arguments.families is not None
+        else None
+    )
+    require_separate_memoize_output(
+        output,
+        (repository / DEFAULT_TEACHER_OUTPUT).resolve(),
+        requested,
+    )
     if arguments.check:
         manifest = verify_records(repository, output)
         print(json.dumps(manifest.summary.to_wire(), indent=2, sort_keys=True))
@@ -761,13 +821,11 @@ def main() -> None:
     existing = [record for _, record in existing_pairs]
     if any(record.teacher != identity for record in existing):
         raise RuntimeError("teacher records belong to a different teacher config")
-    targets: dict[ActionFamily, int]
-    if arguments.smoke:
-        targets = dict.fromkeys(
-            TARGET_FAMILY_ORDER, teacher_config.smoke_accepted_per_family
-        )
-    else:
-        targets = teacher_config.accepted_targets.as_families()
+    targets = generation_targets(
+        teacher_config,
+        smoke=arguments.smoke,
+        requested=requested,
+    )
     started_at = datetime.now(UTC).isoformat()
     previous_manifest_path = output / "manifest.json"
     if previous_manifest_path.is_file():
@@ -818,7 +876,7 @@ def main() -> None:
     with run:
         if run.pool is None:
             raise RuntimeError("teacher database pool did not start")
-        for family in TARGET_FAMILY_ORDER:
+        for family in targets:
             budget = targets[family] * teacher_config.attempt_budget_multiplier
             for task in ordered_tasks(
                 teacher_config, family, teacher_tasks, used_task_ids

@@ -61,6 +61,9 @@ def test_dataset_config_pins_v2_policy_and_thresholds(repository_root) -> None:
     assert config.sampling.initial_samples_per_task == 4
     assert config.sampling.normal_maximum_samples_per_task == 6
     assert config.sampling.default_best_search_maximum_samples_per_task == 30
+    assert config.sampling.default_best_search_minimum_measured_fingerprints == 2
+    assert config.sampling.default_best_search_maximum_observed_speedup == 1.10
+    assert config.sampling.default_best_search_task_limit == 40
     assert config.sampling.fallback_check_task_count == 100
     assert config.sampling.fallback_yield_floor == 0.11
     assert config.labels.win_speedup == 1.15

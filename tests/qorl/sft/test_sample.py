@@ -62,13 +62,8 @@ def test_unexpected_rollout_error_is_recorded(
         evaluator.default = default
         return default
 
-    def fail(
-        policy: QoAgentPolicy,
-        evaluator: object,
-        *,
-        guidance: str | None = None,
-    ) -> None:
-        del policy, evaluator, guidance
+    def fail(policy: QoAgentPolicy, evaluator: object) -> None:
+        del policy, evaluator
         raise TypeError("unexpected sampling failure")
 
     monkeypatch.setattr(PlanValidationEvaluator, "start", start)
@@ -98,7 +93,6 @@ def test_unexpected_rollout_error_is_recorded(
         sample=1,
         seed=1,
         sampling_mode=SamplingMode.NORMAL,
-        guidance=None,
     )
     profile = load_runtime_profile(repository_root, DEFAULT_TRAINING_PROFILE)
     resources = profile.workers[0]

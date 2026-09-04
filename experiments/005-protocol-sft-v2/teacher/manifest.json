@@ -1,0 +1,164 @@
+{
+  "completed_at_utc": "2026-09-04T06:28:35.526081+00:00",
+  "database_pool": {
+    "config_sha256": "792f0d8cb9185c43e83385c3623073eb25f1a43278260c14c420c7cc97c2197e",
+    "id": "qorl-postgres-pool-v1",
+    "path": "configs/postgres/training-pool-v1.json",
+    "worker_count": 4,
+    "workers": [
+      {
+        "cpuset": "0-3,16-19",
+        "cpuset_mems": "0",
+        "memory_bytes": 8589934592,
+        "memory_limit": "8g",
+        "memory_swap_bytes": 0,
+        "physical_core_count": 4,
+        "port": 56000,
+        "shm_bytes": 1073741824,
+        "shm_size": "1g",
+        "slot": 0
+      },
+      {
+        "cpuset": "4-7,20-23",
+        "cpuset_mems": "0",
+        "memory_bytes": 8589934592,
+        "memory_limit": "8g",
+        "memory_swap_bytes": 0,
+        "physical_core_count": 4,
+        "port": 56001,
+        "shm_bytes": 1073741824,
+        "shm_size": "1g",
+        "slot": 1
+      },
+      {
+        "cpuset": "8-11,24-27",
+        "cpuset_mems": "0",
+        "memory_bytes": 8589934592,
+        "memory_limit": "8g",
+        "memory_swap_bytes": 0,
+        "physical_core_count": 4,
+        "port": 56002,
+        "shm_bytes": 1073741824,
+        "shm_size": "1g",
+        "slot": 2
+      },
+      {
+        "cpuset": "12-15,28-31",
+        "cpuset_mems": "0",
+        "memory_bytes": 8589934592,
+        "memory_limit": "8g",
+        "memory_swap_bytes": 0,
+        "physical_core_count": 4,
+        "port": 56003,
+        "shm_bytes": 1073741824,
+        "shm_size": "1g",
+        "slot": 3
+      }
+    ]
+  },
+  "generation_id": "qorl-protocol-sft-v2-teacher-v1",
+  "records": [
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-3a-3a835.json",
+      "requested_family": "join",
+      "sha256": "5b4f37ff57d6c45700450105d793eb10121a03744818be64def6afa9e4b9065a",
+      "task_id": "ceb-3a-3a835",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/join/ceb-3a-3a91.json",
+      "requested_family": "join",
+      "sha256": "a06a7b64d29f365e444c549a2bcc09943884d13bbab674ea09418978c52c2211",
+      "task_id": "ceb-3a-3a91",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a58.json",
+      "requested_family": "leading",
+      "sha256": "0c44428265fddbcb9b821d23b53090d1ec4005c8cb6140e94d9096afe0202cb4",
+      "task_id": "ceb-3a-3a58",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/leading/ceb-3a-3a686.json",
+      "requested_family": "leading",
+      "sha256": "3e7456a62bed90b9b8fb9a6a227953d9515ce0f85c4352615fa13223e6598e6a",
+      "task_id": "ceb-3a-3a686",
+      "template_id": "ceb-3a"
+    },
+    {
+      "accepted": false,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/memoize/ceb-6a-6a184.json",
+      "requested_family": "memoize",
+      "sha256": "7afcd661c0de53a7e3cabcaafe7b387db091fa158a4b6fdf4f165c2cdb0df130",
+      "task_id": "ceb-6a-6a184",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": false,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/memoize/ceb-6a-6a479.json",
+      "requested_family": "memoize",
+      "sha256": "cfde26e63d41536c1cdd00e2e3ae2b2afe0667620a2621f93d8614fad82d0f6e",
+      "task_id": "ceb-6a-6a479",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/parallel/ceb-6a-6a267.json",
+      "requested_family": "parallel",
+      "sha256": "0a4a5c76eb1fb9f80c117f570895cea59339d74e8112fb52dac48645c2c6bebf",
+      "task_id": "ceb-6a-6a267",
+      "template_id": "ceb-6a"
+    },
+    {
+      "accepted": true,
+      "path": "experiments/005-protocol-sft-v2/teacher/records/parallel/ceb-6a-6a428.json",
+      "requested_family": "parallel",
+      "sha256": "52629b88103c873adb6fb7566a9895234ece7c6f6dbf10dbd93d3af293b787a2",
+      "task_id": "ceb-6a-6a428",
+      "template_id": "ceb-6a"
+    }
+  ],
+  "schema_version": 1,
+  "source_filter": {
+    "path": "outputs/sft/protocol-sft-v2/filter/sampling/records.jsonl",
+    "sha256": "3a3b8ed2cba201db0b7ae12d821cefcef0b2e5652719e91197d5cc2d3227b1d8"
+  },
+  "started_at_utc": "2026-09-04T06:23:26.305700+00:00",
+  "status": "completed_with_failures",
+  "summary": {
+    "accepted": 6,
+    "accepted_by_family": {
+      "join": 2,
+      "leading": 2,
+      "parallel": 2
+    },
+    "api_attempts": 17,
+    "rejected_by_reason": {
+      "constraints_not_satisfied": 9,
+      "default_duplicate": 1,
+      "evaluate_candidate.action must be an object": 1
+    },
+    "tasks_attempted": 8
+  },
+  "targets": {
+    "join": 2,
+    "leading": 2,
+    "memoize": 2,
+    "parallel": 2
+  },
+  "teacher": {
+    "base_url": "https://api.anthropic.com/v1/",
+    "config": {
+      "path": "experiments/005-protocol-sft-v2/teacher.json",
+      "sha256": "fd7b0dfc5c7f22cc6c5663deb9972037c7d3138361b06d207348f2f9f1dba16e"
+    },
+    "decoding": "provider_default",
+    "model": "claude-fable-5-1",
+    "teacher_id": "protocol-sft-v2-fable-5-1"
+  }
+}

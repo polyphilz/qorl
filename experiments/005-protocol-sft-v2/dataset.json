@@ -9,6 +9,9 @@
     "initial_samples_per_task": 4,
     "normal_maximum_samples_per_task": 6,
     "default_best_search_maximum_samples_per_task": 30,
+    "default_best_search_minimum_measured_fingerprints": 2,
+    "default_best_search_maximum_observed_speedup": 1.10,
+    "default_best_search_task_limit": 40,
     "fallback_check_task_count": 100,
     "fallback_yield_floor": 0.11
   },
@@ -21,8 +24,7 @@
   },
   "assembly": {
     "maximum_examples_per_task": 2,
-    "maximum_syntax_examples_per_task": 2,
-    "maximum_steered_share_per_family": 0.3333333333333333
+    "maximum_syntax_examples_per_task": 2
   },
   "measurement": {
     "maximum_candidates_per_task": 6,

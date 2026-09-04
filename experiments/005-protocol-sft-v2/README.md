@@ -1,6 +1,6 @@
 # 005 — Tool-use SFT v2
 
-**Status:** inventory and pipeline frozen; host generation pending
+**Status:** inventory and pipeline frozen; teacher smoke complete, full generation pending
 
 This experiment will build expert-iteration SFT data by rejection-sampling
 real one-candidate agent trajectories, then train a fresh LoRA from the pinned
@@ -85,9 +85,13 @@ uv run python -m qorl.sft.sample \
 Filter the sampling split, then generate the missing action-family coverage
 with Fable 5.1. The API uses automatic tool choice; every accepted action is
 replayed through the ordinary agent loop and plan validator before it can enter
-the dataset. The smoke test requires two accepted examples from each target
-family. Accepted records and all retry provenance are stored under this
-experiment directory, so later dataset builds do not call the API:
+the dataset. The smoke accepted two examples each for Leading, join, and
+parallel. Memoize accepted none in six attempts and is excluded from the main
+teacher batch while its pg_hint_plan behavior is investigated separately.
+Accepted records and all retry provenance are stored under this
+experiment directory, so later dataset builds do not call the API. Teacher
+documents remain syntax examples even if measurement later finds them faster;
+measured-win labels are reserved for student samples:
 
 ```bash
 uv run python -m qorl.sft.filter --split sampling
@@ -95,19 +99,33 @@ uv run python -m qorl.sft.teacher --smoke
 uv run python -m qorl.sft.teacher --check
 uv run python -m qorl.sft.teacher
 uv run python -m qorl.sft.teacher --check
+uv run python -m qorl.sft.filter --split teacher
 ```
+
+The normal command targets parallel, Leading, and join. A Memoize-only
+diagnostic must use both an explicit family and a separate output directory:
+
+```bash
+uv run python -m qorl.sft.teacher \
+  --families memoize \
+  --output experiments/005-protocol-sft-v2/teacher-memoize
+```
+
+Memoize remains in the student action space and final coverage gate for now.
+Before assembly, the isolated investigation must either produce a verified
+example or support an explicit decision to remove that family from this
+experiment's gate.
 
 Fable 5.1 uses provider-default decoding because its API rejects a temperature
 parameter. The teacher process reads its temporary credential only from
-`ANTHROPIC_API_KEY`. After teacher generation, filter the validation split,
-measure the accepted training candidates, assemble the dataset, and audit
-Prime-RL's rendering without beginning training:
+`ANTHROPIC_API_KEY`. After teacher generation, filter the validation split and
+measure the initial accepted training candidates. Measurement writes the
+recorded default-best search cohort using the pinned two-fingerprint and 1.10x
+selection rule:
 
 ```bash
 uv run python -m qorl.sft.filter --split validation
 uv run python -m qorl.sft.measure
-uv run python -m qorl.sft.build_protocol_dataset
-uv run python experiments/005-protocol-sft-v2/run.py --prepare
 ```
 
 The normal syntax pass stops at six samples per task. Searching for defensible
@@ -124,7 +142,15 @@ uv run python -m qorl.sft.sample \
   --sample-start 7 --sample-count 24 \
   --model qorl-sft-v2-sampler \
   --sampler-manifest outputs/sft/protocol-sft-v2-sampler-pilot-sft/qorl-merge.json
+uv run python -m qorl.sft.filter --split default_best
+uv run python -m qorl.sft.measure
+uv run python -m qorl.sft.build_protocol_dataset
+uv run python experiments/005-protocol-sft-v2/run.py --prepare
 ```
+
+The exceptional default-best search has its own sampling and filter manifests,
+so it does not mutate the four-sample student pass or the teacher's source-filter
+identity.
 
 Training is a separate, explicit action:
 

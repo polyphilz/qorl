@@ -46,3 +46,21 @@ def test_filter_rejects_a_tool_error() -> None:
     )
 
     assert records[0].rejection_reason == "tool_error"
+
+
+def test_followup_filter_rejects_a_fingerprint_from_the_initial_pass() -> None:
+    initial = filter_records(
+        [(Path("initial.json"), sample())],
+        context_length=20_480,
+        syntax_examples_per_task=2,
+    )
+
+    followup = filter_records(
+        [(Path("followup.json"), sample(7))],
+        context_length=20_480,
+        syntax_examples_per_task=0,
+        existing=initial,
+    )
+
+    assert followup[0].rejection_reason == "task_fingerprint_duplicate"
+    assert followup[0].syntax_eligible is False

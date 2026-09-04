@@ -16,12 +16,14 @@ from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import MeasurementProtocolId, RunStatus
+from qorl.sft.filter import load_filtered_sample
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     JSON_OBJECT_LIST_ADAPTER,
     CandidateLabel,
     CandidateMeasurement,
     DatasetConfig,
+    ExampleSource,
     FilterRecord,
     JsonObject,
     MeasurementAttempt,
@@ -43,11 +45,13 @@ from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts
 
 MEASUREMENT_ID = "qorl-protocol-sft-v2-measurement-v1"
+DEFAULT_BEST_TASKS_FILE = "default-best-tasks.json"
 
 
 @dataclass(frozen=True)
 class MeasurementRequest:
     record: FilterRecord
+    source: ExampleSource
     sample: SampleRecord
     attempt: int
 
@@ -197,6 +201,33 @@ def summarize(
     )
 
 
+def select_default_best_search_tasks(
+    measurements: list[CandidateMeasurement], config: DatasetConfig
+) -> list[str]:
+    by_task: dict[str, list[CandidateMeasurement]] = defaultdict(list)
+    for measurement in measurements:
+        if measurement.score_interval is not None:
+            by_task[measurement.task_id].append(measurement)
+    eligible = [
+        task_id
+        for task_id, records in by_task.items()
+        if len(records)
+        >= config.sampling.default_best_search_minimum_measured_fingerprints
+        and max(
+            record.score_interval.upper
+            for record in records
+            if record.score_interval is not None
+        )
+        <= config.sampling.default_best_search_maximum_observed_speedup
+    ]
+    eligible.sort(
+        key=lambda task_id: hashlib.sha256(
+            f"{config.seed}:default-best-search:{task_id}".encode()
+        ).hexdigest()
+    )
+    return eligible[: config.sampling.default_best_search_task_limit]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Measure accepted protocol SFT v2 candidates."
@@ -222,17 +253,32 @@ def main() -> None:
     config_path = (repository / arguments.config).resolve()
     timeout_path = (repository / arguments.timeouts).resolve()
     config = load_record(config_path, DatasetConfig)
-    filter_path = dataset / "filter/sampling/records.jsonl"
+    filter_paths = [
+        (ExampleSource.STUDENT, dataset / "filter/sampling/records.jsonl"),
+        *(
+            [(ExampleSource.STUDENT, dataset / "filter/default_best/records.jsonl")]
+            if (dataset / "filter/default_best/records.jsonl").is_file()
+            else []
+        ),
+        (ExampleSource.TEACHER, dataset / "filter/teacher/records.jsonl"),
+    ]
+    filter_records_sha256 = hashlib.sha256(
+        "\n".join(
+            f"{source.value}:{path.parent.name}:{sha256_file(path)}"
+            for source, path in filter_paths
+        ).encode()
+    ).hexdigest()
     accepted = [
-        record
-        for record in load_json_lines(filter_path, FilterRecord)
+        (record, source)
+        for source, path in filter_paths
+        for record in load_json_lines(path, FilterRecord)
         if record.accepted
     ]
-    records: list[FilterRecord] = []
+    records: list[tuple[FilterRecord, ExampleSource]] = []
     per_task: Counter[str] = Counter()
-    for record in accepted:
+    for record, source in accepted:
         if per_task[record.task_id] < config.measurement.maximum_candidates_per_task:
-            records.append(record)
+            records.append((record, source))
             per_task[record.task_id] += 1
 
     fixture = DatabaseFixture.load(repository)
@@ -251,9 +297,8 @@ def main() -> None:
         if manifest_path.is_file()
         else None
     )
-    if previous is not None and (
-        previous.dataset_config_sha256 != sha256_file(config_path)
-        or previous.filter_records_sha256 != sha256_file(filter_path)
+    if previous is not None and previous.dataset_config_sha256 != sha256_file(
+        config_path
     ):
         raise RuntimeError("measurement output belongs to different experiment inputs")
     failures = list(previous.failures) if previous is not None else []
@@ -265,7 +310,7 @@ def main() -> None:
         else datetime.now(UTC).isoformat(),
         completed_at_utc=None,
         dataset_config_sha256=sha256_file(config_path),
-        filter_records_sha256=sha256_file(filter_path),
+        filter_records_sha256=filter_records_sha256,
         timeouts=JSON_OBJECT_ADAPTER.validate_python(timeouts.identity()),
         database_pool=previous.database_pool if previous else None,
         summary=None,
@@ -286,12 +331,22 @@ def main() -> None:
 
     measurements: dict[tuple[str, str], CandidateMeasurement] = {}
     samples: dict[tuple[str, str], SampleRecord] = {}
-    for record in records:
+    sources: dict[tuple[str, str], ExampleSource] = {}
+    for record, source in records:
         key = (record.task_id, fingerprint(record))
-        samples[key] = load_record(dataset / record.sample_path, SampleRecord)
+        sources[key] = source
+        samples[key] = load_filtered_sample(repository, dataset, record, source)
         path = measurement_path(dataset, record)
         if path.is_file():
-            measurements[key] = load_record(path, CandidateMeasurement)
+            measurement = load_record(path, CandidateMeasurement)
+            if (
+                measurement.source != source
+                or measurement.sample_path != record.sample_path
+            ):
+                raise RuntimeError(
+                    f"candidate measurement source differs: {record.task_id}"
+                )
+            measurements[key] = measurement
 
     def execute(
         pool: WorkerPool, request: MeasurementRequest
@@ -331,9 +386,12 @@ def main() -> None:
     with run:
         initial = [
             MeasurementRequest(
-                record, samples[(record.task_id, fingerprint(record))], 1
+                record,
+                source,
+                samples[(record.task_id, fingerprint(record))],
+                1,
             )
-            for record in records
+            for record, source in records
             if (record.task_id, fingerprint(record)) not in measurements
         ]
         for completion in run.map(
@@ -352,6 +410,7 @@ def main() -> None:
             measurement = CandidateMeasurement(
                 task_id=request.record.task_id,
                 template_id=request.record.template_id,
+                source=request.source,
                 plan_sha256=fingerprint(request.record),
                 sample_path=request.record.sample_path,
                 attempts=[attempt],
@@ -366,14 +425,14 @@ def main() -> None:
 
         remeasure_records = [
             record
-            for record in records
+            for record, _ in records
             if (record.task_id, fingerprint(record)) in measurements
             and needs_band_remeasurement(
                 measurements[(record.task_id, fingerprint(record))], config
             )
         ]
         by_task: dict[str, list[FilterRecord]] = defaultdict(list)
-        for record in records:
+        for record, _ in records:
             if (record.task_id, fingerprint(record)) in measurements:
                 by_task[record.task_id].append(record)
         already = {
@@ -398,7 +457,10 @@ def main() -> None:
                 already.add(key)
         remeasure = [
             MeasurementRequest(
-                record, samples[(record.task_id, fingerprint(record))], 2
+                record,
+                sources[(record.task_id, fingerprint(record))],
+                samples[(record.task_id, fingerprint(record))],
+                2,
             )
             for record in remeasure_records
         ]
@@ -429,11 +491,15 @@ def main() -> None:
 
     values, task_labels = label_measurements(list(measurements.values()), config)
     by_key = {(value.task_id, value.plan_sha256): value for value in values}
-    for record in records:
+    for record, _ in records:
         key = (record.task_id, fingerprint(record))
         if key in by_key:
             write_json(measurement_path(dataset, record), by_key[key].to_wire())
     summary = summarize(values, task_labels, failures)
+    write_json(
+        dataset / DEFAULT_BEST_TASKS_FILE,
+        select_default_best_search_tasks(values, config),
+    )
     final = manifest.model_copy(
         update={
             "status": RunStatus.COMPLETED_WITH_FAILURES

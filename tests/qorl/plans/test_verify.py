@@ -92,6 +92,66 @@ class TestPlan:
         assert not result.valid
         assert any("uses hash, not merge" in error for error in result.errors)
 
+    def test_memoize_constraint_checks_only_the_join_inner_child(self) -> None:
+        plan = {
+            "Node Type": "Nested Loop",
+            "Plans": [
+                {
+                    "Node Type": "Nested Loop",
+                    "Plans": [
+                        {"Node Type": "Seq Scan", "Alias": "a"},
+                        {
+                            "Node Type": "Memoize",
+                            "Plans": [{"Node Type": "Index Scan", "Alias": "b"}],
+                        },
+                    ],
+                },
+                {"Node Type": "Index Scan", "Alias": "c"},
+            ],
+        }
+        action = {
+            "version": 1,
+            "joins": [
+                {
+                    "relations": ["a", "b", "c"],
+                    "force": "auto",
+                    "forbid": [],
+                    "memoize": "forbid",
+                }
+            ],
+        }
+
+        result = verify_action(action, plan, DIAGNOSTICS)
+
+        assert result.valid, result.errors
+
+    def test_memoize_constraint_detects_a_memoized_inner_child(self) -> None:
+        plan = {
+            "Node Type": "Nested Loop",
+            "Plans": [
+                {"Node Type": "Seq Scan", "Alias": "a"},
+                {
+                    "Node Type": "Memoize",
+                    "Plans": [{"Node Type": "Index Scan", "Alias": "b"}],
+                },
+            ],
+        }
+        action = {
+            "version": 1,
+            "joins": [
+                {
+                    "relations": ["a", "b"],
+                    "force": "auto",
+                    "forbid": [],
+                    "memoize": "force",
+                }
+            ],
+        }
+
+        result = verify_action(action, plan, DIAGNOSTICS)
+
+        assert result.valid, result.errors
+
     def test_rejects_disabled_index_in_actual_plan(self) -> None:
         result = verify_action(
             {
