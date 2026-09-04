@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 import torch
 from safetensors.torch import save_file
 from torch.distributed.checkpoint import FileSystemReader, load
+
+from qorl.adapters.schemas import AdapterExportManifest
+from qorl.util.hashing import sha256_file
+
+MODEL_FILE = "model.safetensors"
 
 
 def adapter_name(checkpoint_name: str) -> str:
@@ -29,6 +33,10 @@ def main() -> None:
     parser.add_argument("--alpha", type=float, default=32.0)
     parser.add_argument("--dropout", type=float, default=0.0)
     arguments = parser.parse_args()
+    model = arguments.model.resolve()
+    model_weights = model / MODEL_FILE
+    if not model_weights.is_file():
+        raise RuntimeError(f"base model weights are missing: {model_weights}")
 
     metadata = FileSystemReader(arguments.checkpoint).read_metadata()
     checkpoint_keys = sorted(
@@ -80,7 +88,7 @@ def main() -> None:
     adapter_config = {
         "peft_type": "LORA",
         "task_type": "CAUSAL_LM",
-        "base_model_name_or_path": str(arguments.model),
+        "base_model_name_or_path": str(model),
         "r": rank,
         "lora_alpha": arguments.alpha,
         "lora_dropout": arguments.dropout,
@@ -91,16 +99,16 @@ def main() -> None:
     (arguments.output / "adapter_config.json").write_text(
         json.dumps(adapter_config, indent=2, sort_keys=True) + "\n"
     )
-    manifest = {
-        "schema_version": 1,
-        "tensor_count": len(adapter),
-        "nonzero_lora_b_values": changed,
-        "adapter_sha256": hashlib.sha256(weights.read_bytes()).hexdigest(),
-    }
-    (arguments.output / "qorl-manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    manifest = AdapterExportManifest(
+        tensor_count=len(adapter),
+        nonzero_lora_b_values=changed,
+        adapter_sha256=sha256_file(weights),
+        base_model_sha256=sha256_file(model_weights),
     )
-    print(json.dumps(manifest, indent=2))
+    (arguments.output / "qorl-manifest.json").write_text(
+        json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
+    )
+    print(json.dumps(manifest.model_dump(mode="json"), indent=2))
 
 
 if __name__ == "__main__":

@@ -10,7 +10,12 @@ import sys
 import tomllib
 from pathlib import Path
 
-from qorl.adapters.model import adapter_rank, model_snapshot
+from qorl.adapters.model import (
+    adapter_base_model,
+    adapter_rank,
+    model_snapshot,
+    verify_adapter_base,
+)
 from qorl.adapters.verify import verify_merged_model
 from qorl.agent import QoAgentConfig
 from qorl.measure.schemas import RunStatus
@@ -78,11 +83,8 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
     uv = shutil.which("uv")
     if uv is None:
         raise RuntimeError("uv is not installed")
-    config = load_record(
-        repository / "experiments/005-protocol-sft-v2/dataset.json", DatasetConfig
-    )
-    snapshot, _, _ = policy(repository, config)
     adapter = (repository / adapter).resolve()
+    snapshot = adapter_base_model(adapter, repository)
     output = (repository / output).resolve()
     run(
         [
@@ -94,6 +96,8 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
             "python",
             "-m",
             "qorl_training.adapters.merge",
+            "--repository",
+            str(repository),
             "--base",
             str(snapshot),
             "--adapter",
@@ -103,7 +107,7 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
         ],
         repository,
     )
-    verify_merged_model(snapshot, adapter, output)
+    verify_merged_model(snapshot, adapter, output, repository)
     return output / "qorl-merge.json"
 
 
@@ -233,6 +237,7 @@ def gate(repository: Path) -> Path:
     )
     snapshot, policy_config, _ = policy(repository, dataset_config)
     adapter = trained_adapter(repository)
+    verify_adapter_base(adapter, snapshot, repository)
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")

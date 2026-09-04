@@ -59,7 +59,8 @@ Training-side code only runs on the Linux CUDA host:
 
 ```bash
 uv run --project training --frozen python -m unittest \
-  training/tests/test_runtime.py training/tests/test_taskset.py
+  training/tests/test_adapters.py training/tests/test_runtime.py \
+  training/tests/test_taskset.py
 ```
 
 When work touches `training/`, say plainly whether it was run on the host or only

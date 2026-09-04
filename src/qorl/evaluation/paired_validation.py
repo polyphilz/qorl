@@ -277,7 +277,7 @@ def main() -> None:
     model_sha256: str
     if arguments.phase == "pre":
         base = model_snapshot(policy)
-        verify_merged_model(base, adapter_path(repository), model)
+        verify_merged_model(base, adapter_path(repository), model, repository)
         merge_manifest_path = model / "qorl-merge.json"
         merge_manifest = json.loads(merge_manifest_path.read_text(encoding="utf-8"))
         model_sha256 = merge_manifest["merged_model_sha256"]

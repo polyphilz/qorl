@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from qorl.adapters.model import adapter_rank
+from qorl.adapters.model import adapter_rank, verify_adapter_base
 from qorl.util.hashing import sha256_file
 from qorl.util.serving import ServedModel
 
@@ -19,14 +19,17 @@ MINIMUM_LOGPROBABILITY_DELTA = 1e-7
 TOP_LOGPROBS = 20
 
 
-def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
+def verify_merged_model(
+    base: Path, adapter: Path, merged: Path, repository: Path
+) -> None:
     manifest_path = merged / "qorl-merge.json"
     model_path = merged / "model.safetensors"
     if not manifest_path.is_file() or not model_path.is_file():
         raise RuntimeError(f"merged SFT model is incomplete: {merged}")
+    base_model_sha256 = verify_adapter_base(adapter, base, repository)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = {
-        "base_model_sha256": sha256_file(base / "model.safetensors"),
+        "base_model_sha256": base_model_sha256,
         "adapter_model_sha256": sha256_file(adapter / "adapter_model.safetensors"),
         "adapter_config_sha256": sha256_file(adapter / "adapter_config.json"),
         "merged_model_sha256": sha256_file(model_path),

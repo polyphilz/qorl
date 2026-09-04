@@ -128,6 +128,8 @@ def rl(repository: Path) -> Path:
                 "python",
                 "-m",
                 MERGE_MODULE,
+                "--repository",
+                str(repository),
                 "--base",
                 str(base),
                 "--adapter",
@@ -137,7 +139,7 @@ def rl(repository: Path) -> Path:
             ],
             repository,
         )
-    verify_merged_model(base, adapter, merged)
+    verify_merged_model(base, adapter, merged, repository)
     merged_manifest = json.loads(
         (merged / "qorl-merge.json").read_text(encoding="utf-8")
     )

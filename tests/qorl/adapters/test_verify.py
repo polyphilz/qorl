@@ -17,7 +17,17 @@ def merged_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
         directory.mkdir()
     (base / "model.safetensors").write_bytes(b"base")
     (adapter / "adapter_model.safetensors").write_bytes(b"adapter")
-    (adapter / "adapter_config.json").write_text("{}")
+    (adapter / "adapter_config.json").write_text(
+        json.dumps(
+            {
+                "base_model_name_or_path": str(base),
+                "peft_type": "LORA",
+                "bias": "none",
+                "r": 16,
+                "lora_alpha": 32.0,
+            }
+        )
+    )
     (merged / "model.safetensors").write_bytes(b"merged")
     (merged / "tokenizer.json").write_bytes(b"tokenizer")
     artifacts = [
@@ -47,8 +57,22 @@ def merged_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
 def test_merged_model_verifies_every_recorded_artifact(tmp_path: Path) -> None:
     base, adapter, merged = merged_fixture(tmp_path)
 
-    verify_merged_model(base, adapter, merged)
+    verify_merged_model(base, adapter, merged, tmp_path)
 
     (merged / "tokenizer.json").write_bytes(b"changed")
     with pytest.raises(RuntimeError, match="artifact inventory differs"):
-        verify_merged_model(base, adapter, merged)
+        verify_merged_model(base, adapter, merged, tmp_path)
+
+
+def test_merged_model_rejects_an_adapter_applied_to_the_wrong_base(
+    tmp_path: Path,
+) -> None:
+    _, adapter, merged = merged_fixture(tmp_path)
+    wrong_base = tmp_path / "wrong-base"
+    wrong_base.mkdir()
+    (wrong_base / "model.safetensors").write_bytes(b"wrong")
+
+    with pytest.raises(
+        RuntimeError, match="does not match the adapter's training base"
+    ):
+        verify_merged_model(wrong_base, adapter, merged, tmp_path)

@@ -37,7 +37,9 @@ uv run python experiments/005-protocol-sft-v2/build_timeouts.py --check
 
 ## Host sequence
 
-Merge and verify the step-70 sampler:
+Merge and verify the step-70 sampler. The runner derives the base from the
+adapter's recorded training base and rejects mismatched weights; this is
+separate from the raw base used to train SFT v2:
 
 ```bash
 uv run python experiments/005-protocol-sft-v2/run.py --merge-sampler

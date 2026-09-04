@@ -12,6 +12,8 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
+from qorl.adapters.model import adapter_config, verify_adapter_base
+
 MODEL_FILE = "model.safetensors"
 ADAPTER_FILE = "adapter_model.safetensors"
 MANIFEST_FILE = "qorl-merge.json"
@@ -43,7 +45,7 @@ def adapter_pairs(path: Path) -> dict[str, tuple[str, str]]:
     return pairs
 
 
-def merge(base: Path, adapter: Path, output: Path) -> Path:
+def merge(base: Path, adapter: Path, output: Path, repository: Path) -> Path:
     base_model = base / MODEL_FILE
     adapter_model = adapter / ADAPTER_FILE
     adapter_config_path = adapter / "adapter_config.json"
@@ -53,11 +55,12 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
     if output.exists():
         raise RuntimeError(f"output already exists: {output}")
 
-    config = json.loads(adapter_config_path.read_text(encoding="utf-8"))
-    if config.get("peft_type") != "LORA" or config.get("bias") != "none":
+    config = adapter_config(adapter)
+    if config.peft_type != "LORA" or config.bias != "none":
         raise RuntimeError("only an unbiased LoRA adapter can be merged")
-    rank = int(config["r"])
-    scale = float(config["lora_alpha"]) / rank
+    base_model_sha256 = verify_adapter_base(adapter, base, repository)
+    rank = config.r
+    scale = config.lora_alpha / rank
     pairs = adapter_pairs(adapter_model)
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -66,7 +69,7 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
     ) as temporary:
         target = Path(temporary)
         for source in base.iterdir():
-            if source.name != MODEL_FILE and source.is_file():
+            if source.name not in {MODEL_FILE, MANIFEST_FILE} and source.is_file():
                 shutil.copy2(source, target / source.name, follow_symlinks=True)
 
         with (
@@ -103,12 +106,12 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
         manifest = {
             "schema_version": 1,
             "operation": "merge_lora_into_base",
-            "base_model_sha256": sha256(base_model),
+            "base_model_sha256": base_model_sha256,
             "adapter_model_sha256": sha256(adapter_model),
             "adapter_config_sha256": sha256(adapter_config_path),
             "merged_model_sha256": merged_model_sha256,
             "lora_rank": rank,
-            "lora_alpha": float(config["lora_alpha"]),
+            "lora_alpha": config.lora_alpha,
             "lora_scale": scale,
             "merged_tensor_count": len(pairs),
             "artifacts": [
@@ -133,6 +136,7 @@ def merge(base: Path, adapter: Path, output: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -142,6 +146,7 @@ def main() -> None:
             arguments.base.resolve(),
             arguments.adapter.resolve(),
             arguments.output.resolve(),
+            arguments.repository.resolve(),
         )
     )
 
