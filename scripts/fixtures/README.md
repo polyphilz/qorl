@@ -13,8 +13,7 @@ under [imdb/](../../imdb/README.md).
 
 The build and restore use the single-worker pool configuration
 `docker/worker_pool/configs/000-poolconf-1x32`. The database image must already
-exist; startup does not rebuild it. Runtime credentials come from the environment
-or the ignored `.env` file.
+exist; startup does not rebuild it. Runtime credentials come from the environment or `.env`.
 
 All containers use the root `compose.yaml`. It mounts the IMDb CSV and schema
 directories read-only; the loader sets their paths. Normal workers do not use
