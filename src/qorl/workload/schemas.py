@@ -12,8 +12,6 @@ class SourceArchive(WorkloadRecord):
     filename: str
     bytes: int
     sha256: str
-    members: int | None = None
-    regular_files: int | None = None
 
 
 class QuerySource(WorkloadRecord):
