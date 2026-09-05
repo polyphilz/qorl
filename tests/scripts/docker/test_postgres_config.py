@@ -12,6 +12,22 @@ from qorl.plans.schemas import (
 
 
 class TestPostgresConfig:
+    def test_one_compose_file_serves_workers_and_fixture_loading(
+        self, repository_root: Path
+    ) -> None:
+        compose = (repository_root / "compose.yaml").read_text()
+        assert "${QORL_IMDB_DATA_DIR:-./imdb/raw/tables}:/qorl/imdb-data:ro" in compose
+        assert (
+            "${QORL_IMDB_SOURCE_DIR:-./benchmarks/raw/job/source}:/qorl/imdb-source:ro"
+            in compose
+        )
+        assert "QORL_IMDB_FIXTURE_ID" not in compose
+        assert not (repository_root / "compose.fixture-build.yaml").exists()
+        for name in ("build_imdb.sh", "load_imdb.sh", "restore_verify_imdb.sh"):
+            script = (repository_root / "scripts/fixtures" / name).read_text()
+            assert '--file "$repository_root/compose.yaml"' in script
+            assert "compose.fixture-build.yaml" not in script
+
     def test_each_config_has_only_the_three_declared_files(
         self, repository_root: Path
     ) -> None:
@@ -33,11 +49,11 @@ class TestPostgresConfig:
             '${PYTHONPATH:+:$PYTHONPATH}"'
         )
         for name in (
-            "build-job-v1.sh",
-            "load-job-v1.sh",
-            "restore-verify-job-v1.sh",
+            "build_imdb.sh",
+            "load_imdb.sh",
+            "restore_verify_imdb.sh",
         ):
-            script = (repository_root / "scripts/job" / name).read_text(
+            script = (repository_root / "scripts/fixtures" / name).read_text(
                 encoding="utf-8"
             )
             assert expected in script

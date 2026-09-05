@@ -51,7 +51,7 @@ def main() -> None:
         output = repository / output
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
 
     samples: dict[str, dict[str, Any]] = {}

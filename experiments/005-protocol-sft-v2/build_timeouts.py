@@ -43,7 +43,7 @@ def build(calibration: Path) -> TimeoutManifest:
         source_manifest_path.read_text(encoding="utf-8")
     )
     selection = load_record(SELECTION, DatasetSelection)
-    task_set = TaskSet.load(ROOT, "ceb-v1")
+    task_set = TaskSet.load(ROOT, "ceb")
     fixture = DatabaseFixture.load(ROOT)
     selected = selection.splits.sampling
     if source_manifest.get("status") != RunStatus.COMPLETED:
@@ -140,7 +140,7 @@ def main() -> None:
         return
     if arguments.calibration is not None:
         raise SystemExit("--calibration is only used with --write")
-    CalibratedTimeouts.load(ROOT, OUTPUT, TaskSet.load(ROOT, "ceb-v1"))
+    CalibratedTimeouts.load(ROOT, OUTPUT, TaskSet.load(ROOT, "ceb"))
 
 
 if __name__ == "__main__":

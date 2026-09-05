@@ -378,7 +378,7 @@ def main() -> None:
         "config_sha256": sha256_file(config_path),
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
-        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
+        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "base_model": {

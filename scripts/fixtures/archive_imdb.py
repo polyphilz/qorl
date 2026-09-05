@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seal a cleanly stopped JOB v1 PGDATA volume as a checksummed archive."""
+"""Seal a cleanly stopped IMDb PGDATA volume as a checksummed archive."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from typing import Any
 from qorl.util.hashing import sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "imdb/build.json"
 
 
 def run(command: list[str]) -> str:
@@ -68,7 +68,7 @@ def main() -> None:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     verification = json.loads(args.build_verification.read_text(encoding="utf-8"))
     if verification["phase"] != "build":
-        raise RuntimeError("snapshot requires a build-phase database verification")
+        raise RuntimeError("archiving requires a build-phase database verification")
     if verification["source_manifest_sha256"] != sha256_file(args.manifest):
         raise RuntimeError(
             "build verification does not match the current source manifest"
@@ -76,7 +76,7 @@ def main() -> None:
 
     container = inspect_container(args.container)
     if container["State"]["Running"]:
-        raise RuntimeError("PostgreSQL must be stopped cleanly before snapshot sealing")
+        raise RuntimeError("PostgreSQL must be stopped cleanly before archiving")
     if container["State"]["ExitCode"] != 0:
         raise RuntimeError(
             f"PostgreSQL container exited unsuccessfully: {container['State']['ExitCode']}"
@@ -101,17 +101,17 @@ def main() -> None:
     image_id = container["Image"]
     if image_reference != manifest["database"]["image_reference"]:
         raise RuntimeError(
-            f"snapshot image mismatch: expected={manifest['database']['image_reference']} "
+            f"fixture image mismatch: expected={manifest['database']['image_reference']} "
             f"actual={image_reference}"
         )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    archive = args.output_dir / "job-v1.snapshot.tar.gz"
-    partial = args.output_dir / ".job-v1.snapshot.tar.gz.part"
-    snapshot_manifest = args.output_dir / "job-v1.snapshot.json"
-    for path in (archive, partial, snapshot_manifest):
+    archive = args.output_dir / "imdb.tar.gz"
+    partial = args.output_dir / ".imdb.tar.gz.part"
+    archive_manifest = args.output_dir / "archive.json"
+    for path in (archive, partial, archive_manifest):
         if path.exists():
-            raise RuntimeError(f"refusing to overwrite snapshot output: {path}")
+            raise RuntimeError(f"refusing to overwrite archive output: {path}")
 
     uid = os.getuid()
     gid = os.getgid()
@@ -168,14 +168,13 @@ test -s "$partial"
     environment_record = None
     if args.environment_capture:
         environment_record = {
-            "filename": args.environment_capture.name,
+            "filename": os.path.relpath(args.environment_capture, args.output_dir),
             "bytes": args.environment_capture.stat().st_size,
             "sha256": sha256_file(args.environment_capture),
         }
 
     result = {
-        "schema_version": 1,
-        "snapshot_id": f"job-v1-sha256-{archive_sha256[:16]}",
+        "schema_version": 2,
         "fixture_id": manifest["fixture_id"],
         "created_at_utc": datetime.now(UTC).isoformat(),
         "format": "qorl-pgdata-tar-gzip-v1",
@@ -185,11 +184,11 @@ test -s "$partial"
             "sha256": archive_sha256,
         },
         "source_manifest": {
-            "filename": args.manifest.name,
+            "filename": os.path.relpath(args.manifest, args.output_dir),
             "sha256": sha256_file(args.manifest),
         },
         "build_verification": {
-            "filename": args.build_verification.name,
+            "filename": os.path.relpath(args.build_verification, args.output_dir),
             "bytes": args.build_verification.stat().st_size,
             "sha256": sha256_file(args.build_verification),
         },
@@ -212,7 +211,6 @@ test -s "$partial"
             "architecture": image["Architecture"],
             "os": image["Os"],
         },
-        "source_volume": volume_name,
         "normalization": {
             "tar_order": "name",
             "mtime": 0,
@@ -221,9 +219,9 @@ test -s "$partial"
             "gzip_original_name_and_timestamp": False,
         },
     }
-    write_atomic(snapshot_manifest, json.dumps(result, indent=2, sort_keys=True) + "\n")
+    write_atomic(archive_manifest, json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(
-        f"sealed {result['snapshot_id']}: "
+        f"archived {result['fixture_id']}: "
         f"archive={archive} bytes={archive.stat().st_size}"
     )
 

@@ -5,10 +5,9 @@
     "multiplier": 3.0
   },
   "data_identity": {
-    "fixture_id": "job-v1",
+    "fixture_id": "imdb",
     "postgres_system_identifier": "7678843906783596587",
-    "snapshot_archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-    "snapshot_id": "job-v1-sha256-767c06fe9c54003c"
+    "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198"
   },
   "manifest_id": "qorl-protocol-sft-v2-timeouts-v1",
   "runtime_identity": {
@@ -19,7 +18,7 @@
   "selection": {
     "inventory_id": "qorl-protocol-sft-v2-selection-v1",
     "path": "experiments/005-protocol-sft-v2/selection.json",
-    "sha256": "6055e0e37e0210073390f68a1b6fc94ddceb0ca01c76c12215985e88c750260f",
+    "sha256": "c330099f1205ab5023b34fbe8dde5990f310a92d02b44db9e4e52926c35f290f",
     "split": "sampling"
   },
   "source_calibration": {

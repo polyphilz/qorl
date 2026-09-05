@@ -1,0 +1,15 @@
+{
+  "status": "high-confidence community recovery; no author-published archive checksum exists",
+  "repository_url": "https://github.com/ycy-YYYY/CEB",
+  "commit": "e3862c9ab6a8210f52927ada424b2e21bad1dab1",
+  "corroborating_branch_archive": {
+    "url": "https://codeload.github.com/ycy-YYYY/CEB/tar.gz/refs/heads/main",
+    "bytes": 172466033,
+    "sha256": "ff67ad4204f6073e81ad5a2ebfe4be5fe7e78d2d0a7b91f417dc521841ac0d43",
+    "comparison": "All 17072 regular-file path, size, and SHA-256 records matched the immutable archive after stripping the archive root directory; both archives contain 17139 total members"
+  },
+  "upstream_metadata": {
+    "repository_url": "https://github.com/learnedsystems/CEB",
+    "commit": "9eaaadbdeaba6ae48cbf80b39602b483525ddcf7"
+  }
+}

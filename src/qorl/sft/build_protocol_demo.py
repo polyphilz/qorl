@@ -87,7 +87,7 @@ def call_tool(
 
 def build_demo(repository: Path) -> dict[str, Any]:
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
     task = next(
         (item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID),
         None,

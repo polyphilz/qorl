@@ -10,8 +10,8 @@ from qorl.workload.taskset import TaskSet
 
 @pytest.fixture(scope="module")
 def task_sets(repository_root: Path) -> tuple[TaskSet, TaskSet]:
-    job = TaskSet.load(repository_root, "job-v1")
-    return job, TaskSet.load(repository_root, "ceb-v1", job.data_identity)
+    job = TaskSet.load(repository_root, "job")
+    return job, TaskSet.load(repository_root, "ceb", job.data_identity)
 
 
 class TestTaskSet:
@@ -32,11 +32,9 @@ class TestTaskSet:
         self, repository_root: Path, task_sets: tuple[TaskSet, TaskSet]
     ) -> None:
         job, _ceb = task_sets
-        different = {**job.data_identity, "snapshot_id": "wrong"}
-        with pytest.raises(
-            FixtureError, match="requires a different database snapshot"
-        ):
-            TaskSet.load(repository_root, "ceb-v1", different)
+        different = {**job.data_identity, "archive_sha256": "wrong"}
+        with pytest.raises(FixtureError, match="requires a different database fixture"):
+            TaskSet.load(repository_root, "ceb", different)
 
     def test_inventory_runtime_metadata_is_not_part_of_data_identity(
         self, repository_root: Path, task_sets: tuple[TaskSet, TaskSet]
@@ -46,6 +44,6 @@ class TestTaskSet:
             **job.inventory["database"],
             "postgres_image_id": "sha256:different-runtime",
         }
-        loaded = TaskSet.load(repository_root, "ceb-v1", expected)
+        loaded = TaskSet.load(repository_root, "ceb", expected)
 
         assert loaded.data_identity == job.data_identity

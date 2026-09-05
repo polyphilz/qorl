@@ -1,22 +1,17 @@
 {
-  "schema_version": 1,
-  "inventory_id": "job-v1-tasks-v1",
-  "role": "held_out_test",
-  "training_allowed": false,
-  "tuning_allowed": false,
+  "schema_version": 2,
+  "inventory_id": "job",
   "task_count": 113,
   "template_count": 33,
   "database": {
-    "fixture_id": "job-v1",
-    "snapshot_id": "job-v1-sha256-767c06fe9c54003c",
-    "snapshot_archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-    "postgres_image_id": "sha256:b1f61c09d2e2c840cb16a77b35effb70ad46a0a2f9e6fcb85dc15ab1b3761670",
+    "fixture_id": "imdb",
+    "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
     "postgres_system_identifier": "7678843906783596587"
   },
   "query_source": {
     "repository_url": "https://github.com/gregrahn/join-order-benchmark",
     "commit": "a39603662e023e449cb2121997a5034df9e02ebf",
-    "source_manifest_sha256": "41792b673e006726671593dd90f8a5e2d2cc0a160eb5c00214d4bed0b77c4cd9",
+    "source_manifest_sha256": "51a6a3144441368ac88b7d4e14f6cda8c65deb0cfe13cc77ab9111930866865c",
     "query_manifest_sha256": "71175e8e0a4390cc5d62a2be6fbf7788c614edccd3591539b06922ffc4e6d210"
   },
   "structure_extraction": {

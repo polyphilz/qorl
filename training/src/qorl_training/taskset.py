@@ -85,7 +85,7 @@ class QorlTask(vf.Task[QorlTaskData]):
 class QorlTaskset(vf.Taskset[QorlTask, QorlTasksetConfig]):
     def load(self) -> Iterator[QorlTask]:
         repository = self.config.repository.resolve()
-        task_set = TaskSet.load(repository, "ceb-v1")
+        task_set = TaskSet.load(repository, "ceb")
         selection_path = (
             self.config.selection
             if self.config.selection.is_absolute()

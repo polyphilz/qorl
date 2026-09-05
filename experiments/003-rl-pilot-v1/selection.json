@@ -19,13 +19,11 @@
   },
   "source": {
     "database": {
-      "fixture_id": "job-v1",
-      "postgres_image_id": "sha256:b1f61c09d2e2c840cb16a77b35effb70ad46a0a2f9e6fcb85dc15ab1b3761670",
-      "postgres_system_identifier": "7678843906783596587",
-      "snapshot_archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-      "snapshot_id": "job-v1-sha256-767c06fe9c54003c"
+      "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
+      "fixture_id": "imdb",
+      "postgres_system_identifier": "7678843906783596587"
     },
-    "inventory_id": "ceb-v1-tasks-v1"
+    "inventory_id": "ceb"
   },
   "splits": {
     "spike": [

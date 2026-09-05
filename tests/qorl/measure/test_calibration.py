@@ -28,10 +28,10 @@ def test_calibration_starts_and_records_the_selected_pool(
     config_id: str,
     worker_count: int,
 ) -> None:
-    snapshot_path = tmp_path / "snapshot.json"
-    snapshot_path.write_text(json.dumps(database_fixture.snapshot))
-    fixture = replace(database_fixture, snapshot_manifest_path=snapshot_path)
-    task_set = TaskSet.load(repository_root, "job-v1", fixture.data_identity)
+    manifest_path = tmp_path / "archive.json"
+    manifest_path.write_text(json.dumps(database_fixture.manifest))
+    fixture = replace(database_fixture, manifest_path=manifest_path)
+    task_set = TaskSet.load(repository_root, "job", fixture.data_identity)
     task_set = replace(
         task_set,
         inventory={
@@ -58,7 +58,7 @@ def test_calibration_starts_and_records_the_selected_pool(
         PostgresContainer, "start", lambda container: started.append(container)
     )
     monkeypatch.setattr(PostgresContainer, "capture_environment", lambda *args: None)
-    monkeypatch.setattr(PostgresWorker, "assert_snapshot", lambda worker: None)
+    monkeypatch.setattr(PostgresWorker, "assert_fixture", lambda worker: None)
     monkeypatch.setattr(PostgresWorker, "explain_analyze", execute)
 
     output = calibration.calibrate(
@@ -101,7 +101,7 @@ class TestCalibration:
     def test_ceb_calibration_resolves_the_400_task_training_selection(
         self, repository_root: Path
     ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb-v1")
+        task_set = TaskSet.load(repository_root, "ceb")
         selection, split, tasks = selected_tasks(
             task_set,
             repository_root / "experiments/004-rl-run-v2/selection.json",
@@ -117,7 +117,7 @@ class TestCalibration:
     def test_multiple_selection_splits_require_an_explicit_name(
         self, repository_root: Path, tmp_path: Path
     ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb-v1")
+        task_set = TaskSet.load(repository_root, "ceb")
         first, second = task_set.inventory["tasks"][:2]
         selection = {
             "inventory_id": "test-selection",

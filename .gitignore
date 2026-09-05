@@ -11,5 +11,8 @@ dist/
 # Local database artifacts and experiment output must be added through explicit,
 # checksummed manifests rather than accidentally committed.
 benchmarks/raw/
-artifacts/
+imdb/*.tar.gz
+imdb/.*.part*
+imdb/raw/
+imdb/verification/
 outputs/

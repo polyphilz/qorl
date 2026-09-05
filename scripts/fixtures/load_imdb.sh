@@ -6,8 +6,8 @@ repository_root="$(cd -- "$script_dir/../.." && pwd)"
 export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
 runtime_profile="$repository_root/docker/worker_pool/configs/000-poolconf-1x32/poolconf.json"
 postgres_config="$repository_root/docker/postgres/configs/000-pgconf-default"
-raw_dir="$repository_root/benchmarks/raw/job-v1"
-project_name="qorl-job-v1-build"
+raw_dir="$repository_root/imdb/raw"
+project_name="qorl-imdb-build"
 skip_fetch=0
 
 usage() {
@@ -48,18 +48,17 @@ source "$repository_root/scripts/docker/postgres-config.sh"
 qorl_load_postgres_config "$repository_root" "$postgres_config"
 
 if ((skip_fetch == 0)); then
-    uv run --project "$repository_root" --frozen python -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+    uv run --project "$repository_root" --frozen python -m scripts.fixtures.fetch_imdb --raw-dir "$raw_dir"
 fi
 
 raw_dir="$(cd -- "$raw_dir" && pwd)"
-export QORL_JOB_DATA_DIR="$raw_dir/imdb"
-export QORL_JOB_SOURCE_DIR="$raw_dir/source"
+export QORL_IMDB_DATA_DIR="$raw_dir/tables"
+export QORL_IMDB_SOURCE_DIR="$repository_root/benchmarks/raw/job/source"
 
 compose=(
     docker compose
     --project-name "$project_name"
     --file "$repository_root/compose.yaml"
-    --file "$repository_root/compose.fixture-build.yaml"
 )
 
 "${compose[@]}" config --quiet
@@ -75,7 +74,7 @@ if [[ -n "$("${compose[@]}" ps --all --quiet)" ]]; then
     exit 1
 fi
 
-trap 'echo "JOB load failed; Compose project retained for diagnosis: '"$project_name"'" >&2' ERR
+trap 'echo "IMDb load failed; Compose project retained for diagnosis: '"$project_name"'" >&2' ERR
 
 "${compose[@]}" up --detach --wait --no-build postgres
 container="$("${compose[@]}" ps --quiet postgres)"
@@ -98,7 +97,7 @@ public_table_count="$({
 } | tr -d '[:space:]')"
 
 if [[ "$public_table_count" != "0" ]]; then
-    echo "fresh JOB build database unexpectedly contains $public_table_count public tables" >&2
+    echo "fresh IMDb build database unexpectedly contains $public_table_count public tables" >&2
     exit 1
 fi
 
@@ -109,7 +108,7 @@ docker exec --interactive "$container" bash -Eeuo pipefail -c '
         --no-psqlrc \
         --set=ON_ERROR_STOP=1 \
         --file=-
-' < "$script_dir/load-job-v1.sql"
+' < "$script_dir/load_imdb.sql"
 
 docker exec --interactive "$container" bash -Eeuo pipefail -c '
     psql \
@@ -118,10 +117,10 @@ docker exec --interactive "$container" bash -Eeuo pipefail -c '
         --no-psqlrc \
         --set=ON_ERROR_STOP=1 \
         --file=-
-' < "$script_dir/finalize-job-v1.sql"
+' < "$script_dir/finalize_imdb.sql"
 
 docker exec "$container" qorl-assert-config
 
 trap - ERR
-printf 'job-v1 load and finalization passed: project=%s container=%s volume=%s\n' \
+printf 'imdb load and finalization passed: project=%s container=%s volume=%s\n' \
     "$project_name" "$container" "$volume_name"

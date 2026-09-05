@@ -277,7 +277,7 @@ def main() -> None:
     config = load_record(config_path, DatasetConfig)
     selection_path = (repository / config.selection).resolve()
     selection = load_record(selection_path, DatasetSelection)
-    task_set = TaskSet.load(repository, "ceb-v1")
+    task_set = TaskSet.load(repository, "ceb")
 
     student_records = load_json_lines(
         dataset / "filter/sampling/records.jsonl", FilterRecord

@@ -59,6 +59,11 @@ uv run python experiments/005-protocol-sft-v2/run.py --gate
 
 ## Frozen provenance
 
+Historical sample and teacher records retain their original database identities.
+Current loaders use the renamed `imdb` fixture and `ceb` workload, so these frozen
+artifacts are not resumable against the renamed inputs. Reproducing the original
+dataset requires its original code and inputs.
+
 - Selection identity: `qorl-protocol-sft-v2-selection-v1`
 - Dataset output: `outputs/sft/protocol-sft-v2/`
 - Training output: `outputs/sft/protocol-sft-train-v2/`

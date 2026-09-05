@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from qorl.db.fixture import archive_data_identity
 from qorl.util.hashing import sha256_bytes, sha256_file
 from qorl.workload.query_structure import (
     extract_join_structure as extract_structure,
@@ -19,8 +20,9 @@ from qorl.workload.query_structure import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
-DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "benchmarks/raw/job-v1/source"
+DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "benchmarks/raw/job/source"
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "benchmarks/job"
+INVENTORY_SCHEMA_VERSION = 2
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
 
@@ -68,29 +70,13 @@ def build_tasks(
     return tasks, queries
 
 
-def snapshot_data_identity(
-    snapshot_manifest_path: Path,
-    source_manifest_sha256: str,
-) -> dict[str, Any]:
-    snapshot = json.loads(snapshot_manifest_path.read_text(encoding="utf-8"))
-    if snapshot["source_manifest"]["sha256"] != source_manifest_sha256:
-        raise RuntimeError("snapshot and JOB source manifests do not match")
-    return {
-        "fixture_id": snapshot["fixture_id"],
-        "snapshot_id": snapshot["snapshot_id"],
-        "snapshot_archive_sha256": snapshot["archive"]["sha256"],
-        "postgres_system_identifier": snapshot["postgresql"]["system_identifier"],
-    }
-
-
 def build_inventory(
     source_manifest_path: Path,
     source_dir: Path,
-    snapshot_manifest_path: Path | None,
-    existing_database: dict[str, Any] | None = None,
+    manifest_path: Path,
 ) -> tuple[dict[str, Any], list[Path]]:
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
-    query_spec = source_manifest["workload"]["queries"]
+    query_spec = source_manifest["queries"]
     tasks, queries = build_tasks(source_dir, query_spec["glob"])
 
     if len(tasks) != query_spec["count"]:
@@ -105,30 +91,18 @@ def build_inventory(
         )
 
     source_manifest_sha256 = sha256_file(source_manifest_path)
-    if snapshot_manifest_path:
-        database = snapshot_data_identity(
-            snapshot_manifest_path, source_manifest_sha256
-        )
-    elif existing_database:
-        database = existing_database
-    else:
-        raise RuntimeError(
-            "a snapshot manifest is required when creating the inventory"
-        )
+    database = archive_data_identity(manifest_path, source_manifest["fixture_id"])
 
     template_ids = sorted({task["template_id"] for task in tasks})
     inventory = {
-        "schema_version": 1,
-        "inventory_id": "job-v1-tasks-v1",
-        "role": "held_out_test",
-        "training_allowed": False,
-        "tuning_allowed": False,
+        "schema_version": INVENTORY_SCHEMA_VERSION,
+        "inventory_id": "job",
         "task_count": len(tasks),
         "template_count": len(template_ids),
         "database": database,
         "query_source": {
-            "repository_url": source_manifest["workload"]["repository_url"],
-            "commit": source_manifest["workload"]["commit"],
+            "repository_url": source_manifest["source"]["repository_url"],
+            "commit": source_manifest["source"]["commit"],
             "source_manifest_sha256": source_manifest_sha256,
             "query_manifest_sha256": aggregate_sha256,
         },
@@ -145,9 +119,10 @@ def build_inventory(
 def write_inventory(
     output_dir: Path, inventory: dict[str, Any], queries: list[Path]
 ) -> None:
-    if output_dir.exists() and any(output_dir.iterdir()):
+    generated = ("queries", "tasks.json")
+    if any((output_dir / name).exists() for name in generated):
         raise RuntimeError(
-            f"refusing to overwrite non-empty output directory: {output_dir}"
+            f"refusing to overwrite existing JOB queries or inventory: {output_dir}"
         )
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
@@ -162,9 +137,10 @@ def write_inventory(
             json.dumps(inventory, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        if output_dir.exists():
-            output_dir.rmdir()
-        temporary.replace(output_dir)
+        output_dir.mkdir(exist_ok=True)
+        for name in generated:
+            (temporary / name).replace(output_dir / name)
+        temporary.rmdir()
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
@@ -174,24 +150,14 @@ def check_inventory(
     output_dir: Path,
     source_manifest_path: Path,
     source_dir: Path,
-    snapshot_manifest_path: Path | None,
+    manifest_path: Path,
 ) -> None:
     inventory_path = output_dir / "tasks.json"
     existing = json.loads(inventory_path.read_text(encoding="utf-8"))
-    if snapshot_manifest_path is not None:
-        snapshot_database = snapshot_data_identity(
-            snapshot_manifest_path, sha256_file(source_manifest_path)
-        )
-        existing_data = {name: existing["database"][name] for name in snapshot_database}
-        if existing_data != snapshot_database:
-            raise RuntimeError(
-                "checked-in inventory and snapshot contain different data"
-            )
     expected, source_queries = build_inventory(
         source_manifest_path,
         source_dir,
-        None,
-        existing_database=existing["database"],
+        manifest_path,
     )
     if existing != expected:
         raise RuntimeError(
@@ -227,7 +193,9 @@ def main() -> None:
             "when checking"
         ),
     )
-    parser.add_argument("--snapshot-manifest", type=Path)
+    parser.add_argument(
+        "--archive-manifest", type=Path, default=REPOSITORY_ROOT / "imdb/archive.json"
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
@@ -241,19 +209,19 @@ def main() -> None:
             args.output_dir,
             args.source_manifest,
             source_dir,
-            args.snapshot_manifest,
+            args.archive_manifest,
         )
-        print("checked-in job-v1 task inventory verification passed")
+        print("checked-in JOB task inventory verification passed")
         return
 
     inventory, queries = build_inventory(
         args.source_manifest,
         source_dir,
-        args.snapshot_manifest,
+        args.archive_manifest,
     )
     write_inventory(args.output_dir, inventory, queries)
     print(
-        f"built job-v1 task inventory: "
+        f"built JOB task inventory: "
         f"tasks={inventory['task_count']} templates={inventory['template_count']}"
     )
 

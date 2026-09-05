@@ -163,13 +163,12 @@ def calibrate(
     fixture = DatabaseFixture.load(repository)
     postgres_config = PostgresConfig.load(repository, postgres_config_path)
     pool_config = load_pool(repository, pool_config_path=pool_config_path)
-    task_set_ids = {"job": "job-v1", "ceb": "ceb-v1"}
-    if workload not in task_set_ids:
+    if workload not in {"job", "ceb"}:
         raise RuntimeError(f"unknown calibration workload: {workload}")
     if selection_path is None and split is not None:
         raise RuntimeError("--split requires --selection")
 
-    task_set = TaskSet.load(repository, task_set_ids[workload], fixture.data_identity)
+    task_set = TaskSet.load(repository, workload, fixture.data_identity)
     selection: dict[str, Any] | None = None
     selected_split: str | None = None
     if selection_path is None:
@@ -213,7 +212,7 @@ def calibrate(
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity_for(postgres_config),
         "postgres_config": postgres_config.manifest().model_dump(),
-        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
+        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "orchestrator": {
             "qorl_version": __version__,
             "python_version": platform.python_version(),

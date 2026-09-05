@@ -15,8 +15,7 @@ class FixtureError(RuntimeError):
 
 DATA_IDENTITY_FIELDS = (
     "fixture_id",
-    "snapshot_id",
-    "snapshot_archive_sha256",
+    "archive_sha256",
     "postgres_system_identifier",
 )
 
@@ -28,47 +27,57 @@ def data_identity(value: dict[str, Any]) -> dict[str, str]:
         raise FixtureError(f"database identity is missing {error.args[0]}") from error
 
 
+def archive_data_identity(manifest_path: Path, fixture_id: str) -> dict[str, str]:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest["fixture_id"] != fixture_id:
+        raise FixtureError("database fixture and workload do not match")
+    return {
+        "fixture_id": manifest["fixture_id"],
+        "archive_sha256": manifest["archive"]["sha256"],
+        "postgres_system_identifier": manifest["postgresql"]["system_identifier"],
+    }
+
+
 @dataclass(frozen=True)
 class DatabaseFixture:
     """The frozen PostgreSQL database restored for every worker."""
 
     repository: Path
-    snapshot_manifest_path: Path
-    snapshot: dict[str, Any]
+    manifest_path: Path
+    manifest: dict[str, Any]
     archive_path: Path
 
     @classmethod
     def load(cls, repository: Path) -> DatabaseFixture:
         repository = repository.resolve()
-        manifest_path = repository / "artifacts/job-v1/job-v1.snapshot.json"
+        manifest_path = repository / "imdb/archive.json"
         if not manifest_path.is_file():
             raise FixtureError(
-                f"required database snapshot is missing: {manifest_path}"
+                f"required database manifest is missing: {manifest_path}"
             )
 
-        snapshot = json.loads(manifest_path.read_text(encoding="utf-8"))
-        archive_name = snapshot["archive"]["filename"]
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        archive_name = manifest["archive"]["filename"]
         archive_relative = PurePosixPath(archive_name)
         if archive_relative.is_absolute() or len(archive_relative.parts) != 1:
-            raise FixtureError("snapshot archive filename is not a basename")
+            raise FixtureError("database archive filename is not a basename")
         archive_path = manifest_path.parent / archive_name
         if not archive_path.is_file():
-            raise FixtureError(f"database snapshot archive is missing: {archive_path}")
+            raise FixtureError(f"database archive is missing: {archive_path}")
 
         return cls(
             repository=repository,
-            snapshot_manifest_path=manifest_path,
-            snapshot=snapshot,
+            manifest_path=manifest_path,
+            manifest=manifest,
             archive_path=archive_path,
         )
 
     @property
     def data_identity(self) -> dict[str, str]:
         return {
-            "fixture_id": self.snapshot["fixture_id"],
-            "snapshot_id": self.snapshot["snapshot_id"],
-            "snapshot_archive_sha256": self.snapshot["archive"]["sha256"],
-            "postgres_system_identifier": self.snapshot["postgresql"][
+            "fixture_id": self.manifest["fixture_id"],
+            "archive_sha256": self.manifest["archive"]["sha256"],
+            "postgres_system_identifier": self.manifest["postgresql"][
                 "system_identifier"
             ],
         }
@@ -79,12 +88,12 @@ class DatabaseFixture:
 
     def runtime_identity_for(self, postgres_config: PostgresConfig) -> dict[str, str]:
         return postgres_config.runtime_identity(
-            self.snapshot["image"]["id"]
+            self.manifest["image"]["id"]
         ).model_dump()
 
     def verify_archive(self) -> None:
-        expected_bytes = self.snapshot["archive"]["bytes"]
+        expected_bytes = self.manifest["archive"]["bytes"]
         if self.archive_path.stat().st_size != expected_bytes:
-            raise FixtureError("database snapshot archive size is incorrect")
-        if sha256_file(self.archive_path) != self.snapshot["archive"]["sha256"]:
-            raise FixtureError("database snapshot archive checksum is incorrect")
+            raise FixtureError("database archive size is incorrect")
+        if sha256_file(self.archive_path) != self.manifest["archive"]["sha256"]:
+            raise FixtureError("database archive checksum is incorrect")

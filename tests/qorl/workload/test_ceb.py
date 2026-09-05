@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from qorl.workload.ceb import choose_validation_templates, extract_sql_bytes
+from qorl.workload.ceb import extract_sql_bytes
 
 
 def short_unicode(value: str) -> bytes:
@@ -34,7 +34,3 @@ class TestCebExtraction:
                 short_unicode("SELECT 1 FROM title")
                 + short_unicode("SELECT 2 FROM title")
             )
-
-    def test_template_split_balances_queries_and_is_deterministic(self) -> None:
-        counts = {"a": 10, "b": 20, "c": 30, "d": 40}
-        assert choose_validation_templates(counts) == ("c",)

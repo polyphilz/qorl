@@ -1,7 +1,0 @@
-services:
-  postgres:
-    environment:
-      QORL_JOB_FIXTURE_ID: job-v1
-    volumes:
-      - ${QORL_JOB_DATA_DIR:?Set QORL_JOB_DATA_DIR}:/qorl/job-data:ro
-      - ${QORL_JOB_SOURCE_DIR:?Set QORL_JOB_SOURCE_DIR}:/qorl/job-source:ro

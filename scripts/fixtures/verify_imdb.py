@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate a loaded JOB v1 database and emit canonical fingerprints."""
+"""Validate a loaded IMDb database and emit canonical fingerprints."""
 
 from __future__ import annotations
 
@@ -16,8 +16,9 @@ from typing import Any
 from qorl.util.hashing import sha256_bytes, sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
-DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/job-v1"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "imdb/build.json"
+DEFAULT_JOB_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
+DEFAULT_QUERY_DIR = REPOSITORY_ROOT / "benchmarks/job/queries"
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 MAX_FRESHLY_FROZEN_XID_AGE = 1_000
 
@@ -76,7 +77,7 @@ def runner_psql(container: str, sql: str) -> str:
     shell = r"""
 exec env \
     PGPASSWORD="$QORL_RUNNER_PASSWORD" \
-    PGAPPNAME=qorl-job-v1-query-verifier \
+    PGAPPNAME=qorl-imdb-query-verifier \
     psql \
         --host=127.0.0.1 \
         --username=qorl_runner \
@@ -342,13 +343,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    parser.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
+    parser.add_argument("--job-manifest", type=Path, default=DEFAULT_JOB_MANIFEST)
+    parser.add_argument("--query-dir", type=Path, default=DEFAULT_QUERY_DIR)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--phase", required=True, choices=("build", "restore"))
     parser.add_argument("--compare-to", type=Path)
     args = parser.parse_args()
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+    job = json.loads(args.job_manifest.read_text(encoding="utf-8"))
     run(
         [
             "docker",
@@ -362,8 +365,8 @@ def main() -> None:
     validate_database_state(state, manifest)
     query_outputs = representative_query_outputs(
         args.container,
-        args.raw_dir / "source",
-        manifest["workload"]["queries"]["representative"],
+        args.query_dir,
+        job["queries"]["representative"],
     )
 
     fingerprint_sections = {
@@ -409,7 +412,7 @@ def main() -> None:
 
     write_atomic(args.output, json.dumps(result, indent=2, sort_keys=True) + "\n")
     print(
-        f"job-v1 {args.phase} verification passed: "
+        f"imdb {args.phase} verification passed: "
         f"tables={len(state['table_names'])} rows={sum(state['table_rows'].values())} "
         f"indexes={len(state['indexes'])}"
     )

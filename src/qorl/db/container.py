@@ -106,11 +106,11 @@ class PostgresContainer:
 
     def start(self) -> None:
         validate_host_topology((self.resources,))
-        fixture_id = self.fixture.snapshot["fixture_id"]
-        print(f"Verifying {fixture_id} database snapshot...")
+        fixture_id = self.fixture.manifest["fixture_id"]
+        print(f"Verifying {fixture_id} database archive...")
         self.fixture.verify_archive()
 
-        image = self.fixture.snapshot["image"]
+        image = self.fixture.manifest["image"]
         actual_image_id = self.command(
             ["docker", "image", "inspect", image["reference"], "--format", "{{.Id}}"]
         ).strip()
@@ -124,7 +124,7 @@ class PostgresContainer:
         if self.compose_command("ps", "--all", "--quiet").strip():
             raise WorkerError(f"Docker project already exists: {self.project_name}")
 
-        print("Restoring job-v1 into a fresh Docker volume...")
+        print("Restoring IMDb into a fresh Docker volume...")
         self.compose_command("create", "--no-build", "postgres")
         self.created = True
         self.container = self.compose_command(
@@ -147,14 +147,14 @@ class PostgresContainer:
 
         archive = self.fixture.archive_path
         relative = PurePosixPath(
-            self.fixture.snapshot["postgresql"]["pgdata_volume_relative_path"]
+            self.fixture.manifest["postgresql"]["pgdata_volume_relative_path"]
         )
         if relative.is_absolute() or ".." in relative.parts:
-            raise WorkerError("database snapshot contains an invalid PGDATA path")
+            raise WorkerError("database manifest contains an invalid PGDATA path")
         restore_script = r"""
 test -z "$(find /target -mindepth 1 -print -quit)"
 mkdir -p "/target/$2"
-gzip --decompress --stdout "/snapshot/$1" \
+gzip --decompress --stdout "/archive/$1" \
     | tar --extract --directory="/target/$2" --numeric-owner
 test -f "/target/$2/PG_VERSION"
 test ! -e "/target/$2/postmaster.pid"
@@ -168,7 +168,7 @@ test ! -e "/target/$2/postmaster.pid"
                 "--volume",
                 f"{volume}:/target",
                 "--volume",
-                f"{archive.parent}:/snapshot:ro",
+                f"{archive.parent}:/archive:ro",
                 "--entrypoint",
                 "bash",
                 image["id"],

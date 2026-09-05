@@ -185,7 +185,7 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
             settings=settings,
             admin_sql=admin_sql,
             fixture=SimpleNamespace(
-                snapshot={"postgresql": {"server_version_num": "180006"}},
+                manifest={"postgresql": {"server_version_num": "180006"}},
                 repository=repository,
             ),
         )

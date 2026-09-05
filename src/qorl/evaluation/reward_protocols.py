@@ -331,7 +331,7 @@ def run_audit(
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
-        "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
+        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "results": [],

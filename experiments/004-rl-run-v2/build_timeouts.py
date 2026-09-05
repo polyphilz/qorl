@@ -28,7 +28,7 @@ def build(calibration: Path) -> dict[str, Any]:
     source_manifest_path = calibration / "calibration.json"
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     selection = json.loads(SELECTION.read_text(encoding="utf-8"))
-    task_set = TaskSet.load(ROOT, "ceb-v1")
+    task_set = TaskSet.load(ROOT, "ceb")
     fixture = DatabaseFixture.load(ROOT)
     selected = selection["splits"]["train"]
     if source_manifest.get("status") != RunStatus.COMPLETED:
@@ -103,7 +103,7 @@ def main() -> None:
         return
     if arguments.calibration is not None:
         raise SystemExit("--calibration is only used with --write")
-    CalibratedTimeouts.load(ROOT, OUTPUT, TaskSet.load(ROOT, "ceb-v1"))
+    CalibratedTimeouts.load(ROOT, OUTPUT, TaskSet.load(ROOT, "ceb"))
 
 
 if __name__ == "__main__":

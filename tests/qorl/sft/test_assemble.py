@@ -4,8 +4,63 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from qorl.sft import assemble
 from qorl.sft.assemble import action_families, select_tasks
 from qorl.workload.taskset import TaskSet
+
+
+def test_finalize_without_cross_workload_report(
+    repository_root: Path, tmp_path: Path, monkeypatch
+) -> None:
+    source = TaskSet.load(repository_root, "ceb").inventory
+    tasks = [
+        next(task for task in source["tasks"] if task["partition"] == partition)
+        for partition in ("train", "validation")
+    ]
+    inventory = {**source, "tasks": tasks, "task_count": len(tasks)}
+    ceb = tmp_path / "benchmarks/ceb"
+    ceb.mkdir(parents=True)
+    (ceb / "tasks.json").write_text(json.dumps(inventory))
+    output = tmp_path / "dataset"
+    for ordinal, task in enumerate(tasks):
+        partition = task["partition"]
+        directory = output / "demonstrations" / partition
+        directory.mkdir(parents=True)
+        document = {
+            "metadata": {
+                "ordinal": ordinal,
+                "demonstration_id": f"demo-{ordinal}",
+                "partition": partition,
+                "task_id": task["task_id"],
+                "template_id": task["template_id"],
+                "data_identity": source["database"],
+                "runtime_identity": {},
+                "inspection_recipe": "test",
+                "in_author_unique_plans_subset": ordinal == 0,
+            },
+            "messages": [],
+            "tools": [],
+        }
+        (directory / "demo.json").write_text(json.dumps(document))
+    monkeypatch.setattr(assemble, "SPLIT_COUNTS", {"train": 1, "validation": 1})
+    monkeypatch.setattr(
+        assemble,
+        "validate_protocol_demo",
+        lambda *_args: {
+            "candidate_ids": [],
+            "turn_count": 0,
+            "canonical_sha256": "test",
+        },
+    )
+
+    manifest = assemble.finalize_dataset(tmp_path, output, [], dataset_seed=0)
+
+    assert manifest["schema_version"] == 2
+    assert set(manifest["sources"]) == {"ceb_inventory"}
+    assert "ineligible_ceb_templates" not in manifest["leakage"]
+    assert manifest["counts"] == {"train": 1, "validation": 1}
+    assert manifest["statistics"]["author_unique_plan_tasks"] == {"train": 1}
+    assert not (ceb / "provenance/job-overlap.json").exists()
 
 
 class TestProtocolDataset:
@@ -17,7 +72,7 @@ class TestProtocolDataset:
                 repository_root / "experiments/001-protocol-sft-v1/dataset.json"
             ).read_text()
         )["seed"]
-        tasks = TaskSet.load(repository_root, "ceb-v1").inventory["tasks"]
+        tasks = TaskSet.load(repository_root, "ceb").inventory["tasks"]
         train = select_tasks(tasks, "train", 256, seed)
         validation = select_tasks(tasks, "validation", 64, seed)
 

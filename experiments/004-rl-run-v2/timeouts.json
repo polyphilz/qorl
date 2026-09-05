@@ -5,18 +5,17 @@
     "multiplier": 3
   },
   "database": {
-    "fixture_id": "job-v1",
+    "fixture_id": "imdb",
     "postgres_image_id": "sha256:b1f61c09d2e2c840cb16a77b35effb70ad46a0a2f9e6fcb85dc15ab1b3761670",
     "postgres_system_identifier": "7678843906783596587",
-    "snapshot_archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-    "snapshot_id": "job-v1-sha256-767c06fe9c54003c"
+    "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198"
   },
   "manifest_id": "qorl-rl-run-v2-timeouts-v1",
   "schema_version": 1,
   "selection": {
     "inventory_id": "qorl-rl-run-v2",
     "path": "experiments/004-rl-run-v2/selection.json",
-    "sha256": "93d8bc184cc11f123e80d151c891d5fc9d92332420c6abe2e137d2f0ecc0da35",
+    "sha256": "d256ca426d43c5b1b03e2958b688345648495cbddf89f0561deeceba0c7887ec",
     "split": "train"
   },
   "source_calibration": {

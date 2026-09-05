@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "membership_id": "ceb-v1-unique-plans",
+  "membership_id": "ceb-unique-plans",
   "definition": "Recovered author-produced unique-plans subset mapped by exact template, source filename, and extracted SQL SHA-256 into the full workload",
   "query_count": 3133,
   "template_count": 16,

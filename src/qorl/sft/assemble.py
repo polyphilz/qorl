@@ -16,6 +16,7 @@ from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
 
 DATASET_ID = "protocol-sft-v1"
+DATASET_MANIFEST_SCHEMA_VERSION = 2
 SPLIT_COUNTS = {"train": 256, "validation": 64}
 SPEEDUP_BOUNDS = (0.5, 0.9, 1.1, 2.0)
 
@@ -161,14 +162,8 @@ def finalize_dataset(
     failures: list[dict[str, str]],
     dataset_seed: int,
 ) -> dict[str, Any]:
-    task_set = TaskSet.load(repository, "ceb-v1")
-    overlap_path = repository / "benchmarks/ceb/provenance/job-overlap.json"
-    overlap = json.loads(overlap_path.read_text(encoding="utf-8"))
-    eligible = {
-        item["template_id"]
-        for item in overlap["templates"]
-        if item["disposition"] == "eligible"
-    }
+    task_set = TaskSet.load(repository, "ceb")
+    template_ids = {task["template_id"] for task in task_set.inventory["tasks"]}
 
     records = load_documents(output_dir)
     counts = Counter(document["metadata"]["partition"] for _, document in records)
@@ -207,8 +202,8 @@ def finalize_dataset(
         metadata = document["metadata"]
         partition = metadata["partition"]
         template = metadata["template_id"]
-        if template not in eligible:
-            raise ValueError(f"ineligible CEB template in dataset: {template}")
+        if template not in template_ids:
+            raise ValueError(f"unknown CEB template in dataset: {template}")
         split_task_ids[partition].add(metadata["task_id"])
         split_templates[partition].add(template)
         template_counts[partition][template] += 1
@@ -277,8 +272,13 @@ def finalize_dataset(
             "sha256": hashlib.sha256(encoded).hexdigest(),
         }
 
+    author_unique_plan_tasks: Counter[str] = Counter(
+        document["metadata"]["partition"]
+        for _, document in records
+        if document["metadata"]["in_author_unique_plans_subset"]
+    )
     manifest = {
-        "schema_version": 1,
+        "schema_version": DATASET_MANIFEST_SCHEMA_VERSION,
         "dataset_id": DATASET_ID,
         "seed": dataset_seed,
         "task_set_id": task_set.task_set_id,
@@ -288,18 +288,11 @@ def finalize_dataset(
                 "path": task_set.inventory_path.relative_to(repository).as_posix(),
                 "sha256": sha256_file(task_set.inventory_path),
             },
-            "job_overlap_audit": {
-                "path": overlap_path.relative_to(repository).as_posix(),
-                "sha256": sha256_file(overlap_path),
-                "eligible_templates": len(eligible),
-                "excluded_templates": overlap["summary"]["excluded_template_count"],
-            },
         },
         "counts": dict(sorted(counts.items())),
         "prime_artifacts": prime_artifacts,
         "leakage": {
             "job_tasks": 0,
-            "ineligible_ceb_templates": 0,
             "shared_tasks_between_splits": 0,
             "shared_templates_between_splits": 0,
         },
@@ -308,11 +301,7 @@ def finalize_dataset(
                 partition: dict(sorted(values.items()))
                 for partition, values in sorted(template_counts.items())
             },
-            "author_unique_plan_tasks": Counter(
-                document["metadata"]["partition"]
-                for _, document in records
-                if document["metadata"]["in_author_unique_plans_subset"]
-            ),
+            "author_unique_plan_tasks": dict(sorted(author_unique_plan_tasks.items())),
             "inspection_recipes": dict(sorted(recipes.items())),
             "measurement_modes": dict(sorted(measurement_modes.items())),
             "tool_calls": dict(sorted(tool_calls.items())),
@@ -327,10 +316,6 @@ def finalize_dataset(
         "generation_failures": failures,
         "demonstrations": demonstrations,
     }
-    # Counter is JSON-compatible, but normalize it for a stable manifest.
-    manifest["statistics"]["author_unique_plan_tasks"] = dict(
-        sorted(manifest["statistics"]["author_unique_plan_tasks"].items())
-    )
     manifest_path = output_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     return manifest

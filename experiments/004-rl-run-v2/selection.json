@@ -23,7 +23,7 @@
       "excluded_distinct_task_count": 64,
       "excluded_training_task_count": 48,
       "path": "experiments/003-rl-pilot-v1/selection.json",
-      "sha256": "61f36d3dae2b1357050d3c90704ca184953bc7254a831281ba2f0599c875b473"
+      "sha256": "d248722c3690d0fb758a5f22c508fb27abe2d20db7bb1c6394abf9f496ef3458"
     },
     "salt": "qorl-rl-run-v2",
     "template_order": [
@@ -60,13 +60,11 @@
   },
   "source": {
     "database": {
-      "fixture_id": "job-v1",
-      "postgres_image_id": "sha256:b1f61c09d2e2c840cb16a77b35effb70ad46a0a2f9e6fcb85dc15ab1b3761670",
-      "postgres_system_identifier": "7678843906783596587",
-      "snapshot_archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-      "snapshot_id": "job-v1-sha256-767c06fe9c54003c"
+      "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
+      "fixture_id": "imdb",
+      "postgres_system_identifier": "7678843906783596587"
     },
-    "inventory_id": "ceb-v1-tasks-v1"
+    "inventory_id": "ceb"
   },
   "splits": {
     "train": [

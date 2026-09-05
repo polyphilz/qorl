@@ -282,7 +282,7 @@ def main() -> None:
             per_task[record.task_id] += 1
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
     task_values = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
     tasks = {
         require_string(task.get("task_id"), "task.task_id"): task

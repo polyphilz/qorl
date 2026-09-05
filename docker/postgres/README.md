@@ -29,5 +29,5 @@ fixture construction and restore verification use `000-poolconf-1x32`.
 The Python worker loads the selected configuration and supplies Compose's resource
 variables. Pool selection is independent of the PostgreSQL config.
 
-See [`scripts/job/README.md`](../../scripts/job/README.md) for building and
-verifying the frozen database snapshot used by JOB and CEB.
+See [`scripts/fixtures/README.md`](../../scripts/fixtures/README.md) for building and
+verifying the IMDb database fixture used by JOB and CEB.

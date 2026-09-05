@@ -51,7 +51,7 @@ class AgentInterface:
                 alias: sorted(indexes)
                 for alias, indexes in sorted(evaluator.catalog.indexes.items())
             },
-            "postgresql_server_version_num": evaluator.worker.fixture.snapshot[
+            "postgresql_server_version_num": evaluator.worker.fixture.manifest[
                 "postgresql"
             ]["server_version_num"],
             "planner_settings": evaluator.worker.settings(settings),

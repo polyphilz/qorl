@@ -110,7 +110,7 @@ def start_pool(
             worker = PostgresWorker(container)
             slots.append(WorkerSlot(resources, container, worker))
             container.start()
-            worker.assert_snapshot()
+            worker.assert_fixture()
     except BaseException:
         for slot in reversed(slots):
             slot.container.close()

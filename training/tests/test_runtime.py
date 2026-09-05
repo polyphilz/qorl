@@ -22,22 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def database_fixture() -> DatabaseFixture:
-    database = json.loads(
-        (ROOT / "benchmarks/job/tasks.json").read_text(encoding="utf-8")
-    )["database"]
     return DatabaseFixture(
         repository=ROOT,
-        snapshot_manifest_path=ROOT / "artifacts/job-v1/job-v1.snapshot.json",
-        archive_path=ROOT / "artifacts/job-v1/job-v1.snapshot.tar.gz",
-        snapshot={
-            "fixture_id": database["fixture_id"],
-            "snapshot_id": database["snapshot_id"],
-            "archive": {"sha256": database["snapshot_archive_sha256"]},
-            "postgresql": {"system_identifier": database["postgres_system_identifier"]},
-            "image": {
-                "id": database["postgres_image_id"],
-            },
-        },
+        manifest_path=ROOT / "imdb/archive.json",
+        archive_path=ROOT / "imdb/imdb.tar.gz",
+        manifest=json.loads((ROOT / "imdb/archive.json").read_text(encoding="utf-8")),
     )
 
 
@@ -69,7 +58,7 @@ class WorkerPoolTest(unittest.TestCase):
             )
             slots.append(WorkerSlot(resources, container, PostgresWorker(container)))
         runtime = QorlRuntime(
-            TaskSet.load(ROOT, "ceb-v1", fixture.data_identity),
+            TaskSet.load(ROOT, "ceb", fixture.data_identity),
             tuple(slots),
             "test-pool",
             "test-sha",

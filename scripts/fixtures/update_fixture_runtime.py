@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh only a verified snapshot's Docker runtime identity."""
+"""Refresh only a verified manifest's Docker runtime identity."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def write_atomic(path: Path, content: str) -> None:
     temporary_path.replace(path)
 
 
-def refresh_snapshot_runtime(
+def refresh_fixture_runtime(
     path: Path,
     image: dict[str, Any],
 ) -> tuple[str, str]:
@@ -57,18 +57,18 @@ def refresh_snapshot_runtime(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--snapshot-manifest", required=True, type=Path)
+    parser.add_argument("--archive-manifest", required=True, type=Path)
     args = parser.parse_args()
 
-    path = args.snapshot_manifest.resolve()
+    path = args.archive_manifest.resolve()
     manifest = json.loads(path.read_text(encoding="utf-8"))
     reference = manifest["image"]["reference"]
     image = inspect_image(reference)
-    old_image_id, new_image_id = refresh_snapshot_runtime(
+    old_image_id, new_image_id = refresh_fixture_runtime(
         path,
         image,
     )
-    print(f"snapshot runtime identity refreshed: {old_image_id} -> {new_image_id}")
+    print(f"manifest runtime identity refreshed: {old_image_id} -> {new_image_id}")
 
 
 if __name__ == "__main__":

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "source_id": "ceb-v1-recovered-source",
+  "source_id": "ceb-recovered-source",
   "source_manifest": {
     "path": "benchmarks/ceb/manifest.json",
-    "sha256": "12fc26f9d8b30c19b55f762f6d62d6a344aa4fbc16ea245de9166a5e1501f199"
+    "sha256": "a83e5803d06c30b6a09e112b568d071d13cb864832935117f4a70f3d2b64260f"
   },
   "extraction": {
     "method": "length-framed UTF-8 byte slicing",

@@ -31,7 +31,7 @@ def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
 def synthetic_demo(
     repository: Path, candidate_attempts: int = MAX_CANDIDATES
 ) -> dict[str, Any]:
-    task_set = TaskSet.load(repository, "ceb-v1")
+    task_set = TaskSet.load(repository, "ceb")
     task = next(
         item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID
     )
@@ -131,7 +131,7 @@ def synthetic_demo(
         "messages": messages,
         "tools": tools,
         "metadata": {
-            "task_set_id": "ceb-v1",
+            "task_set_id": "ceb",
             "task_id": task["task_id"],
             "data_identity": task_set.data_identity,
             "runtime_identity": {

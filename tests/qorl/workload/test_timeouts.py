@@ -18,7 +18,7 @@ class TestCalibratedTimeout:
         timeouts = CalibratedTimeouts.load(
             repository_root,
             MANIFEST,
-            TaskSet.load(repository_root, "ceb-v1"),
+            TaskSet.load(repository_root, "ceb"),
         )
 
         assert len(timeouts.by_task_id) == 400
@@ -31,7 +31,7 @@ class TestCalibratedTimeout:
     def test_legacy_manifest_runtime_image_can_be_enforced(
         self, repository_root: Path
     ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb-v1")
+        task_set = TaskSet.load(repository_root, "ceb")
         with pytest.raises(RuntimeError, match="different runtime"):
             CalibratedTimeouts.load(
                 repository_root,
@@ -46,7 +46,7 @@ class TestCalibratedTimeout:
     def test_current_manifest_enforces_runtime_separately_from_data(
         self, repository_root: Path, tmp_path: Path
     ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb-v1")
+        task_set = TaskSet.load(repository_root, "ceb")
         document = json.loads((repository_root / MANIFEST).read_text(encoding="utf-8"))
         document["data_identity"] = task_set.data_identity
         document["runtime_identity"] = {

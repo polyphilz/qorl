@@ -9,8 +9,8 @@ from typing import Any
 from qorl.db.fixture import FixtureError, data_identity
 
 TASK_SET_PATHS = {
-    "job-v1": Path("benchmarks/job/tasks.json"),
-    "ceb-v1": Path("benchmarks/ceb/tasks.json"),
+    "job": Path("benchmarks/job/tasks.json"),
+    "ceb": Path("benchmarks/ceb/tasks.json"),
 }
 
 
@@ -57,7 +57,7 @@ class TaskSet:
             expected_data_identity is not None
             and inventory_data_identity != data_identity(expected_data_identity)
         ):
-            raise FixtureError(f"{task_set_id} requires a different database snapshot")
+            raise FixtureError(f"{task_set_id} requires a different database fixture")
 
         return cls(
             repository=repository,

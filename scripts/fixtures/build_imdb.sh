@@ -6,10 +6,10 @@ repository_root="$(cd -- "$script_dir/../.." && pwd)"
 export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
 runtime_profile="$repository_root/docker/worker_pool/configs/000-poolconf-1x32/poolconf.json"
 postgres_config="$repository_root/docker/postgres/configs/000-pgconf-default"
-raw_dir="$repository_root/benchmarks/raw/job-v1"
-output_dir="$repository_root/artifacts/job-v1"
-build_project="qorl-job-v1-build"
-restore_project="qorl-job-v1-restore"
+raw_dir="$repository_root/imdb/raw"
+output_dir="$repository_root/imdb"
+build_project="qorl-imdb-build"
+restore_project="qorl-imdb-restore"
 
 usage() {
     echo "usage: $0 [--raw-dir PATH] [--output-dir PATH] [--build-project NAME] [--restore-project NAME]" >&2
@@ -55,37 +55,38 @@ for project_name in "$build_project" "$restore_project"; do
     fi
 done
 
-if [[ -d "$output_dir" && -n "$(find "$output_dir" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
-    echo "refusing to overwrite non-empty output directory: $output_dir" >&2
+if [[ -e "$output_dir/archive.json" || -e "$output_dir/imdb.tar.gz" || -e "$output_dir/verification" ]]; then
+    echo "refusing to overwrite an existing fixture or its verification records: $output_dir" >&2
     exit 1
 fi
-mkdir -p "$output_dir"
+mkdir -p "$output_dir/verification"
 output_dir="$(cd -- "$output_dir" && pwd)"
 
-trap 'echo "job-v1 build stopped; failed resources were retained for diagnosis" >&2' ERR
+trap 'echo "imdb build stopped; failed resources were retained for diagnosis" >&2' ERR
 
-uv run --project "$repository_root" --frozen python -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+uv run --project "$repository_root" --frozen python -m scripts.fixtures.fetch_imdb --raw-dir "$raw_dir"
 raw_dir="$(cd -- "$raw_dir" && pwd)"
 
-source_manifest_copy="$output_dir/job-v1.source.json"
-if [[ -e "$source_manifest_copy" ]]; then
-    echo "refusing to overwrite source manifest copy: $source_manifest_copy" >&2
-    exit 1
+source_manifest_copy="$output_dir/build.json"
+if [[ "$source_manifest_copy" != "$repository_root/imdb/build.json" ]]; then
+    if [[ -e "$source_manifest_copy" ]]; then
+        echo "refusing to overwrite build configuration: $source_manifest_copy" >&2
+        exit 1
+    fi
+    cp "$repository_root/imdb/build.json" "$source_manifest_copy"
 fi
-cp "$repository_root/benchmarks/job/manifest.json" "$source_manifest_copy"
 
-"$script_dir/load-job-v1.sh" \
+"$script_dir/load_imdb.sh" \
     --raw-dir "$raw_dir" \
     --project-name "$build_project" \
     --skip-fetch
 
-export QORL_JOB_DATA_DIR="$raw_dir/imdb"
-export QORL_JOB_SOURCE_DIR="$raw_dir/source"
+export QORL_IMDB_DATA_DIR="$raw_dir/tables"
+export QORL_IMDB_SOURCE_DIR="$repository_root/benchmarks/raw/job/source"
 compose=(
     docker compose
     --project-name "$build_project"
     --file "$repository_root/compose.yaml"
-    --file "$repository_root/compose.fixture-build.yaml"
 )
 container="$("${compose[@]}" ps --quiet postgres)"
 build_volume="$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}')"
@@ -94,50 +95,49 @@ if [[ -z "$build_volume" ]]; then
     exit 1
 fi
 
-uv run --project "$repository_root" --frozen python -m scripts.job.verify_job_v1 \
+uv run --project "$repository_root" --frozen python -m scripts.fixtures.verify_imdb \
     --container "$container" \
-    --raw-dir "$raw_dir" \
+    --manifest "$source_manifest_copy" \
     --phase build \
-    --output "$output_dir/job-v1.database.build.json"
+    --output "$output_dir/verification/build.json"
 
 uv run --project "$repository_root" --frozen python -m qorl.db.capture \
     --container "$container" \
     --runtime-profile "$runtime_profile" \
     --postgres-config "$postgres_config" \
-    --output-dir "$output_dir" \
+    --output-dir "$output_dir/verification" \
     --phase pre
 
 "${compose[@]}" stop --timeout 60 postgres
 container="$("${compose[@]}" ps --all --quiet postgres)"
 
-uv run --project "$repository_root" --frozen python -m scripts.job.seal_job_v1 \
+uv run --project "$repository_root" --frozen python -m scripts.fixtures.archive_imdb \
     --container "$container" \
-    --manifest "$output_dir/job-v1.source.json" \
-    --build-verification "$output_dir/job-v1.database.build.json" \
-    --environment-capture "$output_dir/environment.json" \
+    --manifest "$output_dir/build.json" \
+    --build-verification "$output_dir/verification/build.json" \
+    --environment-capture "$output_dir/verification/environment.json" \
     --output-dir "$output_dir"
 
 "${compose[@]}" down
 
-"$script_dir/restore-verify-job-v1.sh" \
-    --snapshot-manifest "$output_dir/job-v1.snapshot.json" \
-    --build-verification "$output_dir/job-v1.database.build.json" \
-    --output-dir "$output_dir" \
-    --raw-dir "$raw_dir" \
+"$script_dir/restore_verify_imdb.sh" \
+    --archive-manifest "$output_dir/archive.json" \
+    --build-verification "$output_dir/verification/build.json" \
+    --output-dir "$output_dir/verification" \
     --project-name "$restore_project"
 
 docker volume rm "$build_volume" >/dev/null
 trap - ERR
 
-uv run --project "$repository_root" --frozen python - "$output_dir/job-v1.snapshot.json" <<'PY'
+uv run --project "$repository_root" --frozen python - "$output_dir/archive.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-snapshot = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 print(
-    f"job-v1 build, seal, and clean-room restore passed: "
-    f"snapshot_id={snapshot['snapshot_id']} "
-    f"archive_sha256={snapshot['archive']['sha256']}"
+    f"imdb build, archive, and clean-room restore passed: "
+    f"fixture_id={manifest['fixture_id']} "
+    f"archive_sha256={manifest['archive']['sha256']}"
 )
 PY

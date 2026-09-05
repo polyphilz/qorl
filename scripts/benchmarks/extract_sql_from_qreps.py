@@ -17,10 +17,8 @@ from qorl.workload.ceb import extract_sql_bytes
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "benchmarks/ceb/manifest.json"
-DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "benchmarks/raw/ceb-v1/source/imdb"
-DEFAULT_UNIQUE_SOURCE = (
-    REPOSITORY_ROOT / "benchmarks/raw/ceb-v1/source/imdb-unique-plans"
-)
+DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "benchmarks/raw/ceb/source/imdb"
+DEFAULT_UNIQUE_SOURCE = REPOSITORY_ROOT / "benchmarks/raw/ceb/source/imdb-unique-plans"
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "benchmarks/ceb"
 
 
@@ -169,17 +167,17 @@ def build(
         records = extract_full_tree(
             full_source,
             temporary / "queries",
-            source_manifest["trees"]["full"],
+            source_manifest["queries"],
         )
         members = build_unique_membership(
             unique_source,
-            source_manifest["trees"]["unique_plans"],
+            source_manifest["queries"]["subsets"]["unique_plans"],
             records,
         )
         counts = Counter(record["template_id"] for record in records)
         sources = {
             "schema_version": 1,
-            "source_id": "ceb-v1-recovered-source",
+            "source_id": "ceb-recovered-source",
             "source_manifest": {
                 "path": str(source_manifest_path.relative_to(REPOSITORY_ROOT)),
                 "sha256": sha256_file(source_manifest_path),
@@ -201,7 +199,7 @@ def build(
         unique_counts = Counter(member["template_id"] for member in members)
         unique = {
             "schema_version": 1,
-            "membership_id": "ceb-v1-unique-plans",
+            "membership_id": "ceb-unique-plans",
             "definition": (
                 "Recovered author-produced unique-plans subset mapped by exact "
                 "template, source filename, and extracted SQL SHA-256 into the "
@@ -243,9 +241,12 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
     unique = json.loads((provenance / "unique-plans.json").read_text(encoding="utf-8"))
     if sources["source_manifest"]["sha256"] != sha256_file(source_manifest_path):
         raise RuntimeError("checked-in sources reference a different source manifest")
-    if sources["query_count"] != source_manifest["trees"]["full"]["count"]:
+    if sources["query_count"] != source_manifest["queries"]["count"]:
         raise RuntimeError("checked-in full query count differs from source manifest")
-    if unique["query_count"] != source_manifest["trees"]["unique_plans"]["count"]:
+    if (
+        unique["query_count"]
+        != source_manifest["queries"]["subsets"]["unique_plans"]["count"]
+    ):
         raise RuntimeError("checked-in unique query count differs from source manifest")
 
     records = sources["queries"]
@@ -255,7 +256,7 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
         record["template_id"].removeprefix("ceb-") for record in records
     )
     if dict(sorted(full_counts.items())) != expected_templates(
-        source_manifest["trees"]["full"]
+        source_manifest["queries"]
     ):
         raise RuntimeError("checked-in full template counts differ")
     expected_paths: set[str] = set()
@@ -296,7 +297,7 @@ def check(source_manifest_path: Path, output_dir: Path) -> None:
         member["template_id"].removeprefix("ceb-") for member in unique["members"]
     )
     if dict(sorted(unique_counts.items())) != expected_templates(
-        source_manifest["trees"]["unique_plans"]
+        source_manifest["queries"]["subsets"]["unique_plans"]
     ):
         raise RuntimeError("checked-in unique template counts differ")
     if unique["sql_membership_manifest_sha256"] != manifest_sha256(

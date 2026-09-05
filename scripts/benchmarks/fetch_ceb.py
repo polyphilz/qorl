@@ -19,7 +19,7 @@ from qorl.util.hashing import sha256_stream
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/ceb/manifest.json"
-DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/ceb-v1"
+DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/ceb"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
 QUERY_ARCHIVE_PATH_PARTS = 5
 
@@ -45,7 +45,7 @@ def download(url: str, target: Path, specification: dict[str, Any]) -> None:
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(f".{target.name}.part.{os.getpid()}")
-    request = urllib.request.Request(url, headers={"User-Agent": "qorl-ceb-v1/1"})
+    request = urllib.request.Request(url, headers={"User-Agent": "qorl-ceb/1"})
     try:
         with urllib.request.urlopen(request) as response, partial.open("xb") as output:
             shutil.copyfileobj(response, output, length=1024 * 1024)
@@ -70,7 +70,7 @@ def selected_members(
     archive: tarfile.TarFile, manifest: dict[str, Any]
 ) -> dict[str, tarfile.TarInfo]:
     archive_members = archive.getmembers()
-    archive_specification = manifest["provenance"]["immutable_archive"]
+    archive_specification = manifest["source"]["archive"]
     if len(archive_members) != archive_specification["members"]:
         raise RuntimeError("archive member count differs")
     if (
@@ -109,7 +109,11 @@ def selected_members(
     if len(roots) != 1:
         raise RuntimeError(f"archive must have one root directory: {sorted(roots)}")
     for key in TREE_NAMES:
-        specification = manifest["trees"][key]
+        specification = (
+            manifest["queries"]
+            if key == "full"
+            else manifest["queries"]["subsets"][key]
+        )
         expected = {
             template: int(count)
             for template, count in specification["templates"].items()
@@ -189,13 +193,13 @@ def main() -> None:
     parser.add_argument("--raw-dir", type=Path, default=DEFAULT_RAW_DIR)
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    if manifest["workload_id"] != "ceb-v1":
-        raise RuntimeError("manifest is not ceb-v1")
-    specification = manifest["provenance"]["immutable_archive"]
+    if manifest["workload_id"] != "ceb":
+        raise RuntimeError("manifest is not ceb")
+    specification = manifest["source"]["archive"]
     archive = args.raw_dir / specification["filename"]
     download(specification["url"], archive, specification)
     extract(archive, args.raw_dir / "source", manifest)
-    print("ceb-v1 recovered source inputs verified")
+    print("ceb recovered source inputs verified")
 
 
 if __name__ == "__main__":

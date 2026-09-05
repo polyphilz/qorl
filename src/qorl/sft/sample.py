@@ -427,7 +427,7 @@ def main() -> None:
         raise RuntimeError("default-best search is limited to the sampling split")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb-v1", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
     tasks = selected_tasks(task_set, selection, arguments.split)
     fallback_tasks = tasks[: config.sampling.fallback_check_task_count]
     if arguments.task_ids is not None:
