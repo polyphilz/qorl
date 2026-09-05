@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -10,6 +11,8 @@ from qorl.db.config import PostgresConfig
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.resources import RuntimeProfile, WorkerResources, validate_host_topology
+
+STOP_TIMEOUT_SECONDS = 60
 
 
 def execute(
@@ -38,7 +41,7 @@ def execute(
 
 
 class PostgresContainer:
-    """Own one restored PostgreSQL container and its Docker lifecycle."""
+    """Create, populate, and run one PostgreSQL container."""
 
     def __init__(
         self,
@@ -48,6 +51,8 @@ class PostgresContainer:
         resources: WorkerResources,
         postgres_config: PostgresConfig | None = None,
     ) -> None:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project_name):
+            raise ValueError("invalid Compose project name")
         if resources not in runtime_profile.workers:
             raise ValueError("worker resources do not belong to runtime profile")
         self.fixture = fixture
@@ -59,6 +64,9 @@ class PostgresContainer:
         )
         self.container = ""
         self.created = False
+        self.volume = ""
+        self.image_id = ""
+        self.pgdata_relative_path = ""
         self.environment = {
             **os.environ,
             **resources.compose_environment,
@@ -104,27 +112,20 @@ class PostgresContainer:
     def compose_command(self, *arguments: str, check: bool = True) -> str:
         return self.command([*self.compose, *arguments], check=check)
 
-    def start(self) -> None:
+    def create(self) -> None:
         validate_host_topology((self.resources,))
-        fixture_id = self.fixture.manifest["fixture_id"]
-        print(f"Verifying {fixture_id} database archive...")
-        self.fixture.verify_archive()
-
-        image = self.fixture.manifest["image"]
-        actual_image_id = self.command(
-            ["docker", "image", "inspect", image["reference"], "--format", "{{.Id}}"]
-        ).strip()
-        if actual_image_id != image["id"]:
-            raise WorkerError(
-                f"database image mismatch: expected={image['id']} "
-                f"actual={actual_image_id}"
-            )
-
         self.compose_command("config", "--quiet")
         if self.compose_command("ps", "--all", "--quiet").strip():
             raise WorkerError(f"Docker project already exists: {self.project_name}")
+        volume = f"{self.project_name}_qorl-postgres-data"
+        if (
+            self.execute(
+                ["docker", "volume", "inspect", volume], check=False
+            ).returncode
+            == 0
+        ):
+            raise WorkerError(f"Docker volume already exists: {volume}")
 
-        print("Restoring IMDb into a fresh Docker volume...")
         self.compose_command("create", "--no-build", "postgres")
         self.created = True
         self.container = self.compose_command(
@@ -132,8 +133,7 @@ class PostgresContainer:
         ).strip()
         if not self.container:
             raise WorkerError("Docker did not create the PostgreSQL container")
-
-        volume = self.command(
+        self.volume = self.command(
             [
                 "docker",
                 "inspect",
@@ -142,15 +142,45 @@ class PostgresContainer:
                 '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}',
             ]
         ).strip()
-        if not volume:
+        if not self.volume:
             raise WorkerError("Docker did not create the PostgreSQL data volume")
-
-        archive = self.fixture.archive_path
-        relative = PurePosixPath(
-            self.fixture.manifest["postgresql"]["pgdata_volume_relative_path"]
+        self.image_id = self.command(
+            [
+                "docker",
+                "inspect",
+                self.container,
+                "--format",
+                "{{.Image}}",
+            ]
+        ).strip()
+        environment = self.command(
+            [
+                "docker",
+                "inspect",
+                self.container,
+                "--format",
+                "{{range .Config.Env}}{{println .}}{{end}}",
+            ]
         )
-        if relative.is_absolute() or ".." in relative.parts:
-            raise WorkerError("database manifest contains an invalid PGDATA path")
+        pgdata = next(
+            (
+                line.removeprefix("PGDATA=")
+                for line in environment.splitlines()
+                if line.startswith("PGDATA=")
+            ),
+            "",
+        )
+        path = PurePosixPath(pgdata)
+        if ".." in path.parts:
+            raise WorkerError("invalid PGDATA path in PostgreSQL image")
+        self.pgdata_relative_path = str(path.relative_to("/var/lib/postgresql"))
+
+    def restore_archive(self) -> None:
+        if not self.created:
+            raise WorkerError("create the container before restoring IMDb")
+        archive = self.fixture.archive_path
+        if not archive.is_file():
+            raise WorkerError(f"database archive is missing: {archive}")
         restore_script = r"""
 test -z "$(find /target -mindepth 1 -print -quit)"
 mkdir -p "/target/$2"
@@ -166,26 +196,30 @@ test ! -e "/target/$2/postmaster.pid"
                 "--rm",
                 "--network=none",
                 "--volume",
-                f"{volume}:/target",
+                f"{self.volume}:/target",
                 "--volume",
                 f"{archive.parent}:/archive:ro",
                 "--entrypoint",
                 "bash",
-                image["id"],
+                self.image_id,
                 "-Eeuo",
                 "pipefail",
                 "-c",
                 restore_script,
                 "qorl-restore",
                 archive.name,
-                str(relative),
+                self.pgdata_relative_path,
             ]
         )
 
-        print("Starting PostgreSQL worker...")
+    def start(self) -> None:
+        if not self.created:
+            raise WorkerError("create the container before starting PostgreSQL")
         self.compose_command("up", "--detach", "--wait", "--no-build", "postgres")
-        self.container = self.compose_command("ps", "--quiet", "postgres").strip()
         self.command(["docker", "exec", self.container, "qorl-assert-config"])
+
+    def stop(self) -> None:
+        self.compose_command("stop", "--timeout", str(STOP_TIMEOUT_SECONDS), "postgres")
 
     def close(self) -> None:
         if not self.created:

@@ -28,10 +28,8 @@ def test_calibration_starts_and_records_the_selected_pool(
     config_id: str,
     worker_count: int,
 ) -> None:
-    manifest_path = tmp_path / "archive.json"
-    manifest_path.write_text(json.dumps(database_fixture.manifest))
-    fixture = replace(database_fixture, manifest_path=manifest_path)
-    task_set = TaskSet.load(repository_root, "job", fixture.data_identity)
+    fixture = database_fixture
+    task_set = TaskSet.load(repository_root, "job")
     task_set = replace(
         task_set,
         inventory={
@@ -58,7 +56,8 @@ def test_calibration_starts_and_records_the_selected_pool(
         PostgresContainer, "start", lambda container: started.append(container)
     )
     monkeypatch.setattr(PostgresContainer, "capture_environment", lambda *args: None)
-    monkeypatch.setattr(PostgresWorker, "assert_fixture", lambda worker: None)
+    monkeypatch.setattr(PostgresContainer, "create", lambda container: None)
+    monkeypatch.setattr(PostgresContainer, "restore_archive", lambda container: None)
     monkeypatch.setattr(PostgresWorker, "explain_analyze", execute)
 
     output = calibration.calibrate(

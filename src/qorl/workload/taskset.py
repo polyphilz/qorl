@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from qorl.db.fixture import FixtureError, data_identity
+from qorl.db.fixture import FixtureError
 
 TASK_SET_PATHS = {
     "job": Path("benchmarks/job/tasks.json"),
@@ -25,14 +25,13 @@ class TaskSet:
 
     @property
     def data_identity(self) -> dict[str, str]:
-        return data_identity(self.inventory["database"])
+        return {"fixture_id": self.inventory["fixture_id"]}
 
     @classmethod
     def load(
         cls,
         repository: Path,
         task_set_id: str,
-        expected_data_identity: dict[str, str] | None = None,
     ) -> TaskSet:
         repository = repository.resolve()
         try:
@@ -52,12 +51,8 @@ class TaskSet:
             raise FixtureError("task inventory contains an invalid task ID")
         if len(task_ids) != len(set(task_ids)):
             raise FixtureError("task inventory contains duplicate task IDs")
-        inventory_data_identity = data_identity(inventory.get("database", {}))
-        if (
-            expected_data_identity is not None
-            and inventory_data_identity != data_identity(expected_data_identity)
-        ):
-            raise FixtureError(f"{task_set_id} requires a different database fixture")
+        if not isinstance(inventory.get("fixture_id"), str):
+            raise FixtureError("task inventory requires a fixture ID")
 
         return cls(
             repository=repository,

@@ -1,13 +1,9 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "inventory_id": "job",
   "task_count": 113,
   "template_count": 33,
-  "database": {
-    "fixture_id": "imdb",
-    "archive_sha256": "767c06fe9c54003c02fb61d4922a14984ce1e878702ebe02951bdebc4cfa4198",
-    "postgres_system_identifier": "7678843906783596587"
-  },
+  "fixture_id": "imdb",
   "query_source": {
     "repository_url": "https://github.com/gregrahn/join-order-benchmark",
     "commit": "a39603662e023e449cb2121997a5034df9e02ebf",

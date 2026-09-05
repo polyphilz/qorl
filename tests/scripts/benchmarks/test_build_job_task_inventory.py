@@ -9,10 +9,11 @@ def test_build_inventory_has_no_experiment_roles(repository_root: Path) -> None:
     inventory, queries = build_inventory(
         repository_root / "benchmarks/job/manifest.json",
         repository_root / "benchmarks/job/queries",
-        repository_root / "imdb/archive.json",
     )
 
-    assert inventory["schema_version"] == 2
+    assert inventory["schema_version"] == 3
+    assert inventory["fixture_id"] == "imdb"
+    assert "database" not in inventory
     assert inventory["task_count"] == len(queries) == 113
     assert (
         not {"role", "split", "training_allowed", "tuning_allowed"} & inventory.keys()

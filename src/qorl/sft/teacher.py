@@ -766,7 +766,7 @@ def main() -> None:
     }
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb")
     tasks = selected_tasks(task_set, selection, "sampling")
     paths_by_task: dict[str, list[Path]] = {}
     for path in sorted((dataset / "samples/sampling").glob("*/sample-*.json")):

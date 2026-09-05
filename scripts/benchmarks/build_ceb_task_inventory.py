@@ -9,7 +9,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
-from qorl.db.fixture import archive_data_identity
 from qorl.util.hashing import sha256_bytes, sha256_file
 from qorl.workload.query_structure import (
     extract_join_structure,
@@ -18,18 +17,16 @@ from qorl.workload.query_structure import (
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CEB_DIR = REPOSITORY_ROOT / "benchmarks/ceb"
-DEFAULT_ARCHIVE_MANIFEST = REPOSITORY_ROOT / "imdb/archive.json"
-INVENTORY_SCHEMA_VERSION = 3
+INVENTORY_SCHEMA_VERSION = 4
 
 
-def build_inventory(ceb_dir: Path, archive_manifest_path: Path) -> dict[str, Any]:
+def build_inventory(ceb_dir: Path) -> dict[str, Any]:
     provenance_dir = ceb_dir / "provenance"
     sources_path = provenance_dir / "sources.json"
     unique_path = provenance_dir / "unique-plans.json"
     sources = json.loads(sources_path.read_text(encoding="utf-8"))
     unique = json.loads(unique_path.read_text(encoding="utf-8"))
     manifest = json.loads((ceb_dir / "manifest.json").read_text(encoding="utf-8"))
-    database = archive_data_identity(archive_manifest_path, manifest["fixture_id"])
 
     source_templates = set(sources["template_query_counts"])
     source_groups: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
@@ -80,7 +77,7 @@ def build_inventory(ceb_dir: Path, archive_manifest_path: Path) -> dict[str, Any
         "inventory_id": "ceb",
         "task_count": len(tasks),
         "template_count": len(source_templates),
-        "database": database,
+        "fixture_id": manifest["fixture_id"],
         "query_source": {
             "source_id": sources["source_id"],
             "source_manifest": sources["source_manifest"],
@@ -123,13 +120,10 @@ def build_inventory(ceb_dir: Path, archive_manifest_path: Path) -> dict[str, Any
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ceb-dir", type=Path, default=DEFAULT_CEB_DIR)
-    parser.add_argument(
-        "--archive-manifest", type=Path, default=DEFAULT_ARCHIVE_MANIFEST
-    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     output = args.ceb_dir / "tasks.json"
-    expected = build_inventory(args.ceb_dir, args.archive_manifest)
+    expected = build_inventory(args.ceb_dir)
     if args.check:
         actual = json.loads(output.read_text(encoding="utf-8"))
         if actual != expected:

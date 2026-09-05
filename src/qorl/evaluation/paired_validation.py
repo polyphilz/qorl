@@ -290,7 +290,7 @@ def main() -> None:
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
+    task_set = TaskSet.load(repository, config["task_set"])
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
     if (
@@ -315,7 +315,6 @@ def main() -> None:
         "config_sha256": sha256_file(config_path),
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
-        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "model": {

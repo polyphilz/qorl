@@ -168,7 +168,7 @@ def calibrate(
     if selection_path is None and split is not None:
         raise RuntimeError("--split requires --selection")
 
-    task_set = TaskSet.load(repository, workload, fixture.data_identity)
+    task_set = TaskSet.load(repository, workload)
     selection: dict[str, Any] | None = None
     selected_split: str | None = None
     if selection_path is None:
@@ -212,7 +212,6 @@ def calibrate(
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity_for(postgres_config),
         "postgres_config": postgres_config.manifest().model_dump(),
-        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "orchestrator": {
             "qorl_version": __version__,
             "python_version": platform.python_version(),

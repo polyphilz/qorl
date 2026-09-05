@@ -507,7 +507,7 @@ def main() -> None:
         )
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
+    task_set = TaskSet.load(repository, "ceb")
     tasks, dataset = validation_tasks(repository, task_set)
     report: dict[str, Any] = {
         "schema_version": 1,

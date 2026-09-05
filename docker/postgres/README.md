@@ -28,6 +28,3 @@ Calibration, training, and benchmark runs default to `002-poolconf-4x8`;
 fixture construction and restore verification use `000-poolconf-1x32`.
 The Python worker loads the selected configuration and supplies Compose's resource
 variables. Pool selection is independent of the PostgreSQL config.
-
-See [`scripts/fixtures/README.md`](../../scripts/fixtures/README.md) for building and
-verifying the IMDb database fixture used by JOB and CEB.

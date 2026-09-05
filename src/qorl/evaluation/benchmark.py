@@ -187,7 +187,7 @@ def run_benchmark(
 ) -> Path:
     pool_config = load_pool(repository, pool_config_path=pool_config_path)
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, "job", fixture.data_identity)
+    task_set = TaskSet.load(repository, "job")
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
     agent: QoAgentPolicy | None = None
@@ -209,7 +209,6 @@ def run_benchmark(
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
-        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "run_config": {
             "path": str(config_path.relative_to(repository)),
             "sha256": sha256_file(config_path),

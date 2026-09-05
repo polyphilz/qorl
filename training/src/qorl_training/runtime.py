@@ -49,7 +49,7 @@ def start(
     pool: WorkerPool | None = None
     try:
         pool = start_pool(fixture, f"qorl-rl-{os.getpid()}", environment)
-        task_set = TaskSet.load(repository, "ceb", fixture.data_identity)
+        task_set = TaskSet.load(repository, "ceb")
         configured_timeouts = environment.get(TIMEOUT_MANIFEST_ENV)
         calibrated_timeouts = (
             CalibratedTimeouts.load(

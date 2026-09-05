@@ -319,7 +319,7 @@ def run_audit(
         raise RuntimeError("unexpected reward-protocol case manifest")
 
     fixture = DatabaseFixture.load(repository)
-    task_set = TaskSet.load(repository, config["task_set"], fixture.data_identity)
+    task_set = TaskSet.load(repository, config["task_set"])
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     output_dir.mkdir(parents=True, exist_ok=False)
     report_path = output_dir / "report.json"
@@ -331,7 +331,6 @@ def run_audit(
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
-        "fixture_manifest_sha256": sha256_file(fixture.manifest_path),
         "data_identity": fixture.data_identity,
         "runtime_identity": fixture.runtime_identity,
         "results": [],

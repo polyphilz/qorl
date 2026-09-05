@@ -16,17 +16,15 @@ class TestPostgresConfig:
         self, repository_root: Path
     ) -> None:
         compose = (repository_root / "compose.yaml").read_text()
-        assert "${QORL_IMDB_DATA_DIR:-./imdb/raw/tables}:/qorl/imdb-data:ro" in compose
+        assert "${QORL_IMDB_DATA_DIR:-./data/raw/tables}:/qorl/imdb-data:ro" in compose
         assert (
             "${QORL_IMDB_SOURCE_DIR:-./benchmarks/raw/job/source}:/qorl/imdb-source:ro"
             in compose
         )
         assert "QORL_IMDB_FIXTURE_ID" not in compose
         assert not (repository_root / "compose.fixture-build.yaml").exists()
-        for name in ("build_imdb.sh", "load_imdb.sh", "restore_verify_imdb.sh"):
-            script = (repository_root / "scripts/fixtures" / name).read_text()
-            assert '--file "$repository_root/compose.yaml"' in script
-            assert "compose.fixture-build.yaml" not in script
+        launcher = (repository_root / "src/qorl/db/container.py").read_text()
+        assert 'str(fixture.repository / "compose.yaml")' in launcher
 
     def test_each_config_has_only_the_three_declared_files(
         self, repository_root: Path
@@ -41,22 +39,23 @@ class TestPostgresConfig:
         for config_dir in root.iterdir():
             assert {path.name for path in config_dir.iterdir()} == expected
 
-    def test_fixture_entrypoints_expose_src_and_repository_to_python(
+    def test_fixture_entrypoints_use_one_fixed_postgres_and_pool_config(
         self, repository_root: Path
     ) -> None:
-        expected = (
-            'export PYTHONPATH="$repository_root/src:$repository_root'
-            '${PYTHONPATH:+:$PYTHONPATH}"'
-        )
-        for name in (
-            "build_imdb.sh",
-            "load_imdb.sh",
-            "restore_verify_imdb.sh",
-        ):
-            script = (repository_root / "scripts/fixtures" / name).read_text(
+        for name in ("load_verify_archive.py", "restore_and_verify.py"):
+            script = (repository_root / "scripts/imdb" / name).read_text(
                 encoding="utf-8"
             )
-            assert expected in script
+            assert (
+                'POSTGRES_CONFIG = Path("docker/postgres/configs/000-pgconf-default")'
+                in script
+            )
+            assert (
+                'POOL_CONFIG = Path("docker/worker_pool/configs/000-poolconf-1x32")'
+                in script
+            )
+            assert "PostgresContainer(" in script
+            assert "scripts/docker" not in script
 
     def test_configs_define_every_prompt_visible_planner_setting(
         self, repository_root: Path

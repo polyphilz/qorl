@@ -96,7 +96,7 @@ class PostgresConfig:
             expected_sha256=self.expected_sha256,
         )
 
-    def runtime_identity(self, postgres_image_id: str) -> RuntimeIdentity:
+    def runtime_identity(self, postgres_image_id: str | None = None) -> RuntimeIdentity:
         return RuntimeIdentity(
             postgres_image_id=postgres_image_id,
             postgres_config_id=self.config_id,

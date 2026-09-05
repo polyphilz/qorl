@@ -1,7 +1,6 @@
 from enum import StrEnum
 from typing import Protocol
 
-from qorl.db.fixture import DatabaseFixture
 from qorl.measure.protocols import QueryExecutor
 
 # This internal-looking key is already model-visible and therefore wire-stable.
@@ -40,8 +39,6 @@ TERMINAL_STOP_REASON = {
 
 
 class InspectionExecutor(QueryExecutor, Protocol):
-    fixture: DatabaseFixture
-
     def settings(self, names: set[str]) -> dict[str, str]: ...
 
     def admin_sql(self, sql: str) -> str: ...

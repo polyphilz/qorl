@@ -8,11 +8,7 @@ dist/
 
 .env
 
-# Local database artifacts and experiment output must be added through explicit,
-# checksummed manifests rather than accidentally committed.
+# Generated database files, downloads, and experiment outputs.
 benchmarks/raw/
-imdb/*.tar.gz
-imdb/.*.part*
-imdb/raw/
-imdb/verification/
+data/
 outputs/

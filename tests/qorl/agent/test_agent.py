@@ -170,6 +170,7 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
                 **dict.fromkeys(BOOLEAN_SETTINGS, "on"),
                 **dict.fromkeys(NUMERIC_SETTINGS, "1"),
                 **dict.fromkeys(INTEGER_SETTINGS, "1"),
+                "server_version_num": "180006",
             }
 
         def admin_sql(sql: str) -> str:
@@ -185,7 +186,6 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
             settings=settings,
             admin_sql=admin_sql,
             fixture=SimpleNamespace(
-                manifest={"postgresql": {"server_version_num": "180006"}},
                 repository=repository,
             ),
         )
@@ -415,7 +415,7 @@ class TestQoAgent:
         )
         assert evaluator.requested_settings == set(BOOLEAN_SETTINGS) | set(
             NUMERIC_SETTINGS
-        ) | set(INTEGER_SETTINGS)
+        ) | set(INTEGER_SETTINGS) | {"server_version_num"}
         assert trace["initial_observation"]["turn_budget"] == {
             "total_model_turns": 64,
             "maximum_inspection_turns": 6,

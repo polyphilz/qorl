@@ -12,7 +12,6 @@ from qorl.agent.interface import (
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
-from qorl.db.fixture import data_identity
 from qorl.measure.rollout import MAX_CANDIDATES
 from qorl.measure.schemas import MeasurementStatus, ToolResultStatus
 from qorl.plans.catalog import TaskCatalog
@@ -85,7 +84,8 @@ def validate_protocol_demo(
     )
     require(task["partition"] == partition, "demo task partition mismatch")
     require(
-        data_identity(metadata.get("data_identity", {})) == task_set.data_identity,
+        metadata.get("data_identity", {}).get("fixture_id")
+        == task_set.inventory["fixture_id"],
         "demo data identity differs from its task inventory",
     )
     require(

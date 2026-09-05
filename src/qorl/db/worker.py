@@ -42,18 +42,6 @@ class PostgresWorker:
             check=check,
         )
 
-    def assert_fixture(self) -> None:
-        actual_system_identifier = self.admin_sql(
-            "SELECT system_identifier FROM pg_control_system();"
-        ).strip()
-        expected_system_identifier = self.fixture.manifest["postgresql"][
-            "system_identifier"
-        ]
-        if actual_system_identifier != expected_system_identifier:
-            raise WorkerError(
-                "PostgreSQL system identifier does not match the database manifest"
-            )
-
     def admin_sql(self, sql: str) -> str:
         shell = r"""
 exec psql \

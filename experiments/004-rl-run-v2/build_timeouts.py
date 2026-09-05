@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from qorl.db.fixture import DatabaseFixture, data_identity
 from qorl.measure.schemas import RunStatus
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
@@ -29,15 +28,9 @@ def build(calibration: Path) -> dict[str, Any]:
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     selection = json.loads(SELECTION.read_text(encoding="utf-8"))
     task_set = TaskSet.load(ROOT, "ceb")
-    fixture = DatabaseFixture.load(ROOT)
     selected = selection["splits"]["train"]
     if source_manifest.get("status") != RunStatus.COMPLETED:
         raise RuntimeError("source calibration is not complete")
-    source_data_identity = source_manifest.get(
-        "data_identity", source_manifest.get("database", {})
-    )
-    if data_identity(source_data_identity) != task_set.data_identity:
-        raise RuntimeError("source calibration uses a different database")
     if source_manifest.get("selection", {}).get("sha256") != sha256_file(SELECTION):
         raise RuntimeError("source calibration uses a different selection")
 
@@ -74,9 +67,7 @@ def build(calibration: Path) -> dict[str, Any]:
             "split": "train",
         },
         "data_identity": task_set.data_identity,
-        "runtime_identity": source_manifest.get(
-            "runtime_identity", fixture.runtime_identity
-        ),
+        "runtime_identity": source_manifest["runtime_identity"],
         "source_calibration": {
             "calibration_id": source_manifest["calibration_id"],
             "manifest_sha256": sha256_file(source_manifest_path),

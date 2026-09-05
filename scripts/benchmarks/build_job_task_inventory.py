@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from qorl.db.fixture import archive_data_identity
 from qorl.util.hashing import sha256_bytes, sha256_file
 from qorl.workload.query_structure import (
     extract_join_structure as extract_structure,
@@ -22,7 +21,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
 DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "benchmarks/raw/job/source"
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "benchmarks/job"
-INVENTORY_SCHEMA_VERSION = 2
+INVENTORY_SCHEMA_VERSION = 3
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
 
@@ -73,7 +72,6 @@ def build_tasks(
 def build_inventory(
     source_manifest_path: Path,
     source_dir: Path,
-    manifest_path: Path,
 ) -> tuple[dict[str, Any], list[Path]]:
     source_manifest = json.loads(source_manifest_path.read_text(encoding="utf-8"))
     query_spec = source_manifest["queries"]
@@ -91,7 +89,6 @@ def build_inventory(
         )
 
     source_manifest_sha256 = sha256_file(source_manifest_path)
-    database = archive_data_identity(manifest_path, source_manifest["fixture_id"])
 
     template_ids = sorted({task["template_id"] for task in tasks})
     inventory = {
@@ -99,7 +96,7 @@ def build_inventory(
         "inventory_id": "job",
         "task_count": len(tasks),
         "template_count": len(template_ids),
-        "database": database,
+        "fixture_id": source_manifest["fixture_id"],
         "query_source": {
             "repository_url": source_manifest["source"]["repository_url"],
             "commit": source_manifest["source"]["commit"],
@@ -150,14 +147,12 @@ def check_inventory(
     output_dir: Path,
     source_manifest_path: Path,
     source_dir: Path,
-    manifest_path: Path,
 ) -> None:
     inventory_path = output_dir / "tasks.json"
     existing = json.loads(inventory_path.read_text(encoding="utf-8"))
     expected, source_queries = build_inventory(
         source_manifest_path,
         source_dir,
-        manifest_path,
     )
     if existing != expected:
         raise RuntimeError(
@@ -193,9 +188,6 @@ def main() -> None:
             "when checking"
         ),
     )
-    parser.add_argument(
-        "--archive-manifest", type=Path, default=REPOSITORY_ROOT / "imdb/archive.json"
-    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
@@ -209,7 +201,6 @@ def main() -> None:
             args.output_dir,
             args.source_manifest,
             source_dir,
-            args.archive_manifest,
         )
         print("checked-in JOB task inventory verification passed")
         return
@@ -217,7 +208,6 @@ def main() -> None:
     inventory, queries = build_inventory(
         args.source_manifest,
         source_dir,
-        args.archive_manifest,
     )
     write_inventory(args.output_dir, inventory, queries)
     print(

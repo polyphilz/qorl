@@ -1,6 +1,6 @@
 # Benchmark preparation
 
-JOB and CEB are query workloads over the same [IMDb fixture](../../imdb/README.md).
+JOB and CEB are query workloads over the same [IMDb fixture](../imdb/README.md).
 These scripts prepare queries and inventories.
 
 Both workload manifests use the same sections: `source` pins the download,
@@ -18,7 +18,7 @@ uv run python -m scripts.benchmarks.build_job_task_inventory --check
 ```
 
 Building an inventory reads the pinned queries from `benchmarks/raw/job/source/`
-and the database identity from `imdb/archive.json`. The existing query directory
+and their source manifest. The existing query directory
 and inventory must be absent; the source manifest is preserved.
 
 ## CEB
@@ -37,9 +37,8 @@ uv run python -m scripts.benchmarks.extract_sql_from_qreps --check
 uv run python -m scripts.benchmarks.build_ceb_task_inventory --check
 ```
 
-The CEB builder reads its source manifests, SQL, and `imdb/archive.json`, not the
-JOB inventory. It deduplicates exact SQL within each template and records query
-structure and provenance.
+The CEB builder reads its own source manifests and SQL. It also deduplicates exact SQL
+within each template and records query structure/provenance.
 
 `extract_sql_from_qreps.py` extracts length-framed UTF-8 SQL without executing
 pickle contents.

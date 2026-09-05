@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import runpy
 from collections.abc import Callable
 from pathlib import Path
@@ -20,14 +19,9 @@ def repository_root() -> Path:
 
 @pytest.fixture(scope="session")
 def database_fixture(repository_root: Path) -> DatabaseFixture:
-    manifest = json.loads(
-        (repository_root / "imdb/archive.json").read_text(encoding="utf-8")
-    )
     return DatabaseFixture(
         repository_root,
-        repository_root / "imdb/archive.json",
-        manifest,
-        repository_root / "imdb/imdb.tar.gz",
+        repository_root / "data/imdb.tar.gz",
     )
 
 

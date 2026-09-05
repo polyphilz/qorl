@@ -7,9 +7,9 @@ optimizer toward faster physical plans.
 `benchmarks/` holds stable workloads, `experiments/NNN-name/` collocates each run's
 inputs, and [`model/configs/`](model/README.md) holds model and sampling settings.
 
-[`imdb/`](imdb/README.md) describes the shared database fixture and its saved
-archive. Fixture preparation is under `scripts/fixtures/`; query preparation is
-under `scripts/benchmarks/`. Workload identifiers are `job` and `ceb`, and the
+IMDb preparation is under [`scripts/imdb/`](scripts/imdb/README.md); raw inputs,
+the prepared archive, and verification reports live in ignored `data/`.
+Query preparation is under `scripts/benchmarks/`. Workload identifiers are `job` and `ceb`, and the
 database fixture identifier is `imdb`.
 
 ```bash

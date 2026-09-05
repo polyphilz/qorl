@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from qorl.db.fixture import DatabaseFixture, data_identity
 from qorl.measure.schemas import RunStatus
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -44,16 +43,9 @@ def build(calibration: Path) -> TimeoutManifest:
     )
     selection = load_record(SELECTION, DatasetSelection)
     task_set = TaskSet.load(ROOT, "ceb")
-    fixture = DatabaseFixture.load(ROOT)
     selected = selection.splits.sampling
     if source_manifest.get("status") != RunStatus.COMPLETED:
         raise RuntimeError("source calibration is not complete")
-    source_data_identity = require_object(
-        source_manifest.get("data_identity", source_manifest.get("database", {})),
-        "calibration data identity",
-    )
-    if data_identity(source_data_identity) != task_set.data_identity:
-        raise RuntimeError("source calibration uses a different database")
     calibration_selection = require_object(
         source_manifest.get("selection"), "calibration selection"
     )
@@ -88,8 +80,6 @@ def build(calibration: Path) -> TimeoutManifest:
         )
 
     runtime_identity = source_manifest.get("runtime_identity")
-    if runtime_identity is None:
-        runtime_identity = JSON_OBJECT_ADAPTER.validate_python(fixture.runtime_identity)
     return TimeoutManifest(
         manifest_id="qorl-protocol-sft-v2-timeouts-v1",
         algorithm=TimeoutAlgorithm(

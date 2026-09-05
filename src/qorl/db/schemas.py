@@ -49,5 +49,5 @@ class PostgresConfigManifest(DatabaseRecord):
 
 
 class RuntimeIdentity(DatabaseRecord):
-    postgres_image_id: str
+    postgres_image_id: str | None = None
     postgres_config_id: str

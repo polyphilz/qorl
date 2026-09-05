@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -24,9 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def database_fixture() -> DatabaseFixture:
     return DatabaseFixture(
         repository=ROOT,
-        manifest_path=ROOT / "imdb/archive.json",
-        archive_path=ROOT / "imdb/imdb.tar.gz",
-        manifest=json.loads((ROOT / "imdb/archive.json").read_text(encoding="utf-8")),
+        archive_path=ROOT / "data/imdb.tar.gz",
     )
 
 
@@ -58,7 +55,7 @@ class WorkerPoolTest(unittest.TestCase):
             )
             slots.append(WorkerSlot(resources, container, PostgresWorker(container)))
         runtime = QorlRuntime(
-            TaskSet.load(ROOT, "ceb", fixture.data_identity),
+            TaskSet.load(ROOT, "ceb"),
             tuple(slots),
             "test-pool",
             "test-sha",

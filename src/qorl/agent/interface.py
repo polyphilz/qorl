@@ -41,6 +41,7 @@ class AgentInterface:
         settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
         if evaluator.default is None:
             raise RuntimeError("rollout baseline has not been started")
+        live_settings = evaluator.worker.settings(settings | {"server_version_num"})
         observation = {
             "task_id": evaluator.task["task_id"],
             "objective": "minimize measured warm-cache execution time",
@@ -51,10 +52,10 @@ class AgentInterface:
                 alias: sorted(indexes)
                 for alias, indexes in sorted(evaluator.catalog.indexes.items())
             },
-            "postgresql_server_version_num": evaluator.worker.fixture.manifest[
-                "postgresql"
-            ]["server_version_num"],
-            "planner_settings": evaluator.worker.settings(settings),
+            "postgresql_server_version_num": live_settings["server_version_num"],
+            "planner_settings": {
+                name: live_settings[name] for name in sorted(settings)
+            },
             "default_plan": evaluator.default.compact_plan,
             "default_median_execution_time_ms": (
                 evaluator.default.median_execution_time_ms

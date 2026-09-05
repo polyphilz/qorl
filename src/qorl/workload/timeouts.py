@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from qorl.db.fixture import data_identity
 from qorl.util.hashing import sha256_file
 from qorl.workload.taskset import TaskSet
 
@@ -55,23 +54,13 @@ class CalibratedTimeouts:
         manifest = json.loads(path.read_text(encoding="utf-8"))
         if manifest.get("schema_version") != 1:
             raise RuntimeError("unsupported calibrated-timeout manifest")
-        recorded_data_identity = manifest.get(
-            "data_identity", manifest.get("database", {})
-        )
-        if data_identity(recorded_data_identity) != task_set.data_identity:
-            raise RuntimeError("calibrated timeouts use a different database")
         recorded_runtime_identity = manifest.get("runtime_identity")
-        if (
-            expected_runtime_identity is not None
-            and recorded_runtime_identity is not None
-            and recorded_runtime_identity != expected_runtime_identity
-        ):
-            raise RuntimeError("calibrated timeouts use a different runtime")
-        if (
-            expected_runtime_identity is not None
-            and recorded_runtime_identity is None
-            and manifest.get("database", {}).get("postgres_image_id")
-            != expected_runtime_identity["postgres_image_id"]
+        if expected_runtime_identity is not None and (
+            recorded_runtime_identity is None
+            or any(
+                recorded_runtime_identity.get(key) != value
+                for key, value in expected_runtime_identity.items()
+            )
         ):
             raise RuntimeError("calibrated timeouts use a different runtime")
 
@@ -128,6 +117,10 @@ class CalibratedTimeouts:
             )
         if list(by_task_id) != selected_ids:
             raise RuntimeError("calibrated timeouts do not match their selection")
+        if not set(by_task_id) <= {
+            task["task_id"] for task in task_set.inventory["tasks"]
+        }:
+            raise RuntimeError("calibrated timeouts contain unknown tasks")
         return cls(path, sha256_file(path), manifest, by_task_id)
 
     def identity(self) -> dict[str, str]:

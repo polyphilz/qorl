@@ -37,12 +37,9 @@ def test_build_neutral_catalog_deduplicates_only_within_templates(
         target.parent.mkdir(parents=True, exist_ok=True)
         original_source = selected[0] if same_sql_across_templates else source
         target.write_bytes((original / original_source["sql_path"]).read_bytes())
-    archive_manifest = tmp_path / "archive.json"
-    archive_manifest.write_bytes((repository_root / "imdb/archive.json").read_bytes())
+    inventory = build_inventory(ceb)
 
-    inventory = build_inventory(ceb, archive_manifest)
-
-    assert inventory["schema_version"] == 3
+    assert inventory["schema_version"] == 4
     assert inventory["task_count"] == inventory["template_count"] == 2
     assert {task["task_id"] for task in inventory["tasks"]} == {
         source["task_id"] for source in selected
@@ -54,7 +51,8 @@ def test_build_neutral_catalog_deduplicates_only_within_templates(
     assert inventory["tasks"][0]["duplicate_source_ids"] == [duplicate["source_id"]]
     assert inventory["exact_sql_deduplication"]["source_representation_count"] == 3
     assert inventory["exact_sql_deduplication"]["duplicate_representation_count"] == 1
-    assert inventory["database"]["fixture_id"] == "imdb"
+    assert inventory["fixture_id"] == "imdb"
+    assert "database" not in inventory
     assert "job_leakage_audit" not in inventory
     assert not (provenance / "job-overlap.json").exists()
     assert not (tmp_path / "job").exists()
