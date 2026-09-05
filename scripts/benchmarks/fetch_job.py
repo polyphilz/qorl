@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from scripts.benchmarks.build_job_task_inventory import query_manifest_sha256
-from scripts.source_archive import download, extract_source
+from scripts.shared.source_archive import download, extract_source
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from qorl.util.hashing import sha256_file
-from scripts import source_archive
+from scripts.shared import source_archive
 
 
 def test_cached_download_is_verified_without_network(

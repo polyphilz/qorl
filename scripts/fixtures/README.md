@@ -44,6 +44,6 @@ checks, not performance measurements. It reads their selection from the JOB
 manifest. It does not require the raw CSVs or downloaded repository.
 
 The IMDb fetcher and `scripts.benchmarks.fetch_job` share the cached upstream
-repository under `benchmarks/raw/job/`, using `scripts/source_archive.py` for
+repository under `benchmarks/raw/job/`, using `scripts/shared/source_archive.py` for
 checksummed downloads and extraction. The fixture fetcher validates schema/index
 files; the JOB fetcher validates query files and never downloads IMDb table data.

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.util.hashing import sha256_file
-from scripts.source_archive import (
+from scripts.shared.source_archive import (
     TRANSFER_BLOCK_BYTES,
     download,
     extract_source,
