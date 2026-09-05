@@ -81,7 +81,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 else MeasurementProtocolId.RL_TRAINING_V2
             )
             evaluator = RolloutEvaluator(
-                slot.worker,
+                slot.client,
                 active.task_set,
                 task,
                 measurement_protocol=training_protocol(protocol_id),

@@ -6,13 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from qorl.db import pool as pool_module
-from qorl.db.config import DEFAULT_POSTGRES_CONFIG
-from qorl.db.container import PostgresContainer
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.worker import PostgresWorker
-from qorl.measure import calibration
+from qorl.measure import calibration, run
 from qorl.measure.calibration import buffers_stable, observation, selected_tasks
+from qorl.postgres.client import PostgresClient
+from qorl.worker_pool import containers as pool_module
+from qorl.worker_pool.containers import ContainerPool
 from qorl.workload.taskset import TaskSet
 
 
@@ -22,13 +20,14 @@ from qorl.workload.taskset import TaskSet
 )
 def test_calibration_starts_and_records_the_selected_pool(
     repository_root: Path,
-    database_fixture: DatabaseFixture,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     config_id: str,
     worker_count: int,
 ) -> None:
-    fixture = database_fixture
+    archive = tmp_path / "data/imdb.tar.gz"
+    archive.parent.mkdir()
+    archive.write_bytes(b"archive")
     task_set = TaskSet.load(repository_root, "job")
     task_set = replace(
         task_set,
@@ -38,35 +37,34 @@ def test_calibration_starts_and_records_the_selected_pool(
             "task_count": 5,
         },
     )
-    started: list[PostgresContainer] = []
+    started: list[ContainerPool] = []
     executions: list[str] = []
 
     def execute(
-        worker: PostgresWorker, sql: str, timeout_ms: int, *, hint: str | None = None
+        worker: PostgresClient, sql: str, timeout_ms: int, *, hint: str | None = None
     ) -> dict:
         executions.append(sql)
         return explain()
 
-    monkeypatch.setattr(
-        DatabaseFixture, "load", classmethod(lambda cls, repository: fixture)
-    )
     monkeypatch.setattr(TaskSet, "load", classmethod(lambda cls, *args: task_set))
     monkeypatch.setattr(pool_module, "validate_host_topology", lambda resources: None)
     monkeypatch.setattr(
-        PostgresContainer, "start", lambda container: started.append(container)
+        ContainerPool, "start", lambda container: started.append(container)
     )
-    monkeypatch.setattr(PostgresContainer, "capture_environment", lambda *args: None)
-    monkeypatch.setattr(PostgresContainer, "create", lambda container: None)
-    monkeypatch.setattr(PostgresContainer, "restore_archive", lambda container: None)
-    monkeypatch.setattr(PostgresWorker, "explain_analyze", execute)
+    monkeypatch.setattr(run, "capture_environment", lambda *args: None)
+    monkeypatch.setattr(ContainerPool, "create", lambda container: None)
+    monkeypatch.setattr(ContainerPool, "restore", lambda *args: None)
+    monkeypatch.setattr(PostgresClient, "explain_analyze", execute)
 
     output = calibration.calibrate(
         tmp_path,
-        postgres_config_path=repository_root / DEFAULT_POSTGRES_CONFIG,
+        postgres_config_path=repository_root
+        / "docker/postgres/configs/000-pgconf-default",
         pool_config_path=repository_root / "docker/worker_pool/configs" / config_id,
     )
     manifest = json.loads((output / "calibration.json").read_text())
-    assert len(started) == worker_count
+    assert len(started) == 1
+    assert len(started[0].workers) == worker_count
     assert len(executions) == 5 * (2 + 20)
     assert manifest["status"] == "completed"
     assert manifest["completed_task_count"] == 5
@@ -75,7 +73,7 @@ def test_calibration_starts_and_records_the_selected_pool(
     assert manifest["worker_pool"]["id"] == config_id
     assert manifest["worker_pool"]["worker_count"] == worker_count
     assert len(manifest["worker_pool"]["workers"]) == worker_count
-    assert manifest["worker_pool"]["config_sha256"] == started[0].runtime_profile.sha256
+    assert manifest["worker_pool"]["config_sha256"] == started[0].pool_config.sha256
     assert config_id in output.name
     assert "000-pgconf-default" in output.name
 

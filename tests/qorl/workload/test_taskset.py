@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from qorl.db.fixture import FixtureError
-from qorl.workload.taskset import TaskSet
+from qorl.workload.taskset import TaskSet, TaskSetError
 
 
 @pytest.mark.parametrize("workload", ["job", "ceb"])
@@ -46,5 +45,5 @@ def test_inventory_requires_a_logical_fixture_id(
     target.mkdir(parents=True)
     (target / "tasks.json").write_text(json.dumps(source))
 
-    with pytest.raises(FixtureError, match="fixture ID"):
+    with pytest.raises(TaskSetError, match="fixture ID"):
         TaskSet.load(tmp_path, "job")

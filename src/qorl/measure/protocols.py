@@ -1,6 +1,6 @@
 from typing import Any, Protocol
 
-from qorl.db.worker import ExplainResult
+from qorl.postgres.schemas import ExplainResult
 
 
 class QueryExecutor(Protocol):

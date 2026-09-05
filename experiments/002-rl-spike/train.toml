@@ -16,6 +16,8 @@ num_train_gpus = 1
 num_infer_gpus = 1
 
 [env_vars]
+QORL_RL_POSTGRES_CONFIG = "docker/postgres/configs/000-pgconf-default"
+QORL_RL_WORKER_POOL_CONFIG = "docker/worker_pool/configs/002-poolconf-4x8"
 VLLM_USE_FLASHINFER_SAMPLER = "0"
 
 [trainer.model]

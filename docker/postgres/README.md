@@ -24,7 +24,3 @@ Dockerfile also records them as image labels and verifies the compiled
 extension before the image is accepted.
 
 Container resources are defined in [`docker/worker_pool/configs/`](../worker_pool/README.md).
-Calibration, training, and benchmark runs default to `002-poolconf-4x8`;
-fixture construction and restore verification use `000-poolconf-1x32`.
-The Python worker loads the selected configuration and supplies Compose's resource
-variables. Pool selection is independent of the PostgreSQL config.

@@ -54,7 +54,9 @@ Then merge and serve the resulting adapter and run four attempts on each of the
 64 live-gate queries:
 
 ```bash
-uv run python experiments/005-protocol-sft-v2/run.py --gate
+uv run python experiments/005-protocol-sft-v2/run.py --gate \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
 
 ## Frozen provenance

@@ -8,6 +8,7 @@ random structured-action policy on held-out JOB. `run.json` selects
 `random-policy.json`. Both wrappers retain their recorded run prefixes.
 `run.py` reproduces the random structured-action run; the regular `qorl run`
 command uses `run.json` for the untrained model run.
+Both entrypoints require explicit `--postgres-config` and `--pool-config` paths.
 
 The model config's relocation and removal of its unused schema field change its
 file checksum. Historical output manifests retain their original checksums;

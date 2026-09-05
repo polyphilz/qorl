@@ -9,16 +9,18 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
-from qorl.db.config import DEFAULT_POSTGRES_CONFIG, PostgresConfig
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, load_pool
-from qorl.db.worker import PostgresWorker
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
+from qorl.postgres.client import PostgresClient
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import display_path, utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS
 
@@ -53,7 +55,7 @@ def buffers_stable(previous: dict[str, Any], current: dict[str, Any]) -> bool:
 
 
 def calibrate_task(
-    worker: PostgresWorker, task_set: TaskSet, task: dict[str, Any]
+    worker: PostgresClient, task_set: TaskSet, task: dict[str, Any]
 ) -> dict[str, Any]:
     sql = task_set.load_sql(task)
     warmups: list[dict[str, Any]] = []
@@ -133,10 +135,10 @@ def selected_tasks(
 
 
 def calibrate_on_worker(
-    pool: WorkerPool, task_set: TaskSet, task: dict[str, Any]
+    pool: ContainerPool, task_set: TaskSet, task: dict[str, Any]
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
-        result = calibrate_task(slot.worker, task_set, task)
+        result = calibrate_task(slot.client, task_set, task)
         result["worker"] = slot.resources.manifest()
         return slot, result
 
@@ -157,12 +159,12 @@ def calibrate(
     workload: str = "job",
     selection_path: Path | None = None,
     split: str | None = None,
-    postgres_config_path: Path = DEFAULT_POSTGRES_CONFIG,
-    pool_config_path: Path | None = None,
+    *,
+    postgres_config_path: Path,
+    pool_config_path: Path,
 ) -> Path:
-    fixture = DatabaseFixture.load(repository)
     postgres_config = PostgresConfig.load(repository, postgres_config_path)
-    pool_config = load_pool(repository, pool_config_path=pool_config_path)
+    pool_config = load_pool_config(repository, pool_config_path)
     if workload not in {"job", "ceb"}:
         raise RuntimeError(f"unknown calibration workload: {workload}")
     if selection_path is None and split is not None:
@@ -209,8 +211,10 @@ def calibrate(
         "inventory_id": task_set.inventory["inventory_id"],
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity_for(postgres_config),
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "postgres_config": postgres_config.manifest().model_dump(),
         "orchestrator": {
             "qorl_version": __version__,
@@ -250,7 +254,7 @@ def calibrate(
     project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
     run = TaskRun(
-        fixture,
+        repository,
         project_name,
         output_dir,
         manifest_path,
@@ -261,7 +265,7 @@ def calibrate(
     )
 
     def execute_task(
-        pool: WorkerPool, task: dict[str, Any]
+        pool: ContainerPool, task: dict[str, Any]
     ) -> tuple[WorkerSlot, dict[str, Any]]:
         return calibrate_on_worker(pool, task_set, task)
 
@@ -270,7 +274,7 @@ def calibrate(
             for completion in run.map(
                 tasks,
                 execute_task,
-                handled_errors=(WorkerError,),
+                handled_errors=(PostgresError, ContainerError),
             ):
                 task = completion.item
                 task_id = task["task_id"]
@@ -290,7 +294,9 @@ def calibrate(
                     )
                     manifest["completed_task_count"] += 1
                 else:
-                    if not isinstance(completion.error, WorkerError):
+                    if not isinstance(
+                        completion.error, (PostgresError, ContainerError)
+                    ):
                         raise completion.error
                     failures += 1
                     result = failed_task(task, completion.error)

@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from inspect import signature
 from pathlib import Path
 
 import pytest
 
-from qorl.db.resources import (
-    DEFAULT_POOL_CONFIG,
+from qorl.util.hashing import sha256_file
+from qorl.worker_pool.config import (
     cpu_ids,
-    load_runtime_profile,
+    load_pool_config,
     validate_host_topology,
 )
-from qorl.util.hashing import sha256_file
+
+POOL_CONFIG = Path("docker/worker_pool/configs/002-poolconf-4x8")
+
+
+def test_config_path_has_no_default(repository_root: Path) -> None:
+    with pytest.raises(TypeError, match="configured"):
+        signature(load_pool_config).bind(repository_root)
 
 
 @pytest.fixture
@@ -43,10 +50,8 @@ def test_configs_preserve_total_resources_and_resolve_each_worker(
     ports: list[int],
 ) -> None:
     config_dir = Path("docker/worker_pool/configs") / config_id
-    profile = load_runtime_profile(repository_root, config_dir)
-    assert profile == load_runtime_profile(
-        repository_root, config_dir / "poolconf.json"
-    )
+    profile = load_pool_config(repository_root, config_dir)
+    assert profile == load_pool_config(repository_root, config_dir / "poolconf.json")
     assert profile.profile_id == config_id
     assert profile.path == config_dir / "poolconf.json"
     assert profile.sha256 == sha256_file(repository_root / profile.path)
@@ -62,17 +67,9 @@ def test_configs_preserve_total_resources_and_resolve_each_worker(
     for index, worker in enumerate(profile.workers):
         assert worker.index == index
         assert worker.physical_core_count == physical_cores
-        assert worker.compose_environment == {
-            "QORL_POSTGRES_CPUSET": worker.cpuset,
-            "QORL_POSTGRES_CPUSET_MEMS": "0",
-            "QORL_POSTGRES_MEMORY_LIMIT": f"{memory_gib}g",
-            "QORL_POSTGRES_MEMORY_BYTES": str(memory_gib * 1024**3),
-            "QORL_POSTGRES_MEMORY_SWAP_LIMIT": f"{memory_gib}g",
-            "QORL_POSTGRES_MEMORY_SWAP_BYTES": "0",
-            "QORL_POSTGRES_SHM_SIZE": "1g",
-            "QORL_POSTGRES_SHM_BYTES": str(1024**3),
-            "QORL_POSTGRES_PORT": str(ports[index]),
-        }
+        assert worker.memory_bytes == memory_gib * 1024**3
+        assert worker.shm_bytes == 1024**3
+        assert worker.memory_swap_bytes == 0
 
 
 @pytest.mark.parametrize(
@@ -88,13 +85,28 @@ def test_configs_preserve_total_resources_and_resolve_each_worker(
 def test_rejects_invalid_pool_settings(
     repository_root: Path, tmp_path: Path, field: str, value: object, message: str
 ) -> None:
-    raw = json.loads(
-        (repository_root / DEFAULT_POOL_CONFIG / "poolconf.json").read_text()
-    )
+    raw = json.loads((repository_root / POOL_CONFIG / "poolconf.json").read_text())
     raw[field] = value
     (tmp_path / "poolconf.json").write_text(json.dumps(raw))
     with pytest.raises(ValueError, match=message):
-        load_runtime_profile(repository_root, tmp_path)
+        load_pool_config(repository_root, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("config_id", "worker_count"),
+    [("000-poolconf-1x32", 1), ("001-poolconf-2x16", 2), ("002-poolconf-4x8", 4)],
+)
+def test_pool_loader_uses_only_the_explicit_path(
+    repository_root: Path,
+    config_id: str,
+    worker_count: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured = Path("docker/worker_pool/configs") / config_id
+    monkeypatch.setenv("QORL_RL_WORKER_POOL_CONFIG", "missing-config")
+    explicit = load_pool_config(repository_root, configured)
+    assert len(explicit.workers) == worker_count
+    assert explicit.profile_id == config_id
 
 
 @pytest.mark.parametrize(
@@ -110,19 +122,17 @@ def test_rejects_invalid_pool_settings(
 def test_rejects_invalid_worker_settings(
     repository_root: Path, tmp_path: Path, field: str, value: object, message: str
 ) -> None:
-    raw = json.loads(
-        (repository_root / DEFAULT_POOL_CONFIG / "poolconf.json").read_text()
-    )
+    raw = json.loads((repository_root / POOL_CONFIG / "poolconf.json").read_text())
     raw["workers"][1][field] = value
     (tmp_path / "poolconf.json").write_text(json.dumps(raw))
     with pytest.raises(ValueError, match=message):
-        load_runtime_profile(repository_root, tmp_path)
+        load_pool_config(repository_root, tmp_path)
 
 
 def test_topology_rejects_incorrect_core_counts_and_shared_siblings(
     repository_root: Path, cpu_topology: Path
 ) -> None:
-    profile = load_runtime_profile(repository_root, DEFAULT_POOL_CONFIG)
+    profile = load_pool_config(repository_root, POOL_CONFIG)
     with pytest.raises(RuntimeError, match="physical cores"):
         validate_host_topology(
             (replace(profile.workers[0], cpuset="0-1"),), cpu_topology

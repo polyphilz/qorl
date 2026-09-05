@@ -26,3 +26,6 @@ The training and concurrency configs point to `docker/worker_pool/configs/002-po
 after the pool-config refactor. Its resource allocation matches the recorded run;
 a new invocation records the new pool ID and checksum. Historical outputs retain
 their original provenance.
+
+Both launch configs explicitly select `000-pgconf-default` through
+`QORL_RL_POSTGRES_CONFIG`; no PostgreSQL configuration is inferred at startup.

@@ -10,12 +10,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import MeasurementProtocolId, RunStatus
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.sft.filter import load_filtered_sample
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -41,6 +40,10 @@ from qorl.sft.schemas import (
 )
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts
 
@@ -76,7 +79,7 @@ def measurement_path(output: Path, record: FilterRecord) -> Path:
 
 
 def measure_once(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     task: JsonObject,
     request: MeasurementRequest,
@@ -85,7 +88,7 @@ def measure_once(
 ) -> tuple[WorkerSlot, MeasurementAttempt]:
     with pool.claim_worker() as slot:
         evaluator = RolloutEvaluator(
-            slot.worker,
+            slot.client,
             task_set,
             task,
             measurement_protocol=training_protocol(
@@ -233,6 +236,8 @@ def main() -> None:
         description="Measure accepted protocol SFT v2 candidates."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
         "--config",
         type=Path,
@@ -249,6 +254,8 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     dataset = (repository / arguments.dataset).resolve()
     config_path = (repository / arguments.config).resolve()
     timeout_path = (repository / arguments.timeouts).resolve()
@@ -281,7 +288,6 @@ def main() -> None:
             records.append((record, source))
             per_task[record.task_id] += 1
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     task_values = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
     tasks = {
@@ -289,7 +295,10 @@ def main() -> None:
         for task in task_values
     }
     timeouts = CalibratedTimeouts.load(
-        repository, timeout_path, task_set, fixture.runtime_identity
+        repository,
+        timeout_path,
+        task_set,
+        postgres_config.runtime_identity().model_dump(exclude_none=True),
     )
     manifest_path = dataset / "measurement.json"
     previous = (
@@ -320,12 +329,14 @@ def main() -> None:
     manifest_wire = manifest.to_wire()
     write_json(manifest_path, manifest_wire)
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-sft-v2-measure-{os.getpid()}",
         dataset,
         manifest_path,
         manifest_wire,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=dataset / "measurement-environment",
     )
 
@@ -349,7 +360,7 @@ def main() -> None:
             measurements[key] = measurement
 
     def execute(
-        pool: WorkerPool, request: MeasurementRequest
+        pool: ContainerPool, request: MeasurementRequest
     ) -> tuple[WorkerSlot, MeasurementAttempt]:
         return measure_once(
             pool,
@@ -398,7 +409,7 @@ def main() -> None:
             initial,
             execute,
             concurrency=config.measurement.concurrency,
-            handled_errors=(WorkerError,),
+            handled_errors=(PostgresError, ContainerError),
         ):
             if completion.error is not None:
                 record_failure(completion.item, completion.error)
@@ -468,7 +479,7 @@ def main() -> None:
             remeasure,
             execute,
             concurrency=config.measurement.concurrency,
-            handled_errors=(WorkerError,),
+            handled_errors=(PostgresError, ContainerError),
         ):
             if completion.error is not None:
                 record_failure(completion.item, completion.error)

@@ -1,25 +1,19 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from dataclasses import dataclass
+from typing import Any
 
-MAX_TCP_PORT = 65_535
+from pydantic import BaseModel, ConfigDict
+
+
+@dataclass(frozen=True)
+class ExplainResult:
+    document: dict[str, Any]
+    hint_diagnostics: str
 
 
 class DatabaseRecord(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-class PoolWorkerConfig(DatabaseRecord):
-    cpuset: str = Field(min_length=1)
-    physical_core_count: int = Field(ge=1)
-    port: int = Field(ge=1, le=MAX_TCP_PORT)
-
-
-class WorkerPoolConfig(DatabaseRecord):
-    memory_limit: str
-    shm_size: str
-    cpuset_mems: str = Field(min_length=1)
-    workers: list[PoolWorkerConfig] = Field(min_length=1)
 
 
 class PostgreSQLExpected(DatabaseRecord):

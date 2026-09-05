@@ -6,12 +6,9 @@ import pytest
 from tests.qorl.sft.factories import baseline, sample
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.db.container import PostgresContainer
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
-from qorl.db.resources import DEFAULT_POOL_CONFIG, load_runtime_profile
-from qorl.db.worker import PostgresWorker
 from qorl.measure.schemas import Baseline, RunStatus
+from qorl.postgres.client import PostgresClient
+from qorl.postgres.config import PostgresConfig
 from qorl.sft.sample import (
     PlanValidationEvaluator,
     SampleRequest,
@@ -25,6 +22,8 @@ from qorl.sft.schemas import (
     SamplingMode,
     load_record,
 )
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
 from qorl.workload.taskset import TaskSet
 
 
@@ -53,7 +52,6 @@ def test_normal_and_default_best_sampling_caps_are_enforced() -> None:
 
 def test_unexpected_rollout_error_is_recorded(
     repository_root: Path,
-    database_fixture: DatabaseFixture,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     default = baseline()
@@ -68,7 +66,7 @@ def test_unexpected_rollout_error_is_recorded(
 
     monkeypatch.setattr(PlanValidationEvaluator, "start", start)
     monkeypatch.setattr(QoAgentPolicy, "search", fail)
-    monkeypatch.setattr(PostgresWorker, "task_indexes", lambda *_: {})
+    monkeypatch.setattr(PostgresClient, "task_indexes", lambda *_: {})
     agent_config = QoAgentConfig(
         model="model",
         revision="revision",
@@ -94,15 +92,16 @@ def test_unexpected_rollout_error_is_recorded(
         seed=1,
         sampling_mode=SamplingMode.NORMAL,
     )
-    profile = load_runtime_profile(repository_root, DEFAULT_POOL_CONFIG)
-    resources = profile.workers[0]
-    container = PostgresContainer(
-        database_fixture, "test-sft-sample", profile, resources
+    profile = load_pool_config(
+        repository_root, Path("docker/worker_pool/configs/002-poolconf-4x8")
     )
-    pool = WorkerPool(
-        (WorkerSlot(resources, container, PostgresWorker(container)),),
-        "test-pool",
-        "test-sha",
+    pool = ContainerPool(
+        repository_root,
+        "test-sft-sample",
+        profile,
+        PostgresConfig.load(
+            repository_root, Path("docker/postgres/configs/000-pgconf-default")
+        ),
     )
 
     _, record = evaluate_request(

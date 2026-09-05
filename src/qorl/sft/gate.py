@@ -11,11 +11,10 @@ from pathlib import Path
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.types import StopReason
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.sft.assemble import action_families
 from qorl.sft.sample import PlanValidationEvaluator, file_identity
 from qorl.sft.schemas import (
@@ -35,6 +34,9 @@ from qorl.sft.schemas import (
     require_string,
 )
 from qorl.util.io import utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 
 
@@ -55,13 +57,13 @@ def gate_seed(dataset_seed: int, task_id: str, sample: int) -> int:
 
 
 def evaluate_request(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     request: GateRequest,
     config: QoAgentConfig,
 ) -> tuple[WorkerSlot, GateRollout]:
     with pool.claim_worker() as slot:
-        evaluator = PlanValidationEvaluator(slot.worker, task_set, request.task)
+        evaluator = PlanValidationEvaluator(slot.client, task_set, request.task)
         try:
             evaluator.start()
             trace = JSON_OBJECT_ADAPTER.validate_python(
@@ -111,7 +113,7 @@ def evaluate_request(
                 action_families=families,
                 error=None,
             )
-        except (ModelError, WorkerError, RuntimeError) as error:
+        except (ModelError, PostgresError, RuntimeError) as error:
             return slot, GateRollout(
                 task_id=request.task_id,
                 template_id=request.template_id,
@@ -155,6 +157,8 @@ def main() -> None:
         description="Evaluate SFT v2 plan validity and novelty on its live gate."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
         "--config",
         type=Path,
@@ -169,6 +173,8 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
     config = load_record(config_path, DatasetConfig)
@@ -181,7 +187,6 @@ def main() -> None:
         QoAgentPolicy(agent_config).preflight()
     )
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
     by_id = {
@@ -214,18 +219,20 @@ def main() -> None:
     report_wire = provisional.to_wire()
     write_json(output, report_wire)
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-sft-v2-gate-{os.getpid()}",
         output.parent,
         output,
         report_wire,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=output.parent / "live-gate-environment",
     )
     records: list[GateRollout] = []
 
     def execute(
-        pool: WorkerPool, request: GateRequest
+        pool: ContainerPool, request: GateRequest
     ) -> tuple[WorkerSlot, GateRollout]:
         return evaluate_request(pool, task_set, request, agent_config)
 

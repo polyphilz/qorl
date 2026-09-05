@@ -9,11 +9,13 @@ from typing import Any
 from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import ToolName
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import start_pool
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.plans.verify import plan_join_tree
+from qorl.postgres.config import PostgresConfig
 from qorl.sft.validate import validate_protocol_demo
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import start_pool
+from qorl.worker_pool.schemas import PoolConfig
 from qorl.workload.taskset import TaskSet
 
 DEMONSTRATION_ID = "protocol-demo-v1"
@@ -85,8 +87,9 @@ def call_tool(
     return result, finished
 
 
-def build_demo(repository: Path) -> dict[str, Any]:
-    fixture = DatabaseFixture.load(repository)
+def build_demo(
+    repository: Path, *, postgres_config: PostgresConfig, pool_config: PoolConfig
+) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
     task = next(
         (item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID),
@@ -96,10 +99,18 @@ def build_demo(repository: Path) -> dict[str, Any]:
         raise RuntimeError(f"missing pinned CEB task: {TASK_ID}")
 
     with (
-        contextlib.closing(start_pool(fixture, "qorl-protocol-demo")) as pool,
+        contextlib.closing(
+            start_pool(
+                repository,
+                "qorl-protocol-demo",
+                repository / "data/imdb.tar.gz",
+                postgres_config=postgres_config,
+                pool_config=pool_config,
+            )
+        ) as pool,
         pool.claim_worker() as slot,
     ):
-        worker = slot.worker
+        worker = slot.client
         evaluator = RolloutEvaluator(worker, task_set, task)
         evaluator.start()
         interface = AgentInterface.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
@@ -157,8 +168,10 @@ def build_demo(repository: Path) -> dict[str, Any]:
                 "template_id": task["template_id"],
                 "partition": task["partition"],
                 "sql_sha256": task["sql_sha256"],
-                "data_identity": fixture.data_identity,
-                "runtime_identity": fixture.runtime_identity,
+                "data_identity": task_set.data_identity,
+                "runtime_identity": postgres_config.runtime_identity().model_dump(
+                    exclude_none=True
+                ),
                 "maximum_model_turns": MAXIMUM_MODEL_TURNS,
                 "call_sequence": CALL_SEQUENCE,
             },
@@ -180,6 +193,8 @@ def main() -> None:
         description="Build one live, deterministic CEB demonstration."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
         "--output",
         type=Path,
@@ -191,7 +206,11 @@ def main() -> None:
     if not output.is_absolute():
         output = repository / output
 
-    document = build_demo(repository)
+    document = build_demo(
+        repository,
+        postgres_config=PostgresConfig.load(repository, arguments.postgres_config),
+        pool_config=load_pool_config(repository, arguments.pool_config),
+    )
     summary = validate_protocol_demo(document, repository)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")

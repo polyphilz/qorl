@@ -7,7 +7,7 @@
   "query_source": {
     "repository_url": "https://github.com/gregrahn/join-order-benchmark",
     "commit": "a39603662e023e449cb2121997a5034df9e02ebf",
-    "source_manifest_sha256": "51a6a3144441368ac88b7d4e14f6cda8c65deb0cfe13cc77ab9111930866865c",
+    "source_manifest_sha256": "1c32e64ab76d85f63a4751ae6cf72cdcb8148fbea30750a64b4868613595fc3a",
     "query_manifest_sha256": "71175e8e0a4390cc5d62a2be6fbf7788c614edccd3591539b06922ffc4e6d210"
   },
   "structure_extraction": {

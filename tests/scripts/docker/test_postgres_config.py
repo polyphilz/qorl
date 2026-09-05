@@ -20,8 +20,8 @@ class TestPostgresConfig:
         assert "imdb-source" not in compose
         assert "QORL_IMDB_FIXTURE_ID" not in compose
         assert not (repository_root / "compose.fixture-build.yaml").exists()
-        launcher = (repository_root / "src/qorl/db/container.py").read_text()
-        assert 'str(fixture.repository / "compose.yaml")' in launcher
+        launcher = (repository_root / "src/qorl/worker_pool/containers.py").read_text()
+        assert 'str(self.repository / "compose.yaml")' in launcher
 
     def test_each_config_has_only_the_three_declared_files(
         self, repository_root: Path
@@ -50,7 +50,7 @@ class TestPostgresConfig:
             'POOL_CONFIG = Path("docker/worker_pool/configs/000-poolconf-1x32")'
             in script
         )
-        assert "PostgresContainer(" in script
+        assert "ContainerPool(" in script
         assert "scripts/docker" not in script
 
     def test_configs_define_every_prompt_visible_planner_setting(

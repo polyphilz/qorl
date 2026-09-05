@@ -1,33 +1,28 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
-from dataclasses import dataclass
+from collections.abc import Callable
 from typing import Any
 
-from qorl.db.container import PostgresContainer
-from qorl.db.exceptions import QueryTimeout, WorkerError
+from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.schemas import ExplainResult
 
 
-@dataclass(frozen=True)
-class ExplainResult:
-    document: dict[str, Any]
-    hint_diagnostics: str
+class PostgresClient:
+    """Execute inspected and measured SQL using a supplied command runner."""
 
-
-class PostgresWorker:
-    """Execute inspected and measured SQL against one running container."""
-
-    def __init__(self, container: PostgresContainer) -> None:
-        self._container = container
-        self.fixture = container.fixture
+    def __init__(
+        self,
+        run_command: Callable[
+            [list[str], str | None], subprocess.CompletedProcess[str]
+        ],
+    ) -> None:
+        self._run_command = run_command
         self.explain_calls = 0
         self.explain_analyze_calls = 0
         self._settings_cache: dict[str, str] = {}
-
-    @property
-    def container(self) -> str:
-        return self._container.container
 
     def execute(
         self,
@@ -36,11 +31,14 @@ class PostgresWorker:
         input_text: str | None = None,
         check: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        return self._container.execute(
-            command,
-            input_text=input_text,
-            check=check,
-        )
+        completed = self._run_command(command, input_text)
+        if check and completed.returncode != 0:
+            detail = completed.stderr.strip() or completed.stdout.strip()
+            raise PostgresError(
+                f"command failed ({completed.returncode}): "
+                f"{' '.join(completed.args)}\n{detail}"
+            )
+        return completed
 
     def admin_sql(self, sql: str) -> str:
         shell = r"""
@@ -49,12 +47,8 @@ exec psql \
     --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
     --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
 """
-        return self._container.command(
+        return self.execute(
             [
-                "docker",
-                "exec",
-                "--interactive",
-                self.container,
                 "bash",
                 "-Eeuo",
                 "pipefail",
@@ -62,9 +56,11 @@ exec psql \
                 shell,
             ],
             input_text=sql,
-        )
+        ).stdout
 
-    def runner_sql(self, sql: str) -> str:
+    def runner_sql(
+        self, sql: str, *, csv: bool = False, application_name: str = "qorl-worker"
+    ) -> str:
         shell = r"""
 exec env \
     PGPASSWORD="$QORL_RUNNER_PASSWORD" \
@@ -75,12 +71,13 @@ exec env \
         --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
         --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
 """
-        return self._container.command(
+        shell = shell.replace(
+            "PGAPPNAME=qorl-worker", f"PGAPPNAME={shlex.quote(application_name)}"
+        )
+        if csv:
+            shell = shell.replace("--tuples-only --no-align", "--csv")
+        return self.execute(
             [
-                "docker",
-                "exec",
-                "--interactive",
-                self.container,
                 "bash",
                 "-Eeuo",
                 "pipefail",
@@ -88,7 +85,7 @@ exec env \
                 shell,
             ],
             input_text=sql,
-        )
+        ).stdout
 
     def settings(self, names: set[str]) -> dict[str, str]:
         missing = names - self._settings_cache.keys()
@@ -103,7 +100,7 @@ exec env \
         ).strip()
         values = json.loads(output)
         if not isinstance(values, dict) or set(values) != missing:
-            raise WorkerError("PostgreSQL planner-setting response is incomplete")
+            raise PostgresError("PostgreSQL planner-setting response is incomplete")
         self._settings_cache.update({name: str(values[name]) for name in ordered})
         return {name: self._settings_cache[name] for name in sorted(names)}
 
@@ -139,10 +136,6 @@ exec env \
         try:
             completed = self.execute(
                 [
-                    "docker",
-                    "exec",
-                    "--interactive",
-                    self.container,
                     "bash",
                     "-Eeuo",
                     "pipefail",
@@ -156,7 +149,7 @@ exec env \
                     + "\n"
                 ),
             )
-        except WorkerError as error:
+        except PostgresError as error:
             if "canceling statement due to statement timeout" in str(error):
                 raise QueryTimeout(timeout_ms) from error
             raise
@@ -164,7 +157,7 @@ exec env \
             parsed = json.loads(completed.stdout)
             return ExplainResult(parsed[0], completed.stderr)
         except (json.JSONDecodeError, IndexError, TypeError) as error:
-            raise WorkerError("PostgreSQL returned invalid EXPLAIN JSON") from error
+            raise PostgresError("PostgreSQL returned invalid EXPLAIN JSON") from error
 
     def explain_analyze(self, sql: str, timeout_ms: int) -> dict[str, Any]:
         return self.explain(sql, timeout_ms, analyze=True).document

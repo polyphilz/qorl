@@ -9,37 +9,24 @@ import pytest
 
 from qorl.measure import run
 from qorl.measure.run import TaskRun
-
-
-class FakeContainer:
-    def __init__(self) -> None:
-        self.captures: list[tuple[Path, str]] = []
-        self.closed = False
-
-    def capture_environment(self, path: Path, phase: str) -> None:
-        self.captures.append((path, phase))
-
-    def close(self) -> None:
-        self.closed = True
+from qorl.postgres.config import PostgresConfig
+from qorl.worker_pool.schemas import PoolConfig
 
 
 class FakePool:
     def __init__(self) -> None:
-        self.containers = [FakeContainer(), FakeContainer()]
         self.workers = tuple(
-            SimpleNamespace(
-                resources=SimpleNamespace(index=index),
-                container=container,
-            )
-            for index, container in enumerate(self.containers)
+            SimpleNamespace(resources=SimpleNamespace(index=index))
+            for index in range(2)
         )
+        self.captures: list[tuple[int, Path, str]] = []
+        self.closed = False
 
     def manifest(self) -> dict[str, object]:
         return {"worker_count": len(self.workers)}
 
     def close(self) -> None:
-        for container in self.containers:
-            container.close()
+        self.closed = True
 
 
 class ImmediateExecutor:
@@ -66,18 +53,30 @@ class ImmediateExecutor:
 
 
 def test_task_run_owns_pool_capture_manifest_and_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    postgres_config: PostgresConfig,
+    pool_config: PoolConfig,
 ) -> None:
     pool = FakePool()
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
+    monkeypatch.setattr(
+        run,
+        "capture_environment",
+        lambda pool, slot, path, phase: pool.captures.append(
+            (slot.resources.index, path, phase)
+        ),
+    )
     manifest: dict[str, object] = {}
     task_run = TaskRun(
-        SimpleNamespace(),
+        tmp_path,
         "test-run",
         tmp_path,
         tmp_path / "report.json",
         manifest,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=tmp_path / "environment",
     )
 
@@ -89,49 +88,73 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
         4,
     ]
     assert manifest["database_pool"] == {"worker_count": 2}
-    assert all(container.closed for container in pool.containers)
-    assert pool.containers[0].captures == [
+    assert pool.closed
+    assert [(path, phase) for index, path, phase in pool.captures if index == 0] == [
         (tmp_path / "environment/worker-0", "pre"),
         (tmp_path / "environment/worker-0", "post"),
     ]
 
 
 def test_task_run_can_leave_capture_to_each_policy(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    postgres_config: PostgresConfig,
+    pool_config: PoolConfig,
 ) -> None:
     pool = FakePool()
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
+    monkeypatch.setattr(
+        run,
+        "capture_environment",
+        lambda pool, slot, path, phase: pool.captures.append(
+            (slot.resources.index, path, phase)
+        ),
+    )
     task_run = TaskRun(
-        SimpleNamespace(),
+        tmp_path,
         "test-run",
         tmp_path,
         tmp_path / "report.json",
         {},
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         capture_environment=False,
     )
 
     with task_run:
         pass
 
-    assert all(not container.captures for container in pool.containers)
-    assert all(container.closed for container in pool.containers)
+    assert not pool.captures
+    assert pool.closed
 
 
 def test_task_run_cancels_pending_tasks_after_an_unhandled_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    postgres_config: PostgresConfig,
+    pool_config: PoolConfig,
 ) -> None:
     pool = FakePool()
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
+    monkeypatch.setattr(
+        run,
+        "capture_environment",
+        lambda pool, slot, path, phase: pool.captures.append(
+            (slot.resources.index, path, phase)
+        ),
+    )
     monkeypatch.setattr(run, "ThreadPoolExecutor", ImmediateExecutor)
     monkeypatch.setattr(run, "as_completed", lambda futures: iter(futures))
     task_run = TaskRun(
-        SimpleNamespace(),
+        tmp_path,
         "test-run",
         tmp_path,
         tmp_path / "report.json",
         {},
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         capture_environment=False,
     )
 

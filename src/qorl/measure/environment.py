@@ -13,14 +13,17 @@ import json
 import os
 import platform
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from qorl.db.config import PostgresConfig
-from qorl.db.resources import load_runtime_profile
+from qorl.postgres.config import PostgresConfig
 from qorl.util.hashing import sha256_file
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.schemas import WorkerSlot
 
 
 def run(command: list[str], *, check: bool = True) -> str:
@@ -294,6 +297,28 @@ def capture_postgres(container: str, mode: str) -> str:
     )
 
 
+def capture_environment(
+    pool: ContainerPool, slot: WorkerSlot, output_dir: Path, phase: str
+) -> None:
+    pool.command(
+        [
+            sys.executable,
+            "-m",
+            "qorl.measure.environment",
+            "--container",
+            slot.container_id,
+            "--output-dir",
+            str(output_dir),
+            "--phase",
+            phase,
+            "--runtime-profile",
+            str(pool.repository / pool.pool_config.path),
+            "--postgres-config",
+            str(pool.postgres_config.path),
+        ]
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True, help="container name or ID")
@@ -304,7 +329,7 @@ def main() -> None:
     args = parser.parse_args()
 
     container = args.container
-    profile = load_runtime_profile(Path.cwd(), args.runtime_profile)
+    profile = load_pool_config(Path.cwd(), args.runtime_profile)
     profile_path = (Path.cwd() / profile.path).resolve()
     postgres_config = PostgresConfig.load(Path.cwd(), args.postgres_config)
     try:

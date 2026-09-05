@@ -19,11 +19,10 @@ from qorl.agent.client import (
     OpenAIModelClient,
 )
 from qorl.agent.types import ToolName
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Candidate, RunStatus
 from qorl.plans.verify import contains_node
+from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import action_families, canonical_sha256
 from qorl.sft.filter import rejection_reason
 from qorl.sft.sample import PlanValidationEvaluator, selected_tasks
@@ -53,6 +52,9 @@ from qorl.sft.schemas import (
 )
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts
 
@@ -387,6 +389,7 @@ def scripted_messages(
 
 
 def replay_action(
+    pool: ContainerPool,
     slot: WorkerSlot,
     task_set: TaskSet,
     task: JsonObject,
@@ -397,7 +400,7 @@ def replay_action(
 ) -> SampleRecord:
     task_id = require_string(task.get("task_id"), "task.task_id")
     evaluator = PlanValidationEvaluator(
-        slot.worker,
+        slot.client,
         task_set,
         task,
         timeouts.task(task_id),
@@ -426,12 +429,8 @@ def replay_action(
         steered=False,
         guidance=None,
         worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
-        data_identity=JSON_OBJECT_ADAPTER.validate_python(
-            slot.worker.fixture.data_identity
-        ),
-        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(
-            slot.worker.fixture.runtime_identity
-        ),
+        data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
         sampler=prefix.sample.sampler,
         default=baseline,
         candidates=evaluator.candidates,
@@ -558,7 +557,7 @@ def generate_attempts(
 
 
 def generate_task(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     task: TeacherTask,
     family: ActionFamily,
@@ -574,6 +573,7 @@ def generate_task(
 
         def replay(decision: TeacherDecision) -> SampleRecord:
             return replay_action(
+                pool,
                 slot,
                 task_set,
                 task.task,
@@ -693,6 +693,8 @@ def main() -> None:
         description="Generate validated Fable continuations for protocol SFT v2."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path)
+    parser.add_argument("--pool-config", type=Path)
     parser.add_argument(
         "--config",
         type=Path,
@@ -738,6 +740,11 @@ def main() -> None:
         print(json.dumps(manifest.summary.to_wire(), indent=2, sort_keys=True))
         return
 
+    if arguments.postgres_config is None or arguments.pool_config is None:
+        parser.error("--postgres-config and --pool-config are required for generation")
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
+
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY is required")
@@ -765,7 +772,6 @@ def main() -> None:
         record.task_id for record in student_records if record.accepted
     }
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     tasks = selected_tasks(task_set, selection, "sampling")
     paths_by_task: dict[str, list[Path]] = {}
@@ -812,7 +818,10 @@ def main() -> None:
     manifest_wire = initial_manifest.to_wire()
     write_json(previous_manifest_path, manifest_wire)
     timeouts = CalibratedTimeouts.load(
-        repository, timeout_path, task_set, fixture.runtime_identity
+        repository,
+        timeout_path,
+        task_set,
+        postgres_config.runtime_identity().model_dump(exclude_none=True),
     )
     client = OpenAIModelClient(
         teacher_config.base_url,
@@ -820,12 +829,14 @@ def main() -> None:
         api_key=api_key,
     )
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-sft-v2-teacher-{os.getpid()}",
         dataset / "teacher-runtime",
         previous_manifest_path,
         manifest_wire,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=dataset / "teacher-runtime/environment",
     )
     used_task_ids = {record.task_id for record in existing}

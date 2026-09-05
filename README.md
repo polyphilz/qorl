@@ -14,13 +14,13 @@ database fixture identifier is `imdb`.
 
 ```bash
 uv sync
-uv run qorl calibrate
-uv run qorl calibrate ceb
-uv run qorl run
+uv run qorl calibrate job \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
 
 `calibrate` measures all 113 JOB queries; `calibrate ceb` measures the complete
-CEB workload. Both default to the four-worker PostgreSQL pool used by training,
+CEB workload. Both require explicit PostgreSQL and pool configurations,
 record results and environment identity under `outputs/calibration/`, and remove
 their workers afterward. Select one, two, or four containers with `--pool-config`:
 
@@ -38,14 +38,18 @@ manifest contains multiple splits, select one explicitly:
 
 ```bash
 uv run qorl calibrate ceb \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8 \
   --selection experiments/004-rl-run-v2/selection.json
 uv run qorl calibrate ceb \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8 \
   --selection path/to/selection.json --split validation
 ```
 
 `run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
 shared policy in `model/configs/000-modelconf/modelconf.json`. It runs one JOB task per worker,
-using the default four-worker pool or the selected `--pool-config`,
+using the required `--postgres-config` and `--pool-config` selections,
 then records trusted results plus the complete policy trace under
 `outputs/runs/`. The default policy is the untrained
 `empero-ai/Qwen3.8-4B-Distill` `qo-agent` served through a local
@@ -62,8 +66,16 @@ uv pip install --python .venv-vllm/bin/python 'vllm==0.27.1'
 The SFT gate and live-validation runners manage their model servers. A direct `qorl run`
 requires a server matching its selected policy configuration.
 
+```bash
+uv run qorl run \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
+```
+
 To reproduce the frozen random baseline instead:
 
 ```bash
-uv run python experiments/000-vanilla-baseline/run.py
+uv run python experiments/000-vanilla-baseline/run.py \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```

@@ -5,14 +5,13 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from qorl.db.schemas import (
+from qorl.postgres.schemas import (
     PostgresConfigExpected,
     PostgresConfigManifest,
     RuntimeIdentity,
 )
 from qorl.util.hashing import sha256_file
 
-DEFAULT_POSTGRES_CONFIG = Path("docker/postgres/configs/000-pgconf-default")
 POSTGRES_CONFIG_SCHEMA_VERSION = 1
 
 
@@ -30,7 +29,7 @@ class PostgresConfig:
     def load(
         cls,
         repository: Path,
-        configured: Path = DEFAULT_POSTGRES_CONFIG,
+        configured: Path,
     ) -> PostgresConfig:
         repository = repository.resolve()
         path = configured if configured.is_absolute() else repository / configured
@@ -70,19 +69,6 @@ class PostgresConfig:
     @property
     def config_id(self) -> str:
         return self.expected.postgres_config_id
-
-    @property
-    def compose_environment(self) -> dict[str, str]:
-        return {
-            "QORL_POSTGRES_CONFIG_FILE": str(self.pg_conf_path),
-            "QORL_POSTGRES_EXPECTED_FILE": str(self.expected_path),
-            "QORL_POSTGRES_ASSERT_SCRIPT": str(
-                self.repository / "docker/postgres/scripts/assert-config.sh"
-            ),
-            "QORL_POSTGRES_DUMP_SCRIPT": str(
-                self.repository / "docker/postgres/scripts/dump-postgres-state.sh"
-            ),
-        }
 
     def manifest(self) -> PostgresConfigManifest:
         try:

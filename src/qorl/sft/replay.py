@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from qorl.agent.types import ToolName
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import start_pool
 from qorl.measure.schemas import RunStatus
 from qorl.plans.fingerprint import plan_sha256
+from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import load_documents
 from qorl.sft.sample import PlanValidationEvaluator
 from qorl.util.hashing import sha256_file
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import start_pool
 from qorl.workload.taskset import TaskSet
 
 
@@ -33,6 +34,8 @@ def main() -> None:
         description="Replay one tool-use SFT example per CEB template."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
         "--dataset", type=Path, default=Path("outputs/sft/protocol-sft-v1")
     )
@@ -43,6 +46,8 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     dataset = arguments.dataset
     output = arguments.output
     if not dataset.is_absolute():
@@ -50,7 +55,6 @@ def main() -> None:
     if not output.is_absolute():
         output = repository / output
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
 
@@ -61,10 +65,18 @@ def main() -> None:
 
     records = []
     with (
-        contextlib.closing(start_pool(fixture, "qorl-protocol-sft-replay")) as pool,
+        contextlib.closing(
+            start_pool(
+                repository,
+                "qorl-protocol-sft-replay",
+                repository / "data/imdb.tar.gz",
+                postgres_config=postgres_config,
+                pool_config=pool_config,
+            )
+        ) as pool,
         pool.claim_worker() as slot,
     ):
-        worker = slot.worker
+        worker = slot.client
         for template, document in sorted(samples.items()):
             task_id = document["metadata"]["task_id"]
             actions = candidate_actions(document)
@@ -120,8 +132,10 @@ def main() -> None:
         "status": RunStatus.PASSED.value,
         "selection": "lowest dataset ordinal per template",
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "templates": len(records),
         "candidates": sum(len(record["candidate_ids"]) for record in records),
         "records": records,

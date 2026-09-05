@@ -13,23 +13,7 @@ container; the worker list determines the container count.
 All three allocate 32 GiB and 16 physical cores in total, including both hardware
 threads of each core. `physical_core_count` checks the intended allocation against
 the host topology. `cpuset_mems` selects NUMA node 0. Each container has a 1 GiB
-`/dev/shm` limit within its RAM allowance and has swap disabled. `/dev/shm` is
-separate from PostgreSQL's `shared_buffers` setting.
-
-From the repository root, select container resources independently of PostgreSQL
-settings:
-
-```bash
-uv run qorl calibrate job \
-  --pool-config docker/worker_pool/configs/001-poolconf-2x16 \
-  --postgres-config docker/postgres/configs/001-pgconf
-```
-
-`qorl run` also accepts `--pool-config`. Both commands accept either the directory
-or its `poolconf.json`. An explicit option takes precedence over
-`QORL_RL_WORKER_POOL_CONFIG`; otherwise that environment variable selects the pool
-for all harnesses, including training and SFT. The default is `002-poolconf-4x8`.
-Fixture construction and restore verification use `000-poolconf-1x32`.
+`/dev/shm` limit within its RAM allowance and has swap disabled.
 
 Each worker gets its own Compose project and restored database volume. The loader
 validates the config, rejects overlapping CPUs or duplicate ports, and checks the

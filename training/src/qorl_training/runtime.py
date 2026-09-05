@@ -4,29 +4,30 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import (
-    WorkerPool,
-    WorkerSlot,
-    start_pool,
-)
+from qorl.postgres.config import PostgresConfig
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.schemas import PoolConfig
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts
 
 TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"
+POSTGRES_CONFIG_ENV = "QORL_RL_POSTGRES_CONFIG"
+POOL_CONFIG_ENV = "QORL_RL_WORKER_POOL_CONFIG"
 
 
-class QorlRuntime(WorkerPool):
+class QorlRuntime(ContainerPool):
     def __init__(
         self,
         task_set: TaskSet,
-        workers: tuple[WorkerSlot, ...],
-        pool_id: str,
-        pool_config_sha256: str,
-        pool_config_path: str | None = None,
+        pool_config: PoolConfig,
+        project_name: str,
+        postgres_config: PostgresConfig,
         calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
-        super().__init__(workers, pool_id, pool_config_sha256, pool_config_path)
+        super().__init__(
+            task_set.repository, project_name, pool_config, postgres_config
+        )
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
         self.data_identity = task_set.data_identity
@@ -45,35 +46,39 @@ def start(
     global _runtime
     if _runtime is not None:
         raise RuntimeError("QORL runtime is already started")
-    fixture = DatabaseFixture.load(repository)
-    pool: WorkerPool | None = None
+    for name in (POSTGRES_CONFIG_ENV, POOL_CONFIG_ENV):
+        if not environment.get(name, "").strip():
+            raise RuntimeError(f"{name} must specify a configuration path")
+    postgres_config = PostgresConfig.load(
+        repository, Path(environment[POSTGRES_CONFIG_ENV])
+    )
+    pool_config = load_pool_config(repository, Path(environment[POOL_CONFIG_ENV]))
+    runtime = QorlRuntime(
+        TaskSet.load(repository, "ceb"),
+        pool_config,
+        f"qorl-rl-{os.getpid()}",
+        postgres_config,
+    )
     try:
-        pool = start_pool(fixture, f"qorl-rl-{os.getpid()}", environment)
-        task_set = TaskSet.load(repository, "ceb")
+        runtime.create()
+        runtime.restore(repository / "data/imdb.tar.gz")
+        runtime.start()
         configured_timeouts = environment.get(TIMEOUT_MANIFEST_ENV)
-        calibrated_timeouts = (
+        runtime.calibrated_timeouts = (
             CalibratedTimeouts.load(
                 repository,
                 Path(configured_timeouts),
-                task_set,
-                pool.runtime_identity,
+                runtime.task_set,
+                runtime.runtime_identity,
             )
             if configured_timeouts
             else None
         )
-        _runtime = QorlRuntime(
-            task_set=task_set,
-            workers=pool.workers,
-            pool_id=pool.pool_id,
-            pool_config_sha256=pool.pool_config_sha256,
-            pool_config_path=pool.pool_config_path,
-            calibrated_timeouts=calibrated_timeouts,
-        )
     except BaseException:
-        if pool is not None:
-            pool.close()
+        runtime.close()
         raise
-    return _runtime
+    _runtime = runtime
+    return runtime
 
 
 def current() -> QorlRuntime:
@@ -86,5 +91,4 @@ def stop() -> None:
     global _runtime
     runtime, _runtime = _runtime, None
     if runtime is not None:
-        for slot in reversed(runtime.workers):
-            slot.container.close()
+        runtime.close()

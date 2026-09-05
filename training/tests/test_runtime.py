@@ -4,61 +4,65 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
-from qorl.db.container import PostgresContainer
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerSlot
-from qorl.db.resources import (
-    DEFAULT_POOL_CONFIG,
-    load_runtime_profile,
+from qorl.postgres.config import PostgresConfig
+from qorl.worker_pool.config import (
+    load_pool_config,
     validate_host_topology,
 )
-from qorl.db.worker import PostgresWorker
 from qorl.workload.taskset import TaskSet
+from qorl_training import runtime
 from qorl_training.runtime import QorlRuntime
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def database_fixture() -> DatabaseFixture:
-    return DatabaseFixture(
-        repository=ROOT,
-        archive_path=ROOT / "data/imdb.tar.gz",
-    )
-
-
 class WorkerPoolTest(unittest.TestCase):
+    def test_start_requires_both_configuration_paths(self) -> None:
+        for missing in (runtime.POSTGRES_CONFIG_ENV, runtime.POOL_CONFIG_ENV):
+            for value in (None, "", " "):
+                with self.subTest(missing=missing, value=value):
+                    environment = {
+                        runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
+                        runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
+                    }
+                    if value is None:
+                        del environment[missing]
+                    else:
+                        environment[missing] = value
+                    with patch.object(runtime, "QorlRuntime") as pool:
+                        with self.assertRaisesRegex(RuntimeError, missing):
+                            runtime.start(ROOT, environment)
+                        pool.assert_not_called()
+
     def test_resources_are_distinct_and_parameterized(self) -> None:
-        resources = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG).workers
+        resources = load_pool_config(
+            ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
+        ).workers
 
         self.assertEqual([item.index for item in resources], [0, 1, 2, 3])
         self.assertEqual(
-            resources[0].compose_environment["QORL_POSTGRES_CPUSET"],
+            resources[0].cpuset,
             "0-3,16-19",
         )
         self.assertEqual(
-            resources[3].compose_environment["QORL_POSTGRES_PORT"],
-            "56003",
+            resources[3].port,
+            56003,
         )
         self.assertEqual(resources[0].memory_bytes, 8 * 1024**3)
 
     def test_claim_returns_workers_to_the_pool(self) -> None:
-        profile = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG)
-        fixture = database_fixture()
-        slots = []
-        for resources in profile.workers:
-            container = PostgresContainer(
-                fixture,
-                f"test-pool-{resources.index}",
-                profile,
-                resources,
-            )
-            slots.append(WorkerSlot(resources, container, PostgresWorker(container)))
+        profile = load_pool_config(
+            ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
+        )
         runtime = QorlRuntime(
             TaskSet.load(ROOT, "ceb"),
-            tuple(slots),
+            profile,
             "test-pool",
-            "test-sha",
+            PostgresConfig.load(
+                ROOT, Path("docker/postgres/configs/000-pgconf-default")
+            ),
         )
         self.addCleanup(runtime.close)
 
@@ -76,7 +80,9 @@ class WorkerPoolTest(unittest.TestCase):
                 (topology / "physical_package_id").write_text("0")
                 (topology / "core_id").write_text(str(cpu % 16))
 
-            profile = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG)
+            profile = load_pool_config(
+                ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
+            )
             validate_host_topology(profile.workers, root)
 
             with self.assertRaisesRegex(RuntimeError, "physical cores"):

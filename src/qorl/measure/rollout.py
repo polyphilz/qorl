@@ -5,8 +5,6 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
-from qorl.db.exceptions import QueryTimeout, WorkerError
-from qorl.db.worker import ExplainResult
 from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
     NO_VALID_CANDIDATE_REWARD,
@@ -28,6 +26,9 @@ from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
+from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.schemas import ExplainResult
+from qorl.worker_pool.exceptions import ContainerError
 from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
 
 DEFAULT_MEASUREMENTS = 3
@@ -293,7 +294,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 action_valid=True,
                 execution_timed_out=True,
             )
-        except WorkerError as error:
+        except (PostgresError, ContainerError) as error:
             return self.invalid_candidate(
                 candidate_id, action, str(error), hint=hint, action_valid=True
             )
@@ -378,7 +379,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             )
             self.candidates.append(result)
             return result
-        except WorkerError as error:
+        except (PostgresError, ContainerError) as error:
             return self.invalid_candidate(
                 candidate_id, action, str(error), hint=hint, action_valid=True
             )
@@ -436,7 +437,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             action, result.document["Plan"], result.hint_diagnostics
         )
         if not verification.valid:
-            raise WorkerError("; ".join(verification.errors))
+            raise PostgresError("; ".join(verification.errors))
         return result
 
     def finish(self, rng: random.Random) -> Outcome:

@@ -13,10 +13,6 @@ from qorl import __version__
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.types import PolicyType
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot, load_pool
-from qorl.db.worker import PostgresWorker
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
 from qorl.measure.rollout import (
     DEFAULT_MEASUREMENTS,
@@ -29,8 +25,15 @@ from qorl.measure.rollout import (
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import FinalStatus, RunStatus
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
+from qorl.postgres.client import PostgresClient
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 
 DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
@@ -83,7 +86,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def run_task(
-    worker: PostgresWorker,
+    worker: PostgresClient,
     task_set: TaskSet,
     task: dict[str, Any],
     policy: dict[str, Any],
@@ -123,14 +126,14 @@ def run_task(
 
 
 def run_task_on_worker(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     task: dict[str, Any],
     policy: dict[str, Any],
     agent: QoAgentPolicy | None,
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
-        result = run_task(slot.worker, task_set, task, policy, agent)
+        result = run_task(slot.client, task_set, task, policy, agent)
         result["worker"] = slot.resources.manifest()
         return slot, result
 
@@ -183,10 +186,11 @@ def run_benchmark(
     repository: Path,
     configured: str | None = None,
     *,
-    pool_config_path: Path | None = None,
+    postgres_config_path: Path,
+    pool_config_path: Path,
 ) -> Path:
-    pool_config = load_pool(repository, pool_config_path=pool_config_path)
-    fixture = DatabaseFixture.load(repository)
+    postgres_config = PostgresConfig.load(repository, postgres_config_path)
+    pool_config = load_pool_config(repository, pool_config_path)
     task_set = TaskSet.load(repository, "job")
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
@@ -207,8 +211,10 @@ def run_benchmark(
         "completed_at_utc": None,
         "inventory_id": task_set.inventory["inventory_id"],
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "run_config": {
             "path": str(config_path.relative_to(repository)),
             "sha256": sha256_file(config_path),
@@ -264,17 +270,18 @@ def run_benchmark(
     tasks = task_set.inventory["tasks"]
     results_by_task: dict[str, dict[str, Any]] = {}
     run = TaskRun(
-        fixture,
+        repository,
         project_name,
         output_dir,
         manifest_path,
         manifest,
         pool_field="worker_pool",
+        postgres_config=postgres_config,
         pool_config=pool_config,
     )
 
     def execute_task(
-        pool: WorkerPool, task: dict[str, Any]
+        pool: ContainerPool, task: dict[str, Any]
     ) -> tuple[WorkerSlot, dict[str, Any]]:
         return run_task_on_worker(pool, task_set, task, policy, agent)
 
@@ -293,7 +300,7 @@ def run_benchmark(
             for completion in run.map(
                 tasks,
                 execute_task,
-                handled_errors=(ModelError, WorkerError),
+                handled_errors=(ModelError, PostgresError, ContainerError),
             ):
                 task = completion.item
                 task_id = task["task_id"]

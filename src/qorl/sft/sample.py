@@ -11,10 +11,6 @@ from pathlib import Path
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.types import StopReason
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
-from qorl.db.worker import PostgresWorker
 from qorl.measure.rollout import PlanTiming, RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Baseline, Candidate, MeasurementStatus, RunStatus
@@ -22,6 +18,9 @@ from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import compact_plan, hint_status, verify_action
+from qorl.postgres.client import PostgresClient
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.sft.assemble import action_families
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -48,6 +47,10 @@ from qorl.sft.schemas import (
 )
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 from qorl.workload.timeouts import CalibratedTimeouts, TaskTimeout
 
@@ -64,12 +67,12 @@ class SampleRequest:
     sampling_mode: SamplingMode
 
 
-class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
+class PlanValidationEvaluator(RolloutEvaluator[PostgresClient]):
     """Validate a plan action without executing the benchmark query."""
 
     def __init__(
         self,
-        worker: PostgresWorker,
+        worker: PostgresClient,
         task_set: TaskSet,
         task: JsonObject,
         calibrated_timeout: TaskTimeout | None = None,
@@ -116,7 +119,7 @@ class PlanValidationEvaluator(RolloutEvaluator[PostgresWorker]):
             return self.invalid_candidate(candidate_id, raw_action, str(error))
         try:
             plain = self.worker.explain(self.sql, self.timeout_ms, hint=hint)
-        except WorkerError as error:
+        except (PostgresError, ContainerError) as error:
             return self.invalid_candidate(
                 candidate_id, action, str(error), hint=hint, action_valid=True
             )
@@ -200,7 +203,7 @@ def training_transcript(trace: JsonObject) -> list[JsonObject]:
 
 
 def evaluate_request(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     request: SampleRequest,
     config: QoAgentConfig,
@@ -214,7 +217,7 @@ def evaluate_request(
             else None
         )
         evaluator = PlanValidationEvaluator(
-            slot.worker, task_set, request.task, timeout
+            slot.client, task_set, request.task, timeout
         )
         try:
             baseline = evaluator.start()
@@ -240,12 +243,8 @@ def evaluate_request(
             steered=False,
             guidance=None,
             worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
-            data_identity=JSON_OBJECT_ADAPTER.validate_python(
-                slot.worker.fixture.data_identity
-            ),
-            runtime_identity=JSON_OBJECT_ADAPTER.validate_python(
-                slot.worker.fixture.runtime_identity
-            ),
+            data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+            runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
             sampler=sampler_identity,
             default=baseline,
             candidates=evaluator.candidates,
@@ -379,6 +378,8 @@ def main() -> None:
         description="Sample one-candidate CEB trajectories for protocol SFT v2."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
         "--config",
         type=Path,
@@ -403,6 +404,8 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
     timeout_path = (repository / arguments.timeouts).resolve()
@@ -426,7 +429,6 @@ def main() -> None:
     if arguments.default_best and arguments.split != "sampling":
         raise RuntimeError("default-best search is limited to the sampling split")
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     tasks = selected_tasks(task_set, selection, arguments.split)
     fallback_tasks = tasks[: config.sampling.fallback_check_task_count]
@@ -447,7 +449,10 @@ def main() -> None:
         tasks = tasks[: arguments.limit]
     calibrated_timeouts = (
         CalibratedTimeouts.load(
-            repository, timeout_path, task_set, fixture.runtime_identity
+            repository,
+            timeout_path,
+            task_set,
+            postgres_config.runtime_identity().model_dump(exclude_none=True),
         )
         if arguments.split == "sampling"
         else None
@@ -523,8 +528,10 @@ def main() -> None:
         sampler_manifest_path=display_path(repository, sampler_manifest_path),
         sampler_manifest=sampler_manifest,
         guidance=None,
-        data_identity=JSON_OBJECT_ADAPTER.validate_python(fixture.data_identity),
-        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(fixture.runtime_identity),
+        data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(
+            postgres_config.runtime_identity().model_dump(exclude_none=True)
+        ),
         plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
         database_pool=previous.database_pool if previous else None,
         summary=sampling_summary(records),
@@ -534,17 +541,19 @@ def main() -> None:
     manifest_wire = manifest.to_wire()
     write_json(manifest_path, manifest_wire)
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-sft-v2-sample-{os.getpid()}",
         output,
         manifest_path,
         manifest_wire,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=output / "sampling" / f"{arguments.split}-environment",
     )
 
     def execute(
-        pool: WorkerPool, request: SampleRequest
+        pool: ContainerPool, request: SampleRequest
     ) -> tuple[WorkerSlot, SampleRecord]:
         return evaluate_request(
             pool, task_set, request, base_config, calibrated_timeouts, sampler_identity

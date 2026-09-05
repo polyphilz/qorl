@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 
-from qorl.db.schemas import WorkerPoolConfig
 from qorl.util.hashing import sha256_file
+from qorl.worker_pool.schemas import PoolConfig, WorkerPoolConfig, WorkerResources
 
-DEFAULT_POOL_CONFIG = Path("docker/worker_pool/configs/002-poolconf-4x8")
 NO_SWAP_BYTES = 0
 MIN_SIZE_TEXT_LENGTH = 2
 
@@ -34,67 +32,10 @@ def size_bytes(limit: str) -> int:
     return gib * 1024**3
 
 
-@dataclass(frozen=True)
-class WorkerResources:
-    index: int
-    physical_core_count: int
-    cpuset: str
-    cpuset_mems: str
-    memory_limit: str
-    memory_bytes: int
-    memory_swap_bytes: int
-    shm_size: str
-    shm_bytes: int
-    port: int
-
-    @property
-    def compose_environment(self) -> dict[str, str]:
-        return {
-            "QORL_POSTGRES_CPUSET": self.cpuset,
-            "QORL_POSTGRES_CPUSET_MEMS": self.cpuset_mems,
-            "QORL_POSTGRES_MEMORY_LIMIT": self.memory_limit,
-            "QORL_POSTGRES_MEMORY_BYTES": str(self.memory_bytes),
-            "QORL_POSTGRES_MEMORY_SWAP_LIMIT": self.memory_limit,
-            "QORL_POSTGRES_MEMORY_SWAP_BYTES": str(self.memory_swap_bytes),
-            "QORL_POSTGRES_SHM_SIZE": self.shm_size,
-            "QORL_POSTGRES_SHM_BYTES": str(self.shm_bytes),
-            "QORL_POSTGRES_PORT": str(self.port),
-        }
-
-    def manifest(self) -> dict[str, int | str]:
-        return {
-            "slot": self.index,
-            "physical_core_count": self.physical_core_count,
-            "cpuset": self.cpuset,
-            "cpuset_mems": self.cpuset_mems,
-            "memory_limit": self.memory_limit,
-            "memory_bytes": self.memory_bytes,
-            "memory_swap_bytes": self.memory_swap_bytes,
-            "shm_size": self.shm_size,
-            "shm_bytes": self.shm_bytes,
-            "port": self.port,
-        }
-
-
-@dataclass(frozen=True)
-class RuntimeProfile:
-    profile_id: str
-    path: Path
-    sha256: str
-    workers: tuple[WorkerResources, ...]
-    configuration: WorkerPoolConfig
-
-    def manifest(self) -> dict[str, object]:
-        return {
-            "id": self.profile_id,
-            "path": str(self.path),
-            "sha256": self.sha256,
-            "worker_count": len(self.workers),
-            "workers": [worker.manifest() for worker in self.workers],
-        }
-
-
-def load_runtime_profile(repository: Path, configured: Path) -> RuntimeProfile:
+def load_pool_config(
+    repository: Path,
+    configured: Path,
+) -> PoolConfig:
     path = configured if configured.is_absolute() else repository / configured
     if path.is_dir():
         path = path / "poolconf.json"
@@ -132,7 +73,7 @@ def load_runtime_profile(repository: Path, configured: Path) -> RuntimeProfile:
         recorded_path = path.relative_to(repository)
     except ValueError:
         recorded_path = path
-    return RuntimeProfile(
+    return PoolConfig(
         profile_id=path.parent.name,
         path=recorded_path,
         sha256=sha256_file(path),

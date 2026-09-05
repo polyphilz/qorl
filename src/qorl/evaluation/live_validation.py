@@ -17,15 +17,19 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.interface import AgentInterface
 from qorl.agent.types import InspectionExecutor, ToolName
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Decision, RunStatus
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.util.serving import ServedModel
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 
 BASE_MODEL = "qorl-base"
@@ -290,14 +294,14 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def evaluate_live_task(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     task: dict[str, Any],
     agent: QoAgentPolicy,
     maximum_model_turns: int,
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
-        evaluator = RolloutEvaluator(slot.worker, task_set, task)
+        evaluator = RolloutEvaluator(slot.client, task_set, task)
         try:
             baseline = evaluator.start()
             trace = agent.search(evaluator)
@@ -316,7 +320,7 @@ def evaluate_live_task(
                 "policy_trace": trace,
                 "metrics": metrics,
             }
-        except (ModelError, WorkerError) as error:
+        except (ModelError, PostgresError, ContainerError) as error:
             result = {
                 "schema_version": 1,
                 "status": RunStatus.FAILED.value,
@@ -351,13 +355,15 @@ def evaluate_policy(
     identity = agent.preflight()
     results: list[dict[str, Any]] = []
     for slot in pool.workers:
-        slot.container.capture_environment(
+        capture_environment(
+            pool,
+            slot,
             policy_dir / "environment" / f"worker-{slot.resources.index}",
             "pre",
         )
 
     def execute_task(
-        active_pool: WorkerPool, task: dict[str, Any]
+        active_pool: ContainerPool, task: dict[str, Any]
     ) -> tuple[WorkerSlot, dict[str, Any]]:
         return evaluate_live_task(
             active_pool,
@@ -405,7 +411,9 @@ def evaluate_policy(
             progress(summary)
 
     for slot in pool.workers:
-        slot.container.capture_environment(
+        capture_environment(
+            pool,
+            slot,
             policy_dir / "environment" / f"worker-{slot.resources.index}",
             "post",
         )
@@ -434,6 +442,8 @@ def main() -> None:
         description="Compare base and tool-use SFT policies on held-out CEB tasks."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument(
@@ -451,6 +461,8 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     run_policy = json.loads(
         (repository / "model/configs/000-modelconf/modelconf.json").read_text()
     )["policy"]
@@ -506,7 +518,6 @@ def main() -> None:
             ]
         )
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "ceb")
     tasks, dataset = validation_tasks(repository, task_set)
     report: dict[str, Any] = {
@@ -518,8 +529,10 @@ def main() -> None:
         "protocol": "live CEB protocol evaluation; no final timing pairs",
         "policy_order": [name for name, _ in order],
         "task_set_id": "ceb",
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "database_pool": None,
         "task_count": len(tasks),
         "task_ids": [task["task_id"] for task in tasks],
@@ -535,14 +548,16 @@ def main() -> None:
     write_json(report_path, report)
 
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
-    pool: WorkerPool | None = None
+    pool: ContainerPool | None = None
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-ceb-live-{os.getpid()}",
         output_dir,
         report_path,
         report,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         capture_environment=False,
     )
     with ServedModel(

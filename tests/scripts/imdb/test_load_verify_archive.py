@@ -1,4 +1,3 @@
-import copy
 import json
 import subprocess
 import sys
@@ -8,12 +7,24 @@ from unittest.mock import Mock
 import pytest
 from pydantic import ValidationError
 
-from qorl.db.container import PostgresContainer
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.resources import load_runtime_profile
+from qorl.postgres.client import PostgresClient
 from qorl.util.hashing import sha256_bytes
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
 from scripts.imdb import load_verify_archive as load
-from scripts.imdb.schemas import ImdbManifest, ImdbMember
+from scripts.imdb.schemas import (
+    DatabaseColumn,
+    DatabaseConstraint,
+    DatabaseIdentity,
+    DatabaseIndex,
+    DatabaseRelation,
+    DatabaseSnapshot,
+    DatabaseStatistic,
+    ImdbManifest,
+    ImdbMember,
+    LoadVerificationReport,
+    RepresentativeQueryOutput,
+)
 
 
 @pytest.mark.parametrize(
@@ -41,9 +52,9 @@ def test_load_sql_vendors_upstream_definitions_unchanged(
     assert "\\ir " not in sql
 
 
-def test_module_entrypoint(repository_root: Path) -> None:
+def test_module_import(repository_root: Path) -> None:
     result = subprocess.run(
-        [sys.executable, "-E", "-m", "scripts.imdb.load_verify_archive", "--help"],
+        [sys.executable, "-E", "-c", "import scripts.imdb.load_verify_archive"],
         cwd=repository_root,
         capture_output=True,
         text=True,
@@ -51,7 +62,6 @@ def test_module_entrypoint(repository_root: Path) -> None:
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    assert "usage:" in result.stdout
 
 
 @pytest.mark.parametrize("verification_fails", [False, True])
@@ -66,38 +76,45 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
     )
     (tmp_path / "data/raw/tables").mkdir(parents=True)
     calls = []
-    monkeypatch.setattr(
-        load, "verify_against_manifest", lambda *_: calls.append("check-inputs")
-    )
+    monkeypatch.setattr(load, "REPOSITORY_ROOT", tmp_path)
+    input_manifests: list[ImdbManifest] = []
+
+    def verify_inputs(repository: Path, manifest: ImdbManifest) -> None:
+        assert repository == tmp_path
+        input_manifests.append(manifest)
+        calls.append("check-inputs")
+
+    monkeypatch.setattr(load, "verify_input_csvs_against_manifest", verify_inputs)
     for operation in ("create", "start", "stop", "close"):
         monkeypatch.setattr(
-            PostgresContainer,
+            ContainerPool,
             operation,
             lambda *_, operation=operation: calls.append(operation),
         )
     monkeypatch.setattr(
-        PostgresContainer,
-        "restore_archive",
+        ContainerPool,
+        "restore",
         lambda *_: pytest.fail("load must not restore"),
     )
     monkeypatch.setattr(
-        load.PostgresWorker, "admin_sql", lambda _, sql: calls.append("load-sql")
+        load.PostgresClient, "admin_sql", lambda _, sql: calls.append("load-sql")
     )
 
     def verify(*args, **kwargs):
+        assert kwargs["manifest"] is input_manifests[0]
         calls.append("verify")
         if verification_fails:
             raise RuntimeError("verification failed")
 
-    monkeypatch.setattr(load, "verify", verify)
+    monkeypatch.setattr(load, "verify_load", verify)
     monkeypatch.setattr(load, "archive_database", lambda *_: calls.append("archive"))
 
     if verification_fails:
         with pytest.raises(RuntimeError, match="verification failed"):
-            load.load_verify_archive(tmp_path)
+            load.main()
         assert calls == ["check-inputs", "create", "start", "load-sql", "verify"]
     else:
-        load.load_verify_archive(tmp_path)
+        load.main()
         assert calls == [
             "check-inputs",
             "create",
@@ -112,16 +129,18 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
 
 def test_load_requires_fetched_inputs_and_preserves_existing_archive(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr(load, "REPOSITORY_ROOT", tmp_path)
     with pytest.raises(
         RuntimeError, match=r"run `uv run python -m scripts\.imdb\.fetch` first"
     ):
-        load.load_verify_archive(tmp_path)
+        load.main()
     archive = tmp_path / "data/imdb.tar.gz"
     archive.parent.mkdir()
     archive.write_bytes(b"original")
     with pytest.raises(RuntimeError, match="refusing to overwrite"):
-        load.load_verify_archive(tmp_path)
+        load.main()
     assert archive.read_bytes() == b"original"
 
 
@@ -129,18 +148,19 @@ def test_load_requires_fetched_inputs_and_preserves_existing_archive(
 def test_archive_requires_clean_shutdown_and_writes_no_manifest(
     repository_root: Path, tmp_path: Path, monkeypatch, state: str
 ) -> None:
-    profile = load_runtime_profile(repository_root, load.POOL_CONFIG)
+    profile = load_pool_config(repository_root, load.POOL_CONFIG)
     archive = tmp_path / "imdb.tar.gz"
-    container = PostgresContainer(
-        DatabaseFixture(repository_root, archive),
+    pool = ContainerPool(
+        repository_root,
         "test-archive",
         profile,
-        profile.workers[0],
+        load.PostgresConfig.load(repository_root, load.POSTGRES_CONFIG),
     )
-    container.container = "container"
-    container.volume = "volume"
-    container.image_id = "sha256:image"
-    container.pgdata_relative_path = "18/docker"
+    slot = pool.workers[0]
+    slot.container_id = "container"
+    slot.volume = "volume"
+    slot.image_id = "sha256:image"
+    slot.pgdata_relative_path = "18/docker"
     calls = []
 
     def command(arguments):
@@ -153,18 +173,18 @@ def test_archive_requires_clean_shutdown_and_writes_no_manifest(
         (tmp_path / ".imdb.tar.gz.part").write_bytes(b"prepared archive")
         return ""
 
-    monkeypatch.setattr(container, "command", command)
+    monkeypatch.setattr(pool, "command", command)
     if state != "false 0":
         with pytest.raises(RuntimeError, match="stopped cleanly"):
-            load.archive_database(container, archive)
+            load.archive_database(pool, slot, archive)
         assert not archive.exists()
         assert len(calls) == 1
     else:
-        load.archive_database(container, archive)
+        load.archive_database(pool, slot, archive)
         assert archive.read_bytes() == b"prepared archive"
         assert list(tmp_path.iterdir()) == [archive]
         with pytest.raises(RuntimeError, match="refusing to overwrite"):
-            load.archive_database(container, archive)
+            load.archive_database(pool, slot, archive)
 
 
 @pytest.mark.parametrize(
@@ -178,7 +198,7 @@ def test_archive_requires_clean_shutdown_and_writes_no_manifest(
     ],
     ids=["valid", "missing", "unexpected", "wrong-size", "wrong-checksum"],
 )
-def test_verify_against_manifest_checks_extracted_files(
+def test_verify_input_csvs_against_manifest_checks_extracted_files(
     repository_root: Path, tmp_path: Path, change: str | None, error: str | None
 ) -> None:
     manifest = ImdbManifest.model_validate_json(
@@ -192,9 +212,6 @@ def test_verify_against_manifest_checks_extracted_files(
     manifest = manifest.model_copy(
         update={"dataset": manifest.dataset.model_copy(update={"members": members})}
     )
-    manifest_path = tmp_path / "scripts/imdb/manifest.json"
-    manifest_path.parent.mkdir(parents=True)
-    manifest_path.write_text(manifest.model_dump_json())
     target = tmp_path / "data/raw/tables"
     target.mkdir(parents=True)
     for name in members:
@@ -208,30 +225,37 @@ def test_verify_against_manifest_checks_extracted_files(
         (target / "title.csv").write_bytes(b"modified")
 
     if error is None:
-        load.verify_against_manifest(tmp_path)
+        load.verify_input_csvs_against_manifest(tmp_path, manifest)
     else:
         with pytest.raises(RuntimeError, match=error):
-            load.verify_against_manifest(tmp_path)
+            load.verify_input_csvs_against_manifest(tmp_path, manifest)
 
 
-def test_verify_against_manifest_rejects_invalid_manifest(tmp_path: Path) -> None:
+def test_load_rejects_invalid_manifest(tmp_path: Path, monkeypatch) -> None:
     manifest_path = tmp_path / "scripts/imdb/manifest.json"
     manifest_path.parent.mkdir(parents=True)
     manifest_path.write_text("{}")
+    (tmp_path / "data/raw/tables").mkdir(parents=True)
+    monkeypatch.setattr(load, "REPOSITORY_ROOT", tmp_path)
 
     with pytest.raises(ValidationError, match="dataset"):
-        load.verify_against_manifest(tmp_path)
+        load.main()
 
 
-def test_load_database_state_renders_sql_file(
-    repository_root: Path, tmp_path: Path, monkeypatch, database_state
+def test_load_database_snapshot_renders_sql_file(
+    repository_root: Path,
+    tmp_path: Path,
+    monkeypatch,
+    database_snapshot: DatabaseSnapshot,
 ) -> None:
-    query = Mock(return_value=json.dumps(database_state))
-    monkeypatch.setattr(load, "admin_psql", query)
+    query = Mock(return_value=database_snapshot.model_dump_json())
+    client = PostgresClient(Mock())
+    monkeypatch.setattr(client, "admin_sql", query)
     monkeypatch.chdir(tmp_path)
 
     assert (
-        load.load_database_state("container", ["title", "movie_info"]) == database_state
+        load.load_database_snapshot(client, ["title", "movie_info"])
+        == database_snapshot
     )
 
     expected_sql = (
@@ -247,35 +271,225 @@ def test_load_database_state_renders_sql_file(
             ),
         )
     )
-    query.assert_called_once_with("container", expected_sql)
+    query.assert_called_once_with(expected_sql)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("identity", "system_identifier", 123),
+        ("columns", "ordinal", "1"),
+        ("constraints", "validated", "true"),
+        ("indexes", "valid", 1),
+        ("statistics", "avg_width", "4"),
+        ("statistics", "null_frac", True),
+        ("relations", "relation_bytes", "8192"),
+        ("table_rows", "title", "2528312"),
+    ],
+    ids=[
+        "identity",
+        "column",
+        "constraint",
+        "index",
+        "statistics",
+        "boolean-statistic",
+        "relation",
+        "row-count",
+    ],
+)
+def test_load_database_snapshot_validates_nested_json(
+    database_snapshot: DatabaseSnapshot,
+    monkeypatch,
+    section: str,
+    field: str,
+    value: str | int | bool,
+) -> None:
+    raw = database_snapshot.model_dump()
+    row = raw[section]
+    if isinstance(row, list):
+        row = row[0]
+    row[field] = value
+    client = PostgresClient(Mock())
+    monkeypatch.setattr(client, "admin_sql", Mock(return_value=json.dumps(raw)))
+    with pytest.raises(ValidationError) as error:
+        load.load_database_snapshot(client, ["title"])
+    assert error.value.errors()[0]["loc"][0] == section
+
+
+def test_snapshot_preserves_postgres_json_values(
+    database_snapshot: DatabaseSnapshot,
+) -> None:
+    raw = database_snapshot.model_dump(mode="json")
+    raw["constraints"] = None
+    encoded = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    parsed = DatabaseSnapshot.model_validate_json(encoded)
+    assert parsed.constraints is None
+    assert parsed.columns is not None
+    assert parsed.columns[0].default is None
+    assert parsed.statistics is not None
+    assert type(parsed.statistics[0].null_frac) is int
+    assert type(parsed.statistics[0].correlation) is float
+    assert (
+        json.dumps(
+            parsed.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        == encoded
+    )
+
+
+def test_representative_query_outputs_records_exact_csv_bytes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sql = "SELECT 'café' AS value;"
+    (tmp_path / "1a.sql").write_text(sql, encoding="utf-8")
+    csv = "value\ncafé\n"
+    client = PostgresClient(Mock())
+    query = Mock(return_value=csv)
+    monkeypatch.setattr(client, "runner_sql", query)
+
+    outputs = load.representative_query_outputs(client, tmp_path, ["1a.sql"])
+
+    assert list(outputs) == ["1a.sql"]
+    assert outputs["1a.sql"].csv == csv
+    assert outputs["1a.sql"].bytes == len(csv.encode("utf-8"))
+    assert outputs["1a.sql"].sha256 == sha256_bytes(csv.encode("utf-8"))
+    query.assert_called_once_with(
+        sql, csv=True, application_name="qorl-imdb-query-verifier"
+    )
+
+
+def test_section_checksum_is_canonical() -> None:
+    expected = sha256_bytes(b'{"a":0,"b":"caf\xc3\xa9"}')
+    assert load.section_checksum({"b": "café", "a": 0}) == expected
+    assert load.section_checksum({"a": 0, "b": "café"}) == expected
+
+
+@pytest.mark.parametrize("shape", ["record", "list", "mapping"])
+def test_section_checksum_serializes_records_without_changing_hashes(
+    shape: str,
+) -> None:
+    output = RepresentativeQueryOutput(
+        csv="café\n",
+        bytes=len("café\n".encode()),
+        sha256=sha256_bytes("café\n".encode()),
+    )
+    if shape == "record":
+        actual = load.section_checksum(output)
+        plain = output.model_dump()
+    elif shape == "list":
+        actual = load.section_checksum([output])
+        plain = [output.model_dump()]
+    else:
+        actual = load.section_checksum({"1a.sql": output})
+        plain = {"1a.sql": output.model_dump()}
+    expected = sha256_bytes(
+        json.dumps(
+            plain, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    )
+    assert actual == expected
+    changed = output.model_copy(update={"csv": "different\n"})
+    assert load.section_checksum(changed) != load.section_checksum(output)
 
 
 @pytest.fixture
-def database_state(repository_root: Path):
-    metadata = json.loads((repository_root / "scripts/imdb/manifest.json").read_text())
+def imdb_manifest(repository_root: Path) -> ImdbManifest:
+    return ImdbManifest.model_validate_json(
+        (repository_root / "scripts/imdb/manifest.json").read_text()
+    )
+
+
+@pytest.fixture
+def database_snapshot(imdb_manifest: ImdbManifest) -> DatabaseSnapshot:
     rows = {
-        item["table"]: item["rows"]
-        for item in metadata["dataset"]["members"].values()
-        if "table" in item
+        item.table: item.rows
+        for item in imdb_manifest.dataset.members.values()
+        if item.table is not None and item.rows is not None
     }
-    return {
-        "identity": metadata["database"],
-        "table_names": sorted(rows),
-        "table_rows": rows,
-        "columns": [{"table": "title", "column": "id"}],
-        "constraints": [{"table": "title", "definition": "primary key"}],
-        "indexes": [
-            {
-                "name": f"index-{index}",
-                "primary": index < 21,
-                "valid": True,
-                "ready": True,
-            }
+    database = imdb_manifest.database
+    return DatabaseSnapshot(
+        identity=DatabaseIdentity(
+            server_version_num=database.server_version_num,
+            database="imdb",
+            encoding=database.encoding,
+            collation=database.collation,
+            ctype=database.ctype,
+            system_identifier="123456789",
+            pg_hint_plan_version="1.8.0",
+        ),
+        table_names=sorted(rows),
+        table_rows=rows,
+        columns=[
+            DatabaseColumn(
+                table="title",
+                ordinal=1,
+                column="id",
+                data_type="integer",
+                udt_name="int4",
+                nullable="NO",
+                default=None,
+                character_maximum_length=None,
+                numeric_precision=32,
+                numeric_scale=0,
+            )
+        ],
+        constraints=[
+            DatabaseConstraint(
+                table="title",
+                name="title_pkey",
+                type="p",
+                definition="PRIMARY KEY (id)",
+                validated=True,
+            )
+        ],
+        indexes=[
+            DatabaseIndex(
+                table="title",
+                name=f"index-{index}",
+                definition="CREATE INDEX...",
+                primary=index < 21,
+                unique=index < 21,
+                valid=True,
+                ready=True,
+            )
             for index in range(44)
         ],
-        "statistics": [{"table": name, "column": "id"} for name in rows],
-        "relations": [{"table": name, "frozen_xid_age": 0} for name in rows],
-    }
+        statistics=[
+            DatabaseStatistic(
+                table=name,
+                column="id",
+                inherited=False,
+                null_frac=0,
+                avg_width=4,
+                n_distinct=-1,
+                most_common_vals=None,
+                most_common_freqs=None,
+                histogram_bounds="{1,2,3}",
+                correlation=1.0,
+                most_common_elems=None,
+                most_common_elem_freqs=None,
+                elem_count_histogram=None,
+            )
+            for name in rows
+        ],
+        relations=[
+            DatabaseRelation(
+                table=name,
+                relpages=1,
+                reltuples=count,
+                relallvisible=1,
+                relfrozenxid="123",
+                frozen_xid_age=0,
+                relation_bytes=8192,
+                total_relation_bytes=16384,
+            )
+            for name, count in rows.items()
+        ],
+    )
 
 
 @pytest.mark.parametrize(
@@ -295,44 +509,57 @@ def test_verify_loaded_database(
     repository_root: Path,
     tmp_path: Path,
     monkeypatch,
-    database_state,
+    database_snapshot: DatabaseSnapshot,
+    imdb_manifest: ImdbManifest,
     changed: str | None,
     error: str | None,
 ) -> None:
-    state = copy.deepcopy(database_state)
-    outputs = {"1a.sql": {"csv": "result\n"}}
+    raw = database_snapshot.model_dump()
+    outputs = {
+        "1a.sql": RepresentativeQueryOutput(
+            csv="result\n", bytes=len(b"result\n"), sha256=sha256_bytes(b"result\n")
+        )
+    }
     if changed == "table_names":
-        state["table_names"].pop()
+        raw["table_names"].pop()
     elif changed == "table_rows":
-        state["table_rows"]["title"] += 1
+        raw["table_rows"]["title"] += 1
     elif changed == "identity":
-        state["identity"]["encoding"] = "LATIN1"
+        raw["identity"]["encoding"] = "LATIN1"
     elif changed == "indexes":
-        state["indexes"].pop()
+        raw["indexes"].pop()
     elif changed == "unready_index":
-        state["indexes"][0]["ready"] = False
+        raw["indexes"][0]["ready"] = False
     elif changed == "statistics":
-        state["statistics"].pop()
+        raw["statistics"].pop()
     elif changed == "relations":
-        state["relations"][0]["frozen_xid_age"] = load.MAX_FRESHLY_FROZEN_XID_AGE + 1
-    monkeypatch.setattr(load, "run", lambda *_: "")
-    monkeypatch.setattr(load, "load_database_state", lambda *_: state)
-    monkeypatch.setattr(load, "representative_query_outputs", lambda *_: outputs)
+        raw["relations"][0]["frozen_xid_age"] = load.MAX_FRESHLY_FROZEN_XID_AGE + 1
+    state = DatabaseSnapshot.model_validate(raw)
+    client = PostgresClient(Mock())
+    monkeypatch.setattr(client, "execute", Mock())
+    monkeypatch.setattr(load, "load_database_snapshot", lambda *_: state)
+    query_results = Mock(return_value=outputs)
+    monkeypatch.setattr(load, "representative_query_outputs", query_results)
     report = tmp_path / "loaded.json"
 
     if error is not None:
         with pytest.raises(RuntimeError, match=error):
-            load.verify("container", report, repository=repository_root)
+            load.verify_load(
+                client, report, manifest=imdb_manifest, repository=repository_root
+            )
         assert not report.exists()
     else:
-        load.verify("container", report, repository=repository_root)
-        result = json.loads(report.read_text())
-        assert result["phase"] == "load"
-        assert result["database"] == state
-        assert result["representative_query_outputs"] == outputs
-        assert result["fingerprints"] == {
+        load.verify_load(
+            client, report, manifest=imdb_manifest, repository=repository_root
+        )
+        result = LoadVerificationReport.model_validate_json(report.read_text())
+        assert result.schema_version == 2
+        assert result.phase == "load"
+        assert result.database == state
+        assert result.representative_query_outputs == outputs
+        assert result.checksums.model_dump() == {
             **{
-                name: load.fingerprint(state[name])
+                name: load.section_checksum(raw[name])
                 for name in (
                     "table_names",
                     "table_rows",
@@ -342,24 +569,42 @@ def test_verify_loaded_database(
                     "statistics",
                 )
             },
-            "representative_query_outputs": load.fingerprint(outputs),
+            "representative_query_outputs": load.section_checksum(
+                {name: output.model_dump() for name, output in outputs.items()}
+            ),
         }
+        query_results.assert_called_once_with(
+            client=client,
+            source_dir=repository_root / "benchmarks/job/queries",
+            query_names=["1a.sql", "17b.sql", "33c.sql"],
+        )
+        legacy = json.loads(report.read_text())
+        legacy["schema_version"] = 1
+        legacy["fingerprints"] = legacy.pop("checksums")
+        assert (
+            LoadVerificationReport.model_validate_json(json.dumps(legacy)).checksums
+            == result.checksums
+        )
 
 
 def test_load_rejects_invalid_inputs_before_creating_a_container(
-    tmp_path: Path, monkeypatch
+    repository_root: Path, tmp_path: Path, monkeypatch
 ) -> None:
     (tmp_path / "data/raw/tables").mkdir(parents=True)
+    (tmp_path / "scripts").symlink_to(
+        repository_root / "scripts", target_is_directory=True
+    )
     monkeypatch.setattr(
         load,
-        "verify_against_manifest",
+        "verify_input_csvs_against_manifest",
         Mock(side_effect=RuntimeError("invalid inputs")),
     )
+    monkeypatch.setattr(load, "REPOSITORY_ROOT", tmp_path)
     container = Mock(side_effect=AssertionError("invalid inputs must not be loaded"))
-    monkeypatch.setattr(load, "PostgresContainer", container)
+    monkeypatch.setattr(load, "ContainerPool", container)
 
     with pytest.raises(RuntimeError, match="invalid inputs"):
-        load.load_verify_archive(tmp_path)
+        load.main()
     container.assert_not_called()
 
 

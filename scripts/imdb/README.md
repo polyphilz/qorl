@@ -20,7 +20,9 @@ It removes its temporary database container and volume on success;
 failures retain them for inspection. Existing archives and verification reports are not overwritten.
 
 `manifest.json` is the checked-in source recipe and expected database contents.
-`schemas.py` defines its types; fetch validates the manifest before downloading.
+`schemas.py` defines its types, the captured database state, and verification
+records. Fetch validates the manifest before downloading; load parses it once
+and passes it to both the input-file and loaded-database checks.
 `load.sql` creates the loaded database and finalizes its statistics.
 It vendors the table and index definitions inline from JOB's
 [`schema.sql`](https://github.com/gregrahn/join-order-benchmark/blob/a39603662e023e449cb2121997a5034df9e02ebf/schema.sql)
@@ -29,5 +31,5 @@ unchanged from commit `a39603662e023e449cb2121997a5034df9e02ebf`. IMDb preparati
 
 `load_verify_archive.py` owns the input and database checks and writes
 `data/imdb-verification/loaded.json`; all of `data/` is ignored.
-Database workers restore directly from `data/imdb.tar.gz`. Preparation verifies
-the loaded database but does not perform an archive restore-and-compare test.
+The loader selects JOB queries `1a.sql`, `17b.sql`, and `33c.sql` for result checks.
+The report records database state, query outputs, and per-section SHA-256 `checksums`.

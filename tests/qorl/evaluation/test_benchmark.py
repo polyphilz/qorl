@@ -19,7 +19,7 @@ class TestBenchmark:
     def test_task_keeps_one_claimed_worker_for_its_rollout(self) -> None:
         resources = Mock()
         resources.manifest.return_value = {"slot": 2}
-        slot = SimpleNamespace(resources=resources, worker=object())
+        slot = SimpleNamespace(resources=resources, client=object())
         pool = Mock()
         pool.claim_worker.return_value = nullcontext(slot)
         task_set = object()
@@ -35,7 +35,7 @@ class TestBenchmark:
 
         assert claimed is slot
         assert result["worker"] == {"slot": 2}
-        run_task.assert_called_once_with(slot.worker, task_set, task, policy, agent)
+        run_task.assert_called_once_with(slot.client, task_set, task, policy, agent)
 
     def test_run_config_loads_policy_without_schema_version(
         self, tmp_path: Path

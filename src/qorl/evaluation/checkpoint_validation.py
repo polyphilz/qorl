@@ -17,17 +17,20 @@ from qorl import __version__
 from qorl.adapters.model import adapter_rank
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
-from qorl.db.exceptions import WorkerError
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
 from qorl.evaluation.live_validation import trace_metrics
 from qorl.evaluation.paired_validation import load_tasks, summarize
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import FinalStatus, RunStatus
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.util.serving import ServedModel
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
+from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import WorkerSlot
 from qorl.workload.taskset import TaskSet
 
 CONFIG = Path("experiments/004-rl-run-v2/checkpoint-evaluation.json")
@@ -233,7 +236,7 @@ def evaluate_once(
     base_config: QoAgentConfig,
     pair_seed: str,
 ) -> dict[str, Any]:
-    worker = slot.worker
+    worker = slot.client
     before = worker.explain_calls, worker.explain_analyze_calls
     evaluator = RolloutEvaluator(worker, task_set, task)
     try:
@@ -257,7 +260,7 @@ def evaluate_once(
             "policy_trace": trace,
             "protocol_metrics": metrics,
         }
-    except (ModelError, WorkerError) as error:
+    except (ModelError, PostgresError, ContainerError) as error:
         result = {
             "schema_version": 1,
             "status": RunStatus.FAILED.value,
@@ -277,7 +280,7 @@ def evaluate_once(
 
 
 def evaluate_series(
-    pool: WorkerPool,
+    pool: ContainerPool,
     task_set: TaskSet,
     task: dict[str, Any],
     seed: int,
@@ -332,6 +335,8 @@ def main() -> None:
         description="Evaluate the v2 starting policy and saved checkpoints."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path, required=True)
+    parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--startup-timeout", type=int, default=600)
     parser.add_argument(
@@ -342,6 +347,8 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
+    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    pool_config = load_pool_config(repository, arguments.pool_config)
     config, config_path = load_config(repository)
     base_model = (repository / config["base_model"]).resolve()
     training_run = (repository / config["training_run"]).resolve()
@@ -356,7 +363,6 @@ def main() -> None:
     if not vllm.is_file():
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, config["task_set"])
     tasks, selection_path = load_tasks(repository, task_set, config)
     seeds = config["rollout_seeds"]
@@ -378,8 +384,10 @@ def main() -> None:
         "config_sha256": sha256_file(config_path),
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "base_model": {
             "path": config["base_model"],
             "model_sha256": sha256_file(base_model / "model.safetensors"),
@@ -417,20 +425,22 @@ def main() -> None:
         arguments.port,
     )
     environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
-    pool: WorkerPool | None = None
+    pool: ContainerPool | None = None
     results: dict[str, list[dict[str, Any]]] = {name: [] for name in policies}
     run = TaskRun(
-        fixture,
+        repository,
         f"qorl-v2-checkpoints-{os.getpid()}",
         output_dir,
         report_path,
         report,
         pool_field="database_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
         environment_dir=output_dir / "environment",
     )
 
     def execute_job(
-        active_pool: WorkerPool,
+        active_pool: ContainerPool,
         job: tuple[dict[str, Any], int, int],
     ) -> list[dict[str, Any]]:
         task, seed, index = job

@@ -13,13 +13,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import start_pool
-from qorl.db.worker import ExplainResult, PostgresWorker
+from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.schemas import FinalStatus, MeasurementProtocolId, RunStatus
+from qorl.postgres.client import PostgresClient
+from qorl.postgres.config import PostgresConfig
+from qorl.postgres.schemas import ExplainResult
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
+from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import start_pool
+from qorl.worker_pool.schemas import PoolConfig
 from qorl.workload.taskset import TaskSet
 
 DEFAULT_CONFIG = Path("experiments/004-rl-run-v2/reward-protocol-audit/config.json")
@@ -122,7 +126,7 @@ def build_cases(
 
 
 class CountingWorker:
-    def __init__(self, worker: PostgresWorker) -> None:
+    def __init__(self, worker: PostgresClient) -> None:
         self.worker = worker
         self.explain_calls = 0
         self.explain_analyze_calls = 0
@@ -146,7 +150,7 @@ class CountingWorker:
 
 
 def replay(
-    worker: PostgresWorker,
+    worker: PostgresClient,
     task_set: TaskSet,
     task: dict[str, Any],
     actions: list[Any],
@@ -313,12 +317,14 @@ def run_audit(
     config: dict[str, Any],
     case_path: Path,
     output_dir: Path,
+    *,
+    postgres_config: PostgresConfig,
+    pool_config: PoolConfig,
 ) -> Path:
     case_manifest = json.loads(case_path.read_text(encoding="utf-8"))
     if case_manifest.get("inventory_id") != config["audit_id"] + "-cases":
         raise RuntimeError("unexpected reward-protocol case manifest")
 
-    fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, config["task_set"])
     tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
     output_dir.mkdir(parents=True, exist_ok=False)
@@ -331,21 +337,31 @@ def run_audit(
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
-        "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "data_identity": task_set.data_identity,
+        "runtime_identity": postgres_config.runtime_identity().model_dump(
+            exclude_none=True
+        ),
         "results": [],
         "summary": None,
     }
     write_json(report_path, report)
 
     project_name = f"qorl-reward-audit-{os.getpid()}"
-    with contextlib.closing(start_pool(fixture, project_name)) as pool:
+    with contextlib.closing(
+        start_pool(
+            repository,
+            project_name,
+            repository / "data/imdb.tar.gz",
+            postgres_config=postgres_config,
+            pool_config=pool_config,
+        )
+    ) as pool:
         report["database_pool"] = pool.manifest()
         with pool.claim_worker() as slot:
             report["worker"] = slot.resources.manifest()
             write_json(report_path, report)
-            worker = slot.worker
-            slot.container.capture_environment(output_dir, "pre")
+            worker = slot.client
+            capture_environment(pool, slot, output_dir, "pre")
             for index, case in enumerate(case_manifest["cases"]):
                 task = tasks[case["task_id"]]
                 order = list(config["protocols"])
@@ -381,7 +397,7 @@ def run_audit(
                     print(f"  {protocol}: {label}", flush=True)
                 report["results"].append(result)
                 write_json(report_path, report)
-            slot.container.capture_environment(output_dir, "post")
+            capture_environment(pool, slot, output_dir, "post")
 
     report["status"] = RunStatus.COMPLETED.value
     report["completed_at_utc"] = datetime.now(UTC).isoformat()
@@ -395,6 +411,8 @@ def main() -> None:
         description="Compare cheap RL rewards with rigorous evaluation rewards."
     )
     parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--postgres-config", type=Path)
+    parser.add_argument("--pool-config", type=Path)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--build-cases", action="store_true")
     parser.add_argument("--trace-root", type=Path)
@@ -415,7 +433,19 @@ def main() -> None:
 
     output_dir = arguments.output or Path("outputs/rl") / config["audit_id"]
     output_dir = output_dir if output_dir.is_absolute() else repository / output_dir
-    print(run_audit(repository, config_path, config, case_path, output_dir))
+    if arguments.postgres_config is None or arguments.pool_config is None:
+        parser.error("--postgres-config and --pool-config are required for measurement")
+    print(
+        run_audit(
+            repository,
+            config_path,
+            config,
+            case_path,
+            output_dir,
+            postgres_config=PostgresConfig.load(repository, arguments.postgres_config),
+            pool_config=load_pool_config(repository, arguments.pool_config),
+        )
+    )
 
 
 if __name__ == "__main__":

@@ -9,8 +9,6 @@ from typing import Any
 
 import pytest
 
-from qorl.db.exceptions import QueryTimeout
-from qorl.db.worker import ExplainResult
 from qorl.measure.protocols import QueryExecutor
 from qorl.measure.rollout import (
     RIGOROUS_EVALUATION_PROTOCOL_V1,
@@ -29,6 +27,8 @@ from qorl.measure.schemas import (
     score,
 )
 from qorl.plans.fingerprint import plan_sha256
+from qorl.postgres.exceptions import QueryTimeout
+from qorl.postgres.schemas import ExplainResult
 from qorl.workload.timeouts import TaskTimeout, task_timeout_ms
 
 TASK: dict[str, Any] = {

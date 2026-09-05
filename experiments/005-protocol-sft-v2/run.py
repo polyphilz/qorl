@@ -211,7 +211,9 @@ def trained_adapter(repository: Path) -> Path:
     return adapter
 
 
-def gate(repository: Path) -> Path:
+def gate(
+    repository: Path, *, postgres_config_path: Path, pool_config_path: Path
+) -> Path:
     dataset_config = load_record(
         repository / "experiments/005-protocol-sft-v2/dataset.json", DatasetConfig
     )
@@ -267,6 +269,10 @@ def gate(repository: Path) -> Path:
                 sys.executable,
                 "-m",
                 "qorl.sft.gate",
+                "--postgres-config",
+                str(postgres_config_path),
+                "--pool-config",
+                str(pool_config_path),
                 "--repository",
                 str(repository),
                 "--model",
@@ -351,6 +357,8 @@ def train(repository: Path) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare or run protocol SFT v2.")
     parser.add_argument("--repository", type=Path, default=ROOT)
+    parser.add_argument("--postgres-config", type=Path)
+    parser.add_argument("--pool-config", type=Path)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--merge-sampler", action="store_true")
     action.add_argument("--prepare", action="store_true")
@@ -366,7 +374,15 @@ def main() -> None:
         _, report = prepare(repository)
         print(json.dumps(report.to_wire(), indent=2, sort_keys=True))
     elif arguments.gate:
-        print(gate(repository))
+        if arguments.postgres_config is None or arguments.pool_config is None:
+            parser.error("--gate requires --postgres-config and --pool-config")
+        print(
+            gate(
+                repository,
+                postgres_config_path=arguments.postgres_config,
+                pool_config_path=arguments.pool_config,
+            )
+        )
     else:
         print(train(repository))
 

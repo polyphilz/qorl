@@ -1,10 +1,12 @@
-"""Typed contents of the IMDb source and loading manifest."""
+"""IMDb source manifest, captured database state, and load verification records."""
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 
 
 class ImdbRecord(BaseModel):
@@ -13,7 +15,7 @@ class ImdbRecord(BaseModel):
 
 class ImdbFile(ImdbRecord):
     bytes: int = Field(ge=0)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sha256: Sha256
 
 
 class ImdbArchive(ImdbFile):
@@ -71,3 +73,109 @@ class ImdbManifest(ImdbRecord):
     dataset: ImdbDataset
     database: ImdbDatabase
     load: ImdbLoad
+
+
+class DatabaseIdentity(ImdbRecord):
+    server_version_num: str
+    database: str
+    encoding: str
+    collation: str
+    ctype: str
+    system_identifier: str
+    pg_hint_plan_version: str | None
+
+
+class DatabaseColumn(ImdbRecord):
+    table: str
+    ordinal: int
+    column: str
+    data_type: str
+    udt_name: str
+    nullable: Literal["YES", "NO"]
+    default: str | None
+    character_maximum_length: int | None
+    numeric_precision: int | None
+    numeric_scale: int | None
+
+
+class DatabaseConstraint(ImdbRecord):
+    table: str
+    name: str
+    type: str
+    definition: str
+    validated: bool
+
+
+class DatabaseIndex(ImdbRecord):
+    table: str
+    name: str
+    definition: str
+    primary: bool
+    unique: bool
+    valid: bool
+    ready: bool
+
+
+class DatabaseStatistic(ImdbRecord):
+    table: str
+    column: str
+    inherited: bool
+    null_frac: int | float
+    avg_width: int
+    n_distinct: int | float
+    most_common_vals: str | None
+    most_common_freqs: str | None
+    histogram_bounds: str | None
+    correlation: int | float | None
+    most_common_elems: str | None
+    most_common_elem_freqs: str | None
+    elem_count_histogram: str | None
+
+
+class DatabaseRelation(ImdbRecord):
+    table: str
+    relpages: int
+    reltuples: int | float
+    relallvisible: int
+    relfrozenxid: str
+    frozen_xid_age: int
+    relation_bytes: int
+    total_relation_bytes: int
+
+
+class DatabaseSnapshot(ImdbRecord):
+    identity: DatabaseIdentity
+    table_names: list[str] | None
+    table_rows: dict[str, int]
+    columns: list[DatabaseColumn] | None
+    constraints: list[DatabaseConstraint] | None
+    indexes: list[DatabaseIndex] | None
+    statistics: list[DatabaseStatistic] | None
+    relations: list[DatabaseRelation] | None
+
+
+class RepresentativeQueryOutput(ImdbFile):
+    csv: str
+
+
+class DatabaseChecksums(ImdbRecord):
+    table_names: Sha256
+    table_rows: Sha256
+    columns: Sha256
+    constraints: Sha256
+    indexes: Sha256
+    statistics: Sha256
+    representative_query_outputs: Sha256
+
+
+class LoadVerificationReport(ImdbRecord):
+    schema_version: Literal[1, 2] = 2
+    fixture_id: Literal["imdb"]
+    phase: Literal["load"] = "load"
+    captured_at_utc: str
+    source_manifest_sha256: Sha256
+    database: DatabaseSnapshot
+    representative_query_outputs: dict[str, RepresentativeQueryOutput]
+    checksums: DatabaseChecksums = Field(
+        validation_alias=AliasChoices("checksums", "fingerprints")
+    )
