@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from qorl.db.schemas import WorkerPoolConfig
 from qorl.util.hashing import sha256_file
 
-DEFAULT_EVALUATION_PROFILE = Path("configs/postgres/evaluation-worker-v1.json")
-DEFAULT_TRAINING_PROFILE = Path("configs/postgres/training-pool-v1.json")
+DEFAULT_POOL_CONFIG = Path("docker/worker_pool/configs/002-poolconf-4x8")
 NO_SWAP_BYTES = 0
 MIN_SIZE_TEXT_LENGTH = 2
 
@@ -83,6 +82,7 @@ class RuntimeProfile:
     path: Path
     sha256: str
     workers: tuple[WorkerResources, ...]
+    configuration: WorkerPoolConfig
 
     def manifest(self) -> dict[str, object]:
         return {
@@ -96,75 +96,48 @@ class RuntimeProfile:
 
 def load_runtime_profile(repository: Path, configured: Path) -> RuntimeProfile:
     path = configured if configured.is_absolute() else repository / configured
-    config = json.loads(path.read_text(encoding="utf-8"))
-    workers = config.get("workers")
-    worker_count = config.get("worker_count")
-    profile_id = config.get("profile_id")
-    if (
-        config.get("schema_version") != 1
-        or not isinstance(profile_id, str)
-        or not isinstance(worker_count, int)
-        or worker_count < 1
-        or not isinstance(workers, list)
-        or worker_count != len(workers)
-    ):
-        raise ValueError(f"invalid PostgreSQL runtime profile: {path}")
-
-    cpuset_mems = config.get("cpuset_mems")
-    memory_limit = config.get("worker_memory_limit")
-    shm_size = config.get("worker_shm_size")
-    port_base = config.get("worker_port_base")
-    if (
-        not isinstance(cpuset_mems, str)
-        or not cpuset_mems
-        or not isinstance(memory_limit, str)
-        or not isinstance(shm_size, str)
-        or not isinstance(port_base, int)
-        or not 1 <= port_base <= 65_536 - worker_count
-    ):
-        raise ValueError(f"invalid PostgreSQL runtime limits: {path}")
-
-    memory = size_bytes(memory_limit)
-    shm = size_bytes(shm_size)
+    if path.is_dir():
+        path = path / "poolconf.json"
+    path = path.resolve()
+    config = WorkerPoolConfig.model_validate_json(path.read_text(encoding="utf-8"))
+    memory = size_bytes(config.memory_limit)
+    shm = size_bytes(config.shm_size)
+    cpu_ids(config.cpuset_mems)
     resources: list[WorkerResources] = []
-    for index, worker in enumerate(workers):
-        cpuset = worker.get("cpuset")
-        physical_core_count = worker.get("physical_core_count")
-        if (
-            worker.get("slot") != index
-            or not isinstance(cpuset, str)
-            or not isinstance(physical_core_count, int)
-            or physical_core_count < 1
-        ):
-            raise ValueError(f"invalid PostgreSQL worker slot {index}: {path}")
-        cpu_ids(cpuset)
+    for index, worker in enumerate(config.workers):
+        cpu_ids(worker.cpuset)
         resources.append(
             WorkerResources(
                 index=index,
-                physical_core_count=physical_core_count,
-                cpuset=cpuset,
-                cpuset_mems=cpuset_mems,
-                memory_limit=memory_limit,
+                physical_core_count=worker.physical_core_count,
+                cpuset=worker.cpuset,
+                cpuset_mems=config.cpuset_mems,
+                memory_limit=config.memory_limit,
                 memory_bytes=memory,
                 memory_swap_bytes=NO_SWAP_BYTES,
-                shm_size=shm_size,
+                shm_size=config.shm_size,
                 shm_bytes=shm,
-                port=port_base + index,
+                port=worker.port,
             )
         )
 
     parsed = [cpu_ids(worker.cpuset) for worker in resources]
-    if sum(len(item) for item in parsed) != len(set().union(*parsed)):
+    if sum(len(item) for item in parsed) != len(
+        {cpu for item in parsed for cpu in item}
+    ):
         raise ValueError("PostgreSQL worker CPU sets must not overlap")
+    if len({worker.port for worker in resources}) != len(resources):
+        raise ValueError("PostgreSQL worker ports must be distinct")
     try:
         recorded_path = path.relative_to(repository)
     except ValueError:
         recorded_path = path
     return RuntimeProfile(
-        profile_id=profile_id,
+        profile_id=path.parent.name,
         path=recorded_path,
         sha256=sha256_file(path),
         workers=tuple(resources),
+        configuration=config,
     )
 
 

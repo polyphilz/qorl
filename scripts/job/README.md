@@ -8,7 +8,7 @@ database matches the original build.
 
 ## Inputs and trust boundary
 
-`data/job/manifest.json` pins:
+`benchmarks/job/manifest.json` pins:
 
 - The May 2013 IMDb archive URL, byte length, SHA-256, and every extracted
   member's byte length and SHA-256.
@@ -17,7 +17,7 @@ database matches the original build.
   query files.
 - Every expected table row count and the intended final maintenance procedure.
 
-The files under `data/raw/job-v1/` are downloaded inputs and remain ignored by
+The files under `benchmarks/raw/job-v1/` are downloaded inputs and remain ignored by
 git. The loader uses the trusted PostgreSQL administrator connection; the model
 and `qorl_runner` never receives loading, indexing, vacuuming, or snapshot tools.
 
@@ -25,7 +25,11 @@ and `qorl_runner` never receives loading, indexing, vacuuming, or snapshot tools
 
 The PostgreSQL image must already exist, and the two passwords required by
 `compose.yaml` must be present in the process environment or the repository's
-ignored `.env` file. From the repository root, run:
+ignored `.env` file. Fixture construction and restore verification use the
+`000-poolconf-1x32` pool configuration (32 GiB, 16 physical cores). Python
+entrypoints use the project environment through `uv run --frozen`.
+
+From the repository root, run:
 
 ```bash
 ./scripts/job/build-job-v1.sh
@@ -77,8 +81,8 @@ statistics, representative results, and restored database fingerprints match.
 
 ## Checked-in JOB task inventory
 
-`data/job/queries/` contains the 113 exact, human-readable JOB SQL
-files. `data/job/tasks.json` is the single machine-readable inventory:
+`benchmarks/job/queries/` contains the 113 exact, human-readable JOB SQL
+files. `benchmarks/job/tasks.json` is the single machine-readable inventory:
 it declares the entire collection held-out test data and records each query's
 template, SQL checksum, relation instances, table set, join predicates, and
 alias-independent join-graph fingerprint.
@@ -98,7 +102,7 @@ compare every file with a separately fetched upstream source directory, run:
 ```bash
 uv run python -m scripts.job.build_job_task_inventory \
   --check \
-  --source-dir data/raw/job-v1/source
+  --source-dir benchmarks/raw/job-v1/source
 ```
 
 The normal fixture pipeline fetches and verifies that raw source directory.

@@ -17,8 +17,8 @@ from typing import Any
 from qorl.util.hashing import sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
-DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/job-v1"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
+DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/job-v1"
 
 
 def verify_file(path: Path, spec: dict[str, Any]) -> None:

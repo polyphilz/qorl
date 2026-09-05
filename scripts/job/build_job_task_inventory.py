@@ -18,9 +18,9 @@ from qorl.workload.query_structure import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
-DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "data/raw/job-v1/source"
-DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "data/job"
+DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
+DEFAULT_SOURCE_DIR = REPOSITORY_ROOT / "benchmarks/raw/job-v1/source"
+DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "benchmarks/job"
 
 QUERY_NAME = re.compile(r"^(?P<template>[1-9][0-9]*)(?P<variant>[a-z])\.sql$")
 

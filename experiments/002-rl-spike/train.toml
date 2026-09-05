@@ -104,7 +104,7 @@ scoring = 600
 
 [orchestrator.train.source.env.agent.harness]
 id = "qorl-training"
-run_config = "configs/policy/run-v1.json"
+run_config = "model/configs/000-modelconf/modelconf.json"
 
 [orchestrator.train.source.env.agent.runtime]
 type = "subprocess"

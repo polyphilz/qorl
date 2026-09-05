@@ -63,7 +63,7 @@ uv run python experiments/005-protocol-sft-v2/run.py --gate
 - Dataset output: `outputs/sft/protocol-sft-v2/`
 - Training output: `outputs/sft/protocol-sft-train-v2/`
 - Teacher records: `experiments/005-protocol-sft-v2/teacher/`
-- Policy config: `configs/policy/run-v2.json`
+- Policy config: `model/configs/001-modelconf/modelconf.json`
 
 The `memoize` value retained in `teacher.json` records the completed smoke-test
 budget. Editing it would invalidate the checked-in teacher records' config

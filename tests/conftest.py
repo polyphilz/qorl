@@ -21,13 +21,8 @@ def repository_root() -> Path:
 @pytest.fixture(scope="session")
 def database_fixture(repository_root: Path) -> DatabaseFixture:
     database = json.loads(
-        (repository_root / "data/job/tasks.json").read_text(encoding="utf-8")
+        (repository_root / "benchmarks/job/tasks.json").read_text(encoding="utf-8")
     )["database"]
-    benchmark = json.loads(
-        (
-            repository_root / "docker/postgres/contract/benchmark.expected.json"
-        ).read_text(encoding="utf-8")
-    )
     snapshot = {
         "fixture_id": database["fixture_id"],
         "snapshot_id": database["snapshot_id"],
@@ -35,7 +30,6 @@ def database_fixture(repository_root: Path) -> DatabaseFixture:
         "postgresql": {"system_identifier": database["postgres_system_identifier"]},
         "image": {
             "id": database["postgres_image_id"],
-            "benchmark_config_id": benchmark["benchmark_config_id"],
         },
     }
     return DatabaseFixture(

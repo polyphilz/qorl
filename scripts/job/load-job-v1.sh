@@ -4,8 +4,9 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
-runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
-raw_dir="$repository_root/data/raw/job-v1"
+runtime_profile="$repository_root/docker/worker_pool/configs/000-poolconf-1x32/poolconf.json"
+postgres_config="$repository_root/docker/postgres/configs/000-pgconf-default"
+raw_dir="$repository_root/benchmarks/raw/job-v1"
 project_name="qorl-job-v1-build"
 skip_fetch=0
 
@@ -40,12 +41,14 @@ if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
 fi
 
 command -v docker >/dev/null
-command -v python3 >/dev/null
+command -v uv >/dev/null
 source "$repository_root/scripts/docker/runtime-profile.sh"
 qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
+source "$repository_root/scripts/docker/postgres-config.sh"
+qorl_load_postgres_config "$repository_root" "$postgres_config"
 
 if ((skip_fetch == 0)); then
-    python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+    uv run --project "$repository_root" --frozen python -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 fi
 
 raw_dir="$(cd -- "$raw_dir" && pwd)"
@@ -117,7 +120,7 @@ docker exec --interactive "$container" bash -Eeuo pipefail -c '
         --file=-
 ' < "$script_dir/finalize-job-v1.sql"
 
-docker exec "$container" qorl-assert-benchmark-config
+docker exec "$container" qorl-assert-config
 
 trap - ERR
 printf 'job-v1 load and finalization passed: project=%s container=%s volume=%s\n' \

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "dataset_id": "protocol-sft-v2",
   "seed": 20260903,
-  "policy_config": "configs/policy/run-v2.json",
+  "policy_config": "model/configs/001-modelconf/modelconf.json",
   "selection": "experiments/005-protocol-sft-v2/selection.json",
   "sampling": {
     "concurrency": 4,

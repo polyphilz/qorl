@@ -4,8 +4,9 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
-runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
-raw_dir="$repository_root/data/raw/job-v1"
+runtime_profile="$repository_root/docker/worker_pool/configs/000-poolconf-1x32/poolconf.json"
+postgres_config="$repository_root/docker/postgres/configs/000-pgconf-default"
+raw_dir="$repository_root/benchmarks/raw/job-v1"
 project_name="qorl-job-v1-restore"
 snapshot_manifest=""
 build_verification=""
@@ -59,6 +60,8 @@ if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
 fi
 source "$repository_root/scripts/docker/runtime-profile.sh"
 qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
+source "$repository_root/scripts/docker/postgres-config.sh"
+qorl_load_postgres_config "$repository_root" "$postgres_config"
 
 snapshot_manifest="$(cd -- "$(dirname -- "$snapshot_manifest")" && pwd)/$(basename -- "$snapshot_manifest")"
 build_verification="$(cd -- "$(dirname -- "$build_verification")" && pwd)/$(basename -- "$build_verification")"
@@ -67,7 +70,7 @@ output_dir="$(cd -- "$output_dir" && pwd)"
 raw_dir="$(cd -- "$raw_dir" && pwd)"
 
 readarray -t snapshot_fields < <(
-    python3 - "$snapshot_manifest" <<'PY'
+    uv run --project "$repository_root" --frozen python - "$snapshot_manifest" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -162,16 +165,17 @@ docker run \
 "${compose[@]}" up --detach --wait --no-build postgres
 container="$("${compose[@]}" ps --quiet postgres)"
 
-python3 -m scripts.job.verify_job_v1 \
+uv run --project "$repository_root" --frozen python -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \
     --phase restore \
     --compare-to "$build_verification" \
     --output "$output_dir/job-v1.database.restore.json"
 
-python3 -m qorl.db.capture \
+uv run --project "$repository_root" --frozen python -m qorl.db.capture \
     --container "$container" \
     --runtime-profile "$runtime_profile" \
+    --postgres-config "$postgres_config" \
     --output-dir "$output_dir" \
     --phase post
 
@@ -179,7 +183,7 @@ python3 -m qorl.db.capture \
 trap - ERR
 
 if [[ "$refresh_runtime_identity" -eq 1 ]]; then
-    python3 "$script_dir/update_snapshot_runtime.py" \
+    uv run --project "$repository_root" --frozen python "$script_dir/update_snapshot_runtime.py" \
         --snapshot-manifest "$snapshot_manifest"
 fi
 

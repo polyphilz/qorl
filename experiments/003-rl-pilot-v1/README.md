@@ -13,10 +13,9 @@ pilot's experiment-specific training and preflight logic.
 - Dependency: `experiments/002-rl-spike/` reads this experiment's frozen task
   selection
 
-The completed pre-RL report records the policy checksum from before
-`run_id_prefix` moved out of `configs/policy/run-v1.json`. Re-running the legacy
-`run.py` gate against the reorganized policy file will therefore reject that
-historical report; the completed pilot and validation artifacts remain valid.
+The pre-RL gate reads `model/configs/000-modelconf/modelconf.json`. The completed
+pre-RL report's policy checksum predates the configuration refactors, so the gate
+rejects that historical report. The recorded pilot and validation results remain valid.
 
 This experiment used `benchmark-v1`, with GEQO enabled. Results for tasks with
 at least 12 relations are not directly comparable with `benchmark-v2` results.

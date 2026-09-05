@@ -57,7 +57,7 @@ def test_final_run_is_pinned_to_its_inputs_and_limits(repository_root: Path) -> 
     )
     assert (
         config["env_vars"]["QORL_RL_WORKER_POOL_CONFIG"]
-        == "configs/postgres/training-pool-v1.json"
+        == "docker/worker_pool/configs/002-poolconf-4x8"
     )
     assert config["orchestrator"]["group_size"] == 4
     assert config["orchestrator"]["batch_size"] == 16

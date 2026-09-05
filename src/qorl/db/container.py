@@ -6,6 +6,7 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
+from qorl.db.config import PostgresConfig
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.resources import RuntimeProfile, WorkerResources, validate_host_topology
@@ -45,6 +46,7 @@ class PostgresContainer:
         project_name: str,
         runtime_profile: RuntimeProfile,
         resources: WorkerResources,
+        postgres_config: PostgresConfig | None = None,
     ) -> None:
         if resources not in runtime_profile.workers:
             raise ValueError("worker resources do not belong to runtime profile")
@@ -52,9 +54,16 @@ class PostgresContainer:
         self.project_name = project_name
         self.runtime_profile = runtime_profile
         self.resources = resources
+        self.postgres_config = postgres_config or PostgresConfig.load(
+            fixture.repository
+        )
         self.container = ""
         self.created = False
-        self.environment = {**os.environ, **resources.compose_environment}
+        self.environment = {
+            **os.environ,
+            **resources.compose_environment,
+            **self.postgres_config.compose_environment,
+        }
         self.compose = [
             "docker",
             "compose",
@@ -176,7 +185,7 @@ test ! -e "/target/$2/postmaster.pid"
         print("Starting PostgreSQL worker...")
         self.compose_command("up", "--detach", "--wait", "--no-build", "postgres")
         self.container = self.compose_command("ps", "--quiet", "postgres").strip()
-        self.command(["docker", "exec", self.container, "qorl-assert-benchmark-config"])
+        self.command(["docker", "exec", self.container, "qorl-assert-config"])
 
     def close(self) -> None:
         if not self.created:
@@ -199,5 +208,7 @@ test ! -e "/target/$2/postmaster.pid"
                 phase,
                 "--runtime-profile",
                 str(self.fixture.repository / self.runtime_profile.path),
+                "--postgres-config",
+                str(self.postgres_config.path),
             ]
         )

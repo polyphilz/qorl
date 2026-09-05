@@ -17,7 +17,7 @@ from qorl.sft.schemas import (
 
 def test_selection_is_balanced_and_disjoint(repository_root, load_experiment) -> None:
     builder = load_experiment("experiments/005-protocol-sft-v2/build_inventory.py")
-    source = load_json_object(repository_root / "data/ceb/tasks.json")
+    source = load_json_object(repository_root / "benchmarks/ceb/tasks.json")
     selection = builder["build"](source)
     sampling = selection.splits.sampling
     live_gate = selection.splits.live_gate
@@ -56,7 +56,7 @@ def test_dataset_config_pins_v2_policy_and_thresholds(repository_root) -> None:
         DatasetConfig,
     )
 
-    assert config.policy_config == "configs/policy/run-v2.json"
+    assert config.policy_config == "model/configs/001-modelconf/modelconf.json"
     assert config.sampling.concurrency == 4
     assert config.sampling.initial_samples_per_task == 4
     assert config.sampling.normal_maximum_samples_per_task == 6
@@ -122,9 +122,9 @@ def test_training_template_matches_the_sampling_context(repository_root) -> None
         .replace("__SEQUENCE_LENGTH__", "20480")
         .replace("__DATASET_SEED__", "20260903")
     )
-    policy = json.loads((repository_root / "configs/policy/run-v2.json").read_text())[
-        "policy"
-    ]
+    policy = json.loads(
+        (repository_root / "model/configs/001-modelconf/modelconf.json").read_text()
+    )["policy"]
 
     assert training["model"]["seq_len"] == policy["context_length"] == 20_480
     assert training["renderer"] == {"name": "qwen3.5", "enable_thinking": False}

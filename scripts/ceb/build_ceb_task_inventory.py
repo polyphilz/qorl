@@ -17,8 +17,8 @@ from qorl.workload.query_structure import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CEB_DIR = REPOSITORY_ROOT / "data/ceb"
-DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "data/job/tasks.json"
+DEFAULT_CEB_DIR = REPOSITORY_ROOT / "benchmarks/ceb"
+DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "benchmarks/job/tasks.json"
 
 
 def build_inventory(ceb_dir: Path, job_inventory_path: Path) -> dict[str, Any]:

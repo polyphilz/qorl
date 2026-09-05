@@ -15,7 +15,7 @@ from qorl.agent.client import ModelError
 from qorl.agent.types import PolicyType
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.pool import WorkerPool, WorkerSlot, load_pool
 from qorl.db.worker import PostgresWorker
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
 from qorl.measure.rollout import (
@@ -33,7 +33,7 @@ from qorl.util.hashing import sha256_file
 from qorl.util.io import utc_now, write_json
 from qorl.workload.taskset import TaskSet
 
-DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run-v2.json"
+DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -160,8 +160,6 @@ def load_run_config(
         raise RuntimeError(
             f"cannot load policy configuration {policy_path}: {error}"
         ) from error
-    if policy_value.get("schema_version") != 1:
-        raise RuntimeError("policy configuration schema_version must equal 1")
     policy = policy_value.get("policy")
     if not isinstance(policy, dict) or policy.get("type") not in {
         PolicyType.RANDOM_STRUCTURED_ACTION,
@@ -181,7 +179,13 @@ def load_run_config(
     }
 
 
-def run_benchmark(repository: Path, configured: str | None = None) -> Path:
+def run_benchmark(
+    repository: Path,
+    configured: str | None = None,
+    *,
+    pool_config_path: Path | None = None,
+) -> Path:
+    pool_config = load_pool(repository, pool_config_path=pool_config_path)
     fixture = DatabaseFixture.load(repository)
     task_set = TaskSet.load(repository, "job-v1", fixture.data_identity)
     config_path, config = load_run_config(repository, configured)
@@ -267,6 +271,7 @@ def run_benchmark(repository: Path, configured: str | None = None) -> Path:
         manifest_path,
         manifest,
         pool_field="worker_pool",
+        pool_config=pool_config,
     )
 
     def execute_task(

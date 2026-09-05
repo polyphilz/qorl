@@ -4,8 +4,9 @@ set -Eeuo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd -- "$script_dir/../.." && pwd)"
 export PYTHONPATH="$repository_root/src:$repository_root${PYTHONPATH:+:$PYTHONPATH}"
-runtime_profile="$repository_root/configs/postgres/evaluation-worker-v1.json"
-raw_dir="$repository_root/data/raw/job-v1"
+runtime_profile="$repository_root/docker/worker_pool/configs/000-poolconf-1x32/poolconf.json"
+postgres_config="$repository_root/docker/postgres/configs/000-pgconf-default"
+raw_dir="$repository_root/benchmarks/raw/job-v1"
 output_dir="$repository_root/artifacts/job-v1"
 build_project="qorl-job-v1-build"
 restore_project="qorl-job-v1-restore"
@@ -45,6 +46,8 @@ if [[ "$build_project" == "$restore_project" ]]; then
 fi
 source "$repository_root/scripts/docker/runtime-profile.sh"
 qorl_load_postgres_runtime_profile "$repository_root" "$runtime_profile"
+source "$repository_root/scripts/docker/postgres-config.sh"
+qorl_load_postgres_config "$repository_root" "$postgres_config"
 for project_name in "$build_project" "$restore_project"; do
     if [[ ! "$project_name" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
         echo "invalid Compose project name: $project_name" >&2
@@ -61,7 +64,7 @@ output_dir="$(cd -- "$output_dir" && pwd)"
 
 trap 'echo "job-v1 build stopped; failed resources were retained for diagnosis" >&2' ERR
 
-python3 -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
+uv run --project "$repository_root" --frozen python -m scripts.job.fetch_job_v1 --raw-dir "$raw_dir"
 raw_dir="$(cd -- "$raw_dir" && pwd)"
 
 source_manifest_copy="$output_dir/job-v1.source.json"
@@ -69,7 +72,7 @@ if [[ -e "$source_manifest_copy" ]]; then
     echo "refusing to overwrite source manifest copy: $source_manifest_copy" >&2
     exit 1
 fi
-cp "$repository_root/data/job/manifest.json" "$source_manifest_copy"
+cp "$repository_root/benchmarks/job/manifest.json" "$source_manifest_copy"
 
 "$script_dir/load-job-v1.sh" \
     --raw-dir "$raw_dir" \
@@ -91,22 +94,23 @@ if [[ -z "$build_volume" ]]; then
     exit 1
 fi
 
-python3 -m scripts.job.verify_job_v1 \
+uv run --project "$repository_root" --frozen python -m scripts.job.verify_job_v1 \
     --container "$container" \
     --raw-dir "$raw_dir" \
     --phase build \
     --output "$output_dir/job-v1.database.build.json"
 
-python3 -m qorl.db.capture \
+uv run --project "$repository_root" --frozen python -m qorl.db.capture \
     --container "$container" \
     --runtime-profile "$runtime_profile" \
+    --postgres-config "$postgres_config" \
     --output-dir "$output_dir" \
     --phase pre
 
 "${compose[@]}" stop --timeout 60 postgres
 container="$("${compose[@]}" ps --all --quiet postgres)"
 
-python3 -m scripts.job.seal_job_v1 \
+uv run --project "$repository_root" --frozen python -m scripts.job.seal_job_v1 \
     --container "$container" \
     --manifest "$output_dir/job-v1.source.json" \
     --build-verification "$output_dir/job-v1.database.build.json" \
@@ -125,7 +129,7 @@ python3 -m scripts.job.seal_job_v1 \
 docker volume rm "$build_volume" >/dev/null
 trap - ERR
 
-python3 - "$output_dir/job-v1.snapshot.json" <<'PY'
+uv run --project "$repository_root" --frozen python - "$output_dir/job-v1.snapshot.json" <<'PY'
 import json
 import sys
 from pathlib import Path

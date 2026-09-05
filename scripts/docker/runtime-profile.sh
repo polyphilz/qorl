@@ -10,7 +10,8 @@ qorl_load_postgres_runtime_profile() {
 
     rendered="$(
         PYTHONPATH="$repository_root/src${PYTHONPATH:+:$PYTHONPATH}" \
-        python3 "$repository_root/scripts/docker/profile_env.py" \
+        uv run --project "$repository_root" --frozen python \
+            "$repository_root/scripts/docker/profile_env.py" \
             "$profile" --validate-host
     )" || return
     while IFS= read -r assignment; do

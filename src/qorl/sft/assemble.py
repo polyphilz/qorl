@@ -162,7 +162,7 @@ def finalize_dataset(
     dataset_seed: int,
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb-v1")
-    overlap_path = repository / "data/ceb/provenance/job-overlap.json"
+    overlap_path = repository / "benchmarks/ceb/provenance/job-overlap.json"
     overlap = json.loads(overlap_path.read_text(encoding="utf-8"))
     eligible = {
         item["template_id"]

@@ -1,0 +1,11 @@
+{
+  "memory_limit": "8g",
+  "shm_size": "1g",
+  "cpuset_mems": "0",
+  "workers": [
+    {"cpuset": "0-3,16-19", "physical_core_count": 4, "port": 56000},
+    {"cpuset": "4-7,20-23", "physical_core_count": 4, "port": 56001},
+    {"cpuset": "8-11,24-27", "physical_core_count": 4, "port": 56002},
+    {"cpuset": "12-15,28-31", "physical_core_count": 4, "port": 56003}
+  ]
+}

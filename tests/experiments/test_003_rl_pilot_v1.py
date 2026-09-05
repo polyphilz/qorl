@@ -54,7 +54,7 @@ def test_paired_validation_cohort_and_seeds_are_frozen(
         2026083103,
     ]
     assert config["selection"] == "experiments/003-rl-pilot-v1/selection.json"
-    assert config["run_config"] == "configs/policy/run-v1.json"
+    assert config["run_config"] == "model/configs/000-modelconf/modelconf.json"
 
 
 def test_pre_rl_gate_checks_inputs_model_and_reward_variance(
@@ -65,7 +65,7 @@ def test_pre_rl_gate_checks_inputs_model_and_reward_variance(
     inputs = {
         "config_sha256": tmp_path / "experiments/003-rl-pilot-v1/validation.json",
         "selection_sha256": tmp_path / "experiments/003-rl-pilot-v1/selection.json",
-        "run_config_sha256": tmp_path / "configs/policy/run-v1.json",
+        "run_config_sha256": tmp_path / "model/configs/000-modelconf/modelconf.json",
     }
     for path in inputs.values():
         path.parent.mkdir(parents=True, exist_ok=True)

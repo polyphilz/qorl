@@ -9,9 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
+from qorl.db.config import DEFAULT_POSTGRES_CONFIG, PostgresConfig
 from qorl.db.exceptions import WorkerError
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.pool import WorkerPool, WorkerSlot, load_pool
 from qorl.db.worker import PostgresWorker
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
@@ -156,8 +157,12 @@ def calibrate(
     workload: str = "job",
     selection_path: Path | None = None,
     split: str | None = None,
+    postgres_config_path: Path = DEFAULT_POSTGRES_CONFIG,
+    pool_config_path: Path | None = None,
 ) -> Path:
     fixture = DatabaseFixture.load(repository)
+    postgres_config = PostgresConfig.load(repository, postgres_config_path)
+    pool_config = load_pool(repository, pool_config_path=pool_config_path)
     task_set_ids = {"job": "job-v1", "ceb": "ceb-v1"}
     if workload not in task_set_ids:
         raise RuntimeError(f"unknown calibration workload: {workload}")
@@ -180,16 +185,19 @@ def calibrate(
             task_set, selection_path, split
         )
         calibration_name = selection["inventory_id"]
-    worker_count = 4
+    worker_count = len(pool_config.workers)
 
     started_at = datetime.now(UTC)
-    calibration_id = started_at.strftime(f"{calibration_name}-%Y%m%dT%H%M%SZ")
+    calibration_id = started_at.strftime(
+        f"{calibration_name}-{postgres_config.config_id}"
+        f"-{pool_config.profile_id}-%Y%m%dT%H%M%SZ"
+    )
     output_dir = repository / "outputs/calibration" / calibration_id
     output_dir.mkdir(parents=True, exist_ok=False)
     task_dir = output_dir / "tasks"
 
     manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "calibration_id": calibration_id,
         "purpose": (
             "training timeout calibration"
@@ -203,7 +211,8 @@ def calibrate(
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": fixture.data_identity,
-        "runtime_identity": fixture.runtime_identity,
+        "runtime_identity": fixture.runtime_identity_for(postgres_config),
+        "postgres_config": postgres_config.manifest().model_dump(),
         "snapshot_manifest_sha256": sha256_file(fixture.snapshot_manifest_path),
         "orchestrator": {
             "qorl_version": __version__,
@@ -249,6 +258,8 @@ def calibrate(
         manifest_path,
         manifest,
         pool_field="worker_pool",
+        postgres_config=postgres_config,
+        pool_config=pool_config,
     )
 
     def execute_task(

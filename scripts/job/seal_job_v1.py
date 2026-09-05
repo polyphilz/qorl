@@ -15,7 +15,7 @@ from typing import Any
 from qorl.util.hashing import sha256_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/job/manifest.json"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
 
 
 def run(command: list[str]) -> str:
@@ -211,9 +211,6 @@ test -s "$partial"
             "id": image_id,
             "architecture": image["Architecture"],
             "os": image["Os"],
-            "benchmark_config_id": (image["Config"].get("Labels") or {}).get(
-                "io.qorl.benchmark.config-id"
-            ),
         },
         "source_volume": volume_name,
         "normalization": {

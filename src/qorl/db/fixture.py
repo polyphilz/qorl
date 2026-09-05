@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from qorl.db.config import PostgresConfig
 from qorl.util.hashing import sha256_file
 
 
@@ -74,10 +75,12 @@ class DatabaseFixture:
 
     @property
     def runtime_identity(self) -> dict[str, str]:
-        return {
-            "postgres_image_id": self.snapshot["image"]["id"],
-            "benchmark_config_id": self.snapshot["image"]["benchmark_config_id"],
-        }
+        return self.runtime_identity_for(PostgresConfig.load(self.repository))
+
+    def runtime_identity_for(self, postgres_config: PostgresConfig) -> dict[str, str]:
+        return postgres_config.runtime_identity(
+            self.snapshot["image"]["id"]
+        ).model_dump()
 
     def verify_archive(self) -> None:
         expected_bytes = self.snapshot["archive"]["bytes"]

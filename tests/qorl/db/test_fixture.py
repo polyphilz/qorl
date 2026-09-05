@@ -18,7 +18,6 @@ class TestDatabaseFixture:
                 "postgresql": {"system_identifier": "system"},
                 "image": {
                     "id": "sha256:image",
-                    "benchmark_config_id": "benchmark-v2",
                 },
             },
         )
@@ -31,5 +30,5 @@ class TestDatabaseFixture:
         }
         assert fixture.runtime_identity == {
             "postgres_image_id": "sha256:image",
-            "benchmark_config_id": "benchmark-v2",
+            "postgres_config_id": "000-pgconf-default",
         }

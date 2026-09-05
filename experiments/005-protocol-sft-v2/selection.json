@@ -78,8 +78,8 @@
   },
   "source": {
     "inventory_id": "ceb-v1-tasks-v1",
-    "path": "data/ceb/tasks.json",
-    "sha256": "3d3f514531694d4ed621890977b583a046db388a0f1493fe44978a2650891ab1"
+    "path": "benchmarks/ceb/tasks.json",
+    "sha256": "cb17b288b8a1dbfadb303e27263339913ef6f0b46c368f8491297f998b24484d"
   },
   "splits": {
     "live_gate": [

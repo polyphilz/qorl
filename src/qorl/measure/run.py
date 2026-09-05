@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from qorl.db.config import PostgresConfig
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, start_pool
+from qorl.db.resources import RuntimeProfile
 from qorl.util.io import write_json
 
 
@@ -33,6 +35,8 @@ class TaskRun:
         pool_field: str,
         environment_dir: Path | None = None,
         capture_environment: bool = True,
+        postgres_config: PostgresConfig | None = None,
+        pool_config: RuntimeProfile | None = None,
     ) -> None:
         self.fixture = fixture
         self.project_name = project_name
@@ -42,6 +46,8 @@ class TaskRun:
         self.pool_field = pool_field
         self.environment_dir = environment_dir or output_dir
         self.capture_environment = capture_environment
+        self.postgres_config = postgres_config
+        self.pool_config = pool_config
         self.pool: WorkerPool | None = None
 
     def __enter__(self) -> TaskRun:
@@ -52,7 +58,12 @@ class TaskRun:
         if self.pool is not None:
             raise RuntimeError("task run is already started")
         try:
-            self.pool = start_pool(self.fixture, self.project_name)
+            self.pool = start_pool(
+                self.fixture,
+                self.project_name,
+                postgres_config=self.postgres_config,
+                pool_config=self.pool_config,
+            )
             self.manifest[self.pool_field] = self.pool.manifest()
             self.write()
             if self.capture_environment:

@@ -1,35 +1,33 @@
 # PostgreSQL image
 
 This directory builds the database runtime shared by every QORL worker. It
-contains PostgreSQL 18.6, `pg_hint_plan` 1.8.0, the first-start role bootstrap,
-and the immutable [`benchmark-v2` contract](./contract/README.md). It contains
-no workload data, Python code, model weights, or host-specific resource shape.
+contains PostgreSQL 18.6, `pg_hint_plan` 1.8.0, and the first-start role
+bootstrap. It contains no workload data, Python code, model weights, or
+host-specific resource shape.
+
+`configs/NNN-pgconf*/` holds the selectable PostgreSQL configurations. Each
+directory contains `pg.conf`, its machine-readable expectations, and a short
+description of its differences from stock PostgreSQL. Reusable validation and
+state-capture commands live in `scripts/`.
+
+Create the next numbered config as a copy of the default with:
+
+```bash
+docker/postgres/scripts/create-new-config.sh
+```
+
+The script assigns the next three-digit prefix, updates the copied config ID,
+and leaves the new config ready for its deliberate settings edits.
 
 Exact upstream versions, commits, and checksums live in `versions.json`. The
 Dockerfile also records them as image labels and verifies the compiled
 extension before the image is accepted.
 
-Runtime resources are explicit profiles, not Compose defaults:
+Container resources are defined in [`docker/worker_pool/configs/`](../worker_pool/README.md).
+Calibration, training, and benchmark runs default to `002-poolconf-4x8`;
+fixture construction and restore verification use `000-poolconf-1x32`.
+The Python worker loads the selected configuration and supplies Compose's resource
+variables. Pool selection is independent of the PostgreSQL config.
 
-- `configs/postgres/evaluation-worker-v1.json` defines one worker for fixture
-  construction, restore verification, and manual image checks.
-- `configs/postgres/training-pool-v1.json` defines the four-worker pool used by
-  calibration, training, and benchmark runs.
-
-The Python worker loads the applicable profile and supplies every required
-Compose variable. For a manual development check, load the evaluation profile,
-start the service, and run the host-side smoke test:
-
-```bash
-source scripts/docker/runtime-profile.sh
-qorl_load_postgres_runtime_profile "$PWD" \
-  configs/postgres/evaluation-worker-v1.json
-docker compose build postgres
-docker compose up --detach --wait postgres
-scripts/docker/smoke-test-postgres.sh
-docker compose down --volumes
-```
-
-Building an image and freezing workload data are deliberately separate. See
-[`docker/README.md`](../README.md) for the full image-to-fixture-to-worker chain
-and [`scripts/job/README.md`](../../scripts/job/README.md) for fixture creation.
+See [`scripts/job/README.md`](../../scripts/job/README.md) for building and
+verifying the frozen database snapshot used by JOB and CEB.

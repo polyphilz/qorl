@@ -80,7 +80,7 @@ class TestQueryStructure:
         self, repository_root: Path
     ) -> None:
         inventory = json.loads(
-            (repository_root / "data/job/tasks.json").read_text(encoding="utf-8")
+            (repository_root / "benchmarks/job/tasks.json").read_text(encoding="utf-8")
         )
         task = inventory["tasks"][0]
         graph_hash, _topology_hash = task_join_fingerprints(task)

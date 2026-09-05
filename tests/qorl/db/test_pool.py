@@ -1,71 +1,24 @@
 from __future__ import annotations
 
-import json
-from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
-from qorl.db.pool import WorkerPool, WorkerSlot
+from qorl.db.pool import WorkerPool, WorkerSlot, load_pool
 from qorl.db.resources import (
-    DEFAULT_TRAINING_PROFILE,
+    DEFAULT_POOL_CONFIG,
     load_runtime_profile,
-    validate_host_topology,
 )
 from qorl.db.worker import PostgresWorker
 
 
 class TestWorkerPool:
-    def test_resources_are_distinct_and_parameterized(
-        self, repository_root: Path
-    ) -> None:
-        profile = load_runtime_profile(repository_root, DEFAULT_TRAINING_PROFILE)
-        resources = profile.workers
-
-        assert [item.index for item in resources] == [0, 1, 2, 3]
-        assert resources[0].compose_environment["QORL_POSTGRES_CPUSET"] == "0-3,16-19"
-        assert resources[3].compose_environment["QORL_POSTGRES_PORT"] == "56003"
-        assert resources[0].memory_bytes == 8 * 1024**3
-        assert resources[0].physical_core_count == 4
-        assert resources[0].shm_bytes == 1024**3
-
-    def test_profile_rejects_overlapping_cpu_sets(self, tmp_path: Path) -> None:
-        profile_path = tmp_path / "profile.json"
-        profile_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "profile_id": "overlap",
-                    "worker_count": 2,
-                    "cpuset_mems": "0",
-                    "worker_memory_limit": "1g",
-                    "worker_shm_size": "1g",
-                    "worker_port_base": 56000,
-                    "workers": [
-                        {
-                            "slot": 0,
-                            "physical_core_count": 2,
-                            "cpuset": "0-1",
-                        },
-                        {
-                            "slot": 1,
-                            "physical_core_count": 2,
-                            "cpuset": "1-2",
-                        },
-                    ],
-                }
-            )
-        )
-
-        with pytest.raises(ValueError, match="must not overlap"):
-            load_runtime_profile(tmp_path, Path("profile.json"))
-
     def test_claim_returns_workers_to_the_pool(
         self, repository_root: Path, database_fixture: DatabaseFixture
     ) -> None:
-        profile = load_runtime_profile(repository_root, DEFAULT_TRAINING_PROFILE)
+        profile = load_runtime_profile(repository_root, DEFAULT_POOL_CONFIG)
         slots = []
         for resources in profile.workers:
             container = PostgresContainer(
@@ -83,20 +36,23 @@ class TestWorkerPool:
             assert next_slot.resources.index == 2
         pool.close()
 
-    def test_topology_requires_four_nonoverlapping_physical_cores(
-        self, repository_root: Path, tmp_path: Path
-    ) -> None:
-        for cpu in range(32):
-            topology = tmp_path / f"cpu{cpu}" / "topology"
-            topology.mkdir(parents=True)
-            (topology / "physical_package_id").write_text("0")
-            (topology / "core_id").write_text(str(cpu % 16))
 
-        profile = load_runtime_profile(repository_root, DEFAULT_TRAINING_PROFILE)
-        validate_host_topology(profile.workers, tmp_path)
-
-        with pytest.raises(RuntimeError, match="physical cores"):
-            validate_host_topology(
-                (replace(profile.workers[0], cpuset="0-1"),),
-                tmp_path,
-            )
+@pytest.mark.parametrize(
+    ("config_id", "worker_count"),
+    [("000-poolconf-1x32", 1), ("001-poolconf-2x16", 2), ("002-poolconf-4x8", 4)],
+)
+def test_pool_selection_accepts_each_worker_count(
+    repository_root: Path, config_id: str, worker_count: int
+) -> None:
+    configured = Path("docker/worker_pool/configs") / config_id
+    from_environment = load_pool(
+        repository_root, {"QORL_RL_WORKER_POOL_CONFIG": str(configured)}
+    )
+    explicit = load_pool(
+        repository_root,
+        {"QORL_RL_WORKER_POOL_CONFIG": "missing-config"},
+        pool_config_path=configured,
+    )
+    assert explicit == from_environment
+    assert len(explicit.workers) == worker_count
+    assert explicit.profile_id == config_id

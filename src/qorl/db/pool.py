@@ -7,19 +7,17 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from qorl.db.config import PostgresConfig
 from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.resources import (
-    DEFAULT_TRAINING_PROFILE,
+    DEFAULT_POOL_CONFIG,
     RuntimeProfile,
     WorkerResources,
     load_runtime_profile,
     validate_host_topology,
 )
 from qorl.db.worker import PostgresWorker
-
-DEFAULT_POOL_CONFIG = DEFAULT_TRAINING_PROFILE
-EXPECTED_POOL_WORKERS = 4
 
 
 @dataclass(frozen=True)
@@ -56,7 +54,20 @@ class WorkerPool:
             "config_sha256": self.pool_config_sha256,
             "worker_count": len(self.workers),
             "workers": [slot.resources.manifest() for slot in self.workers],
+            "postgres_config": self.postgres_config.manifest().model_dump(),
         }
+
+    @property
+    def postgres_config(self) -> PostgresConfig:
+        if not self.workers:
+            raise RuntimeError("PostgreSQL worker pool is empty")
+        return self.workers[0].container.postgres_config
+
+    @property
+    def runtime_identity(self) -> dict[str, str]:
+        if not self.workers:
+            raise RuntimeError("PostgreSQL worker pool is empty")
+        return self.workers[0].worker.fixture.runtime_identity_for(self.postgres_config)
 
     def close(self) -> None:
         for slot in reversed(self.workers):
@@ -64,23 +75,27 @@ class WorkerPool:
 
 
 def load_pool(
-    repository: Path, environment: Mapping[str, str] = os.environ
+    repository: Path,
+    environment: Mapping[str, str] = os.environ,
+    *,
+    pool_config_path: Path | None = None,
 ) -> RuntimeProfile:
-    configured = Path(
+    configured = pool_config_path or Path(
         environment.get("QORL_RL_WORKER_POOL_CONFIG", DEFAULT_POOL_CONFIG)
     )
-    profile = load_runtime_profile(repository, configured)
-    if len(profile.workers) != EXPECTED_POOL_WORKERS:
-        raise ValueError("the training profile must define exactly four workers")
-    return profile
+    return load_runtime_profile(repository, configured)
 
 
 def start_pool(
     fixture: DatabaseFixture,
     project_name: str,
     environment: Mapping[str, str] = os.environ,
+    *,
+    postgres_config: PostgresConfig | None = None,
+    pool_config: RuntimeProfile | None = None,
 ) -> WorkerPool:
-    profile = load_pool(fixture.repository, environment)
+    profile = pool_config or load_pool(fixture.repository, environment)
+    selected_config = postgres_config or PostgresConfig.load(fixture.repository)
     validate_host_topology(profile.workers)
     slots: list[WorkerSlot] = []
     try:
@@ -90,6 +105,7 @@ def start_pool(
                 f"{project_name}-{resources.index}",
                 profile,
                 resources,
+                selected_config,
             )
             worker = PostgresWorker(container)
             slots.append(WorkerSlot(resources, container, worker))

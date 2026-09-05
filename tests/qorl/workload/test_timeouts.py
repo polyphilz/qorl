@@ -39,7 +39,7 @@ class TestCalibratedTimeout:
                 task_set,
                 {
                     "postgres_image_id": "sha256:different-runtime",
-                    "benchmark_config_id": "benchmark-v1",
+                    "postgres_config_id": "000-pgconf-default",
                 },
             )
 
@@ -51,7 +51,7 @@ class TestCalibratedTimeout:
         document["data_identity"] = task_set.data_identity
         document["runtime_identity"] = {
             "postgres_image_id": "sha256:current-runtime",
-            "benchmark_config_id": "benchmark-v2",
+            "postgres_config_id": "000-pgconf-default",
         }
         document.pop("database")
         path = tmp_path / "timeouts.json"
@@ -67,6 +67,6 @@ class TestCalibratedTimeout:
                 task_set,
                 {
                     "postgres_image_id": "sha256:different-runtime",
-                    "benchmark_config_id": "benchmark-v2",
+                    "postgres_config_id": "000-pgconf-default",
                 },
             )

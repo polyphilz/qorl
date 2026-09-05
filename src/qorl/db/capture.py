@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from qorl.db.config import PostgresConfig
+from qorl.db.resources import load_runtime_profile
 from qorl.util.hashing import sha256_file
 
 
@@ -240,8 +242,8 @@ printf 'shm_size_bytes=%s\n' "$((shm_block_size * shm_blocks))"
 
 def image_file_digests(container: str) -> dict[str, str]:
     paths = (
-        "/etc/qorl/benchmark-v2.conf",
-        "/usr/share/qorl/benchmark-v2.expected.json",
+        "/etc/qorl/postgres.conf",
+        "/usr/share/qorl/postgres-config.expected.json",
         "/usr/share/qorl/versions.json",
         "/usr/lib/postgresql/18/lib/pg_hint_plan.so",
     )
@@ -296,23 +298,21 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--container", required=True, help="container name or ID")
     parser.add_argument("--runtime-profile", required=True, type=Path)
+    parser.add_argument("--postgres-config", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--phase", required=True, choices=("pre", "post"))
     args = parser.parse_args()
 
     container = args.container
-    profile_path = args.runtime_profile.resolve()
-    profile = json.loads(profile_path.read_text(encoding="utf-8"))
-    if profile.get("schema_version") != 1 or not isinstance(
-        profile.get("profile_id"), str
-    ):
-        raise RuntimeError("invalid PostgreSQL runtime profile")
+    profile = load_runtime_profile(Path.cwd(), args.runtime_profile)
+    profile_path = (Path.cwd() / profile.path).resolve()
+    postgres_config = PostgresConfig.load(Path.cwd(), args.postgres_config)
     try:
         displayed_profile_path = str(profile_path.relative_to(Path.cwd()))
     except ValueError:
         displayed_profile_path = str(profile_path)
     assertion_output = run(
-        ["docker", "exec", container, "/usr/local/bin/qorl-assert-benchmark-config"]
+        ["docker", "exec", container, "/usr/local/bin/qorl-assert-config"]
     ).strip()
 
     artifact_contents = {
@@ -342,15 +342,18 @@ def main() -> None:
 
     environment = {
         "schema_version": 1,
-        "benchmark_config_id": image_info["labels"].get("io.qorl.benchmark.config-id"),
+        "runtime_identity": postgres_config.runtime_identity(
+            container_info["image_id"]
+        ).model_dump(),
+        "postgres_config": postgres_config.manifest().model_dump(),
         "phase": args.phase,
         "captured_at_utc": datetime.now(UTC).isoformat(),
         "assertion_output": assertion_output,
         "runtime_profile": {
-            "id": profile["profile_id"],
+            "id": profile.profile_id,
             "path": displayed_profile_path,
-            "sha256": sha256_file(profile_path),
-            "configuration": profile,
+            "sha256": profile.sha256,
+            "configuration": profile.configuration.model_dump(),
         },
         "host": {
             "hostname": platform.node(),
@@ -436,7 +439,7 @@ def main() -> None:
         environment_path, json.dumps(environment, indent=2, sort_keys=True) + "\n"
     )
 
-    print(f"captured {args.phase} benchmark environment in {args.output_dir}")
+    print(f"captured {args.phase} PostgreSQL environment in {args.output_dir}")
 
 
 if __name__ == "__main__":

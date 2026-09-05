@@ -10,6 +10,6 @@ dist/
 
 # Local database artifacts and experiment output must be added through explicit,
 # checksummed manifests rather than accidentally committed.
-data/raw/
+benchmarks/raw/
 artifacts/
 outputs/

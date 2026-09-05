@@ -451,9 +451,9 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    run_policy = json.loads((repository / "configs/policy/run-v1.json").read_text())[
-        "policy"
-    ]
+    run_policy = json.loads(
+        (repository / "model/configs/000-modelconf/modelconf.json").read_text()
+    )["policy"]
     snapshot = model_snapshot(run_policy)
     adapter = adapter_path(repository) if arguments.policies != "base" else None
     vllm = repository / ".venv-vllm/bin/vllm"

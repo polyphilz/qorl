@@ -30,7 +30,6 @@ class QorlRuntime(WorkerPool):
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
         self.data_identity = task_set.data_identity
-        self.runtime_identity = workers[0].worker.fixture.runtime_identity
 
     def pool_manifest(self) -> dict[str, object]:
         return self.manifest()
@@ -57,7 +56,7 @@ def start(
                 repository,
                 Path(configured_timeouts),
                 task_set,
-                fixture.runtime_identity,
+                pool.runtime_identity,
             )
             if configured_timeouts
             else None

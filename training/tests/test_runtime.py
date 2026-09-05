@@ -10,7 +10,7 @@ from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerSlot
 from qorl.db.resources import (
-    DEFAULT_TRAINING_PROFILE,
+    DEFAULT_POOL_CONFIG,
     load_runtime_profile,
     validate_host_topology,
 )
@@ -22,14 +22,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def database_fixture() -> DatabaseFixture:
-    database = json.loads((ROOT / "data/job/tasks.json").read_text(encoding="utf-8"))[
-        "database"
-    ]
-    benchmark = json.loads(
-        (ROOT / "docker/postgres/contract/benchmark.expected.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    database = json.loads(
+        (ROOT / "benchmarks/job/tasks.json").read_text(encoding="utf-8")
+    )["database"]
     return DatabaseFixture(
         repository=ROOT,
         snapshot_manifest_path=ROOT / "artifacts/job-v1/job-v1.snapshot.json",
@@ -41,7 +36,6 @@ def database_fixture() -> DatabaseFixture:
             "postgresql": {"system_identifier": database["postgres_system_identifier"]},
             "image": {
                 "id": database["postgres_image_id"],
-                "benchmark_config_id": benchmark["benchmark_config_id"],
             },
         },
     )
@@ -49,7 +43,7 @@ def database_fixture() -> DatabaseFixture:
 
 class WorkerPoolTest(unittest.TestCase):
     def test_resources_are_distinct_and_parameterized(self) -> None:
-        resources = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE).workers
+        resources = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG).workers
 
         self.assertEqual([item.index for item in resources], [0, 1, 2, 3])
         self.assertEqual(
@@ -63,7 +57,7 @@ class WorkerPoolTest(unittest.TestCase):
         self.assertEqual(resources[0].memory_bytes, 8 * 1024**3)
 
     def test_claim_returns_workers_to_the_pool(self) -> None:
-        profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
+        profile = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG)
         fixture = database_fixture()
         slots = []
         for resources in profile.workers:
@@ -96,7 +90,7 @@ class WorkerPoolTest(unittest.TestCase):
                 (topology / "physical_package_id").write_text("0")
                 (topology / "core_id").write_text(str(cpu % 16))
 
-            profile = load_runtime_profile(ROOT, DEFAULT_TRAINING_PROFILE)
+            profile = load_runtime_profile(ROOT, DEFAULT_POOL_CONFIG)
             validate_host_topology(profile.workers, root)
 
             with self.assertRaisesRegex(RuntimeError, "physical cores"):

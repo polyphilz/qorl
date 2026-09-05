@@ -9,8 +9,8 @@ from typing import Any
 from qorl.db.fixture import FixtureError, data_identity
 
 TASK_SET_PATHS = {
-    "job-v1": Path("data/job/tasks.json"),
-    "ceb-v1": Path("data/ceb/tasks.json"),
+    "job-v1": Path("benchmarks/job/tasks.json"),
+    "ceb-v1": Path("benchmarks/ceb/tasks.json"),
 }
 
 

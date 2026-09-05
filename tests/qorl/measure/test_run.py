@@ -69,7 +69,7 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = FakePool()
-    monkeypatch.setattr(run, "start_pool", lambda *_: pool)
+    monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     manifest: dict[str, object] = {}
     task_run = TaskRun(
         SimpleNamespace(),
@@ -100,7 +100,7 @@ def test_task_run_can_leave_capture_to_each_policy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = FakePool()
-    monkeypatch.setattr(run, "start_pool", lambda *_: pool)
+    monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     task_run = TaskRun(
         SimpleNamespace(),
         "test-run",
@@ -122,7 +122,7 @@ def test_task_run_cancels_pending_tasks_after_an_unhandled_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pool = FakePool()
-    monkeypatch.setattr(run, "start_pool", lambda *_: pool)
+    monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     monkeypatch.setattr(run, "ThreadPoolExecutor", ImmediateExecutor)
     monkeypatch.setattr(run, "as_completed", lambda futures: iter(futures))
     task_run = TaskRun(

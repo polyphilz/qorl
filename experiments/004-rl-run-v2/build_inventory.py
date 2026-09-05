@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "data/ceb/tasks.json"
+SOURCE = ROOT / "benchmarks/ceb/tasks.json"
 PILOT = ROOT / "experiments/003-rl-pilot-v1/selection.json"
 OUTPUT = ROOT / "experiments/004-rl-run-v2/selection.json"
 SALT = "qorl-rl-run-v2"

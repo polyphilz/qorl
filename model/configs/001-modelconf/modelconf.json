@@ -1,0 +1,26 @@
+{
+  "policy": {
+    "type": "qo_agent",
+    "model": "empero-ai/Qwen3.8-4B-Distill",
+    "revision": "c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e",
+    "vllm_version": "0.27.1",
+    "use_flashinfer_sampler": false,
+    "enable_prefix_caching": true,
+    "base_url": "http://127.0.0.1:8000/v1",
+    "context_length": 20480,
+    "maximum_model_turns": 64,
+    "request_timeout_seconds": 300,
+    "seed": 20260827,
+    "sampling": {
+      "max_tokens": 2048,
+      "temperature": 1.0,
+      "top_p": 1.0,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "repetition_penalty": 1.0
+    },
+    "thinking": false,
+    "tool_call_parser": "qwen3_coder"
+  }
+}

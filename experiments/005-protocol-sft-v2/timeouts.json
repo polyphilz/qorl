@@ -19,7 +19,7 @@
   "selection": {
     "inventory_id": "qorl-protocol-sft-v2-selection-v1",
     "path": "experiments/005-protocol-sft-v2/selection.json",
-    "sha256": "67a2d59e54b5436e7112eac9a5890d813db0028515031935d3280527feed565e",
+    "sha256": "6055e0e37e0210073390f68a1b6fc94ddceb0ca01c76c12215985e88c750260f",
     "split": "sampling"
   },
   "source_calibration": {

@@ -21,3 +21,8 @@ containing at least 12 relations are not directly comparable with
 `benchmark-v2` results. Its timeout manifest is also bound to the old image and
 is intentionally rejected by `QorlRuntime.start` after the benchmark-v2 image
 rebuild; the completed v2 run remains a valid historical artifact.
+
+The training and concurrency configs point to `docker/worker_pool/configs/002-poolconf-4x8`
+after the pool-config refactor. Its resource allocation matches the recorded run;
+a new invocation records the new pool ID and checksum. Historical outputs retain
+their original provenance.

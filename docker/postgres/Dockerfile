@@ -50,7 +50,6 @@ LABEL org.opencontainers.image.title="qorl-postgres" \
       org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QORL plan-steering experiments" \
       org.opencontainers.image.version="18.6-pg_hint_plan-1.8.0" \
       org.opencontainers.image.source="https://github.com/ossc-db/pg_hint_plan" \
-      io.qorl.benchmark.config-id="benchmark-v2" \
       io.qorl.postgresql.version="18.6" \
       io.qorl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
       io.qorl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
@@ -65,11 +64,11 @@ COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/18
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/18/extension/ /usr/share/postgresql/18/extension/
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/qorl/ /usr/share/qorl/
 
-COPY contract/benchmark.conf /etc/qorl/benchmark-v2.conf
-COPY contract/benchmark.expected.json /usr/share/qorl/benchmark-v2.expected.json
+COPY configs/000-pgconf-default/pg.conf /etc/qorl/postgres.conf
+COPY configs/000-pgconf-default/config.expected.json /usr/share/qorl/postgres-config.expected.json
 COPY versions.json /usr/share/qorl/versions.json
-COPY --chmod=0555 contract/assert-benchmark-config.sh /usr/local/bin/qorl-assert-benchmark-config
-COPY --chmod=0555 contract/dump-postgres-state.sh /usr/local/bin/qorl-dump-postgres-state
+COPY --chmod=0555 scripts/assert-config.sh /usr/local/bin/qorl-assert-config
+COPY --chmod=0555 scripts/dump-postgres-state.sh /usr/local/bin/qorl-dump-postgres-state
 COPY --chmod=0555 initdb/bootstrap.sh /docker-entrypoint-initdb.d/bootstrap.sh
 
 RUN set -eux; \
@@ -80,10 +79,10 @@ RUN set -eux; \
     grep --fixed-strings "default_version = '${PG_HINT_PLAN_VERSION}'" \
         /usr/share/postgresql/18/extension/pg_hint_plan.control
 
-# Run the full contract check during startup. The very long steady-state
+# Run the full config check during startup. The very long steady-state
 # interval avoids health probes adding noise to timed benchmark queries; the
 # orchestrator performs explicit pre/post checks for every run.
 HEALTHCHECK --interval=168h --timeout=15s --start-period=1m --start-interval=1s --retries=1 \
-    CMD ["/usr/local/bin/qorl-assert-benchmark-config"]
+    CMD ["/usr/local/bin/qorl-assert-config"]
 
-CMD ["postgres", "-c", "config_file=/etc/qorl/benchmark-v2.conf"]
+CMD ["postgres", "-c", "config_file=/etc/qorl/postgres.conf"]

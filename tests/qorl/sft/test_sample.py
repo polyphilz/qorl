@@ -9,7 +9,7 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.pool import WorkerPool, WorkerSlot
-from qorl.db.resources import DEFAULT_TRAINING_PROFILE, load_runtime_profile
+from qorl.db.resources import DEFAULT_POOL_CONFIG, load_runtime_profile
 from qorl.db.worker import PostgresWorker
 from qorl.measure.schemas import Baseline, RunStatus
 from qorl.sft.sample import (
@@ -94,7 +94,7 @@ def test_unexpected_rollout_error_is_recorded(
         seed=1,
         sampling_mode=SamplingMode.NORMAL,
     )
-    profile = load_runtime_profile(repository_root, DEFAULT_TRAINING_PROFILE)
+    profile = load_runtime_profile(repository_root, DEFAULT_POOL_CONFIG)
     resources = profile.workers[0]
     container = PostgresContainer(
         database_fixture, "test-sft-sample", profile, resources

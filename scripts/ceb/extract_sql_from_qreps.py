@@ -16,10 +16,12 @@ from qorl.util.hashing import sha256_bytes, sha256_file
 from qorl.workload.ceb import extract_sql_bytes
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
-DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb"
-DEFAULT_UNIQUE_SOURCE = REPOSITORY_ROOT / "data/raw/ceb-v1/source/imdb-unique-plans"
-DEFAULT_OUTPUT = REPOSITORY_ROOT / "data/ceb"
+DEFAULT_SOURCE_MANIFEST = REPOSITORY_ROOT / "benchmarks/ceb/manifest.json"
+DEFAULT_FULL_SOURCE = REPOSITORY_ROOT / "benchmarks/raw/ceb-v1/source/imdb"
+DEFAULT_UNIQUE_SOURCE = (
+    REPOSITORY_ROOT / "benchmarks/raw/ceb-v1/source/imdb-unique-plans"
+)
+DEFAULT_OUTPUT = REPOSITORY_ROOT / "benchmarks/ceb"
 
 
 def manifest_sha256(records: list[dict[str, Any]], key: str, path_key: str) -> str:

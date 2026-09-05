@@ -25,9 +25,24 @@ services:
     mem_limit: ${QORL_POSTGRES_MEMORY_LIMIT:?Load a PostgreSQL runtime profile}
     memswap_limit: ${QORL_POSTGRES_MEMORY_SWAP_LIMIT:?Load a PostgreSQL runtime profile}
     shm_size: ${QORL_POSTGRES_SHM_SIZE:?Load a PostgreSQL runtime profile}
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/qorl/postgres.conf
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/qorl-assert-config"]
+      interval: 168h
+      timeout: 15s
+      start_period: 1m
+      start_interval: 1s
+      retries: 1
     stop_grace_period: 1m
     volumes:
       - qorl-postgres-data:/var/lib/postgresql
+      - ${QORL_POSTGRES_CONFIG_FILE:?Select a PostgreSQL config}:/etc/qorl/postgres.conf:ro
+      - ${QORL_POSTGRES_EXPECTED_FILE:?Select a PostgreSQL config}:/usr/share/qorl/postgres-config.expected.json:ro
+      - ${QORL_POSTGRES_ASSERT_SCRIPT:?Select a PostgreSQL config}:/usr/local/bin/qorl-assert-config:ro
+      - ${QORL_POSTGRES_DUMP_SCRIPT:?Select a PostgreSQL config}:/usr/local/bin/qorl-dump-postgres-state:ro
 
 volumes:
   qorl-postgres-data:

@@ -18,8 +18,8 @@ from typing import Any, BinaryIO
 from qorl.util.hashing import sha256_stream
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MANIFEST = REPOSITORY_ROOT / "data/ceb/manifest.json"
-DEFAULT_RAW_DIR = REPOSITORY_ROOT / "data/raw/ceb-v1"
+DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/ceb/manifest.json"
+DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/ceb-v1"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
 QUERY_ARCHIVE_PATH_PARTS = 5
 

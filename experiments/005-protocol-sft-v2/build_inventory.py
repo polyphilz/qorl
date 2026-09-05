@@ -23,7 +23,7 @@ from qorl.sft.schemas import (
 from qorl.util.hashing import sha256_file
 
 ROOT = Path(__file__).resolve().parents[2]
-SOURCE = ROOT / "data/ceb/tasks.json"
+SOURCE = ROOT / "benchmarks/ceb/tasks.json"
 OUTPUT = ROOT / "experiments/005-protocol-sft-v2/selection.json"
 SALT = "qorl-protocol-sft-v2"
 SAMPLING_TASKS_PER_TEMPLATE = 25

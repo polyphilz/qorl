@@ -136,7 +136,7 @@ def synthetic_demo(
             "data_identity": task_set.data_identity,
             "runtime_identity": {
                 "postgres_image_id": "sha256:test",
-                "benchmark_config_id": "benchmark-v2",
+                "postgres_config_id": "000-pgconf-default",
             },
             "maximum_model_turns": maximum_turns,
             "call_sequence": call_sequence,

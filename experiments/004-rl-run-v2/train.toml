@@ -17,7 +17,7 @@ num_infer_gpus = 1
 
 [env_vars]
 VLLM_USE_FLASHINFER_SAMPLER = "0"
-QORL_RL_WORKER_POOL_CONFIG = "configs/postgres/training-pool-v1.json"
+QORL_RL_WORKER_POOL_CONFIG = "docker/worker_pool/configs/002-poolconf-4x8"
 QORL_RL_TIMEOUT_MANIFEST = "experiments/004-rl-run-v2/timeouts.json"
 
 [trainer.model]
@@ -107,7 +107,7 @@ scoring = 600
 
 [orchestrator.train.source.env.agent.harness]
 id = "qorl-training"
-run_config = "configs/policy/run-v1.json"
+run_config = "model/configs/000-modelconf/modelconf.json"
 
 [orchestrator.train.source.env.agent.runtime]
 type = "subprocess"
