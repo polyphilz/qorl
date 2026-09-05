@@ -190,24 +190,5 @@
       "statistics_target": 100,
       "checkpoint_after_vacuum": true
     }
-  },
-  "schema_source": {
-    "repository_url": "https://github.com/gregrahn/join-order-benchmark",
-    "commit": "a39603662e023e449cb2121997a5034df9e02ebf",
-    "archive": {
-      "url": "https://codeload.github.com/gregrahn/join-order-benchmark/tar.gz/a39603662e023e449cb2121997a5034df9e02ebf",
-      "filename": "join-order-benchmark-a39603662e023e449cb2121997a5034df9e02ebf.tar.gz",
-      "bytes": 12313,
-      "sha256": "6a57357a67950dbd507f8a7cebdbed1d0a3806b3de445b8dd20f82f0d4aa7593"
-    },
-    "schema": {
-      "path": "schema.sql",
-      "sha256": "1d10ba0c9a881e890aeb951c0960cc4e3472c9c9695ce1edb6493e9e4466d3d2"
-    },
-    "indexes": {
-      "path": "fkindexes.sql",
-      "sha256": "727909bbbb9b0ae2b7d5739cfcd066992fc4bf1e984b29d87bcc700c4e2583cc",
-      "secondary_index_count": 23
-    }
   }
 }

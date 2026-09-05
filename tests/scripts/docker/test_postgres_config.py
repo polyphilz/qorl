@@ -17,10 +17,7 @@ class TestPostgresConfig:
     ) -> None:
         compose = (repository_root / "compose.yaml").read_text()
         assert "${QORL_IMDB_DATA_DIR:-./data/raw/tables}:/qorl/imdb-data:ro" in compose
-        assert (
-            "${QORL_IMDB_SOURCE_DIR:-./benchmarks/raw/job/source}:/qorl/imdb-source:ro"
-            in compose
-        )
+        assert "imdb-source" not in compose
         assert "QORL_IMDB_FIXTURE_ID" not in compose
         assert not (repository_root / "compose.fixture-build.yaml").exists()
         launcher = (repository_root / "src/qorl/db/container.py").read_text()
@@ -39,23 +36,22 @@ class TestPostgresConfig:
         for config_dir in root.iterdir():
             assert {path.name for path in config_dir.iterdir()} == expected
 
-    def test_fixture_entrypoints_use_one_fixed_postgres_and_pool_config(
+    def test_fixture_loader_uses_one_fixed_postgres_and_pool_config(
         self, repository_root: Path
     ) -> None:
-        for name in ("load_verify_archive.py", "restore_and_verify.py"):
-            script = (repository_root / "scripts/imdb" / name).read_text(
-                encoding="utf-8"
-            )
-            assert (
-                'POSTGRES_CONFIG = Path("docker/postgres/configs/000-pgconf-default")'
-                in script
-            )
-            assert (
-                'POOL_CONFIG = Path("docker/worker_pool/configs/000-poolconf-1x32")'
-                in script
-            )
-            assert "PostgresContainer(" in script
-            assert "scripts/docker" not in script
+        script = (repository_root / "scripts/imdb/load_verify_archive.py").read_text(
+            encoding="utf-8"
+        )
+        assert (
+            'POSTGRES_CONFIG = Path("docker/postgres/configs/000-pgconf-default")'
+            in script
+        )
+        assert (
+            'POOL_CONFIG = Path("docker/worker_pool/configs/000-poolconf-1x32")'
+            in script
+        )
+        assert "PostgresContainer(" in script
+        assert "scripts/docker" not in script
 
     def test_configs_define_every_prompt_visible_planner_setting(
         self, repository_root: Path

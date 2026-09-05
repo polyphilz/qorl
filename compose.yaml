@@ -40,7 +40,6 @@ services:
     volumes:
       - qorl-postgres-data:/var/lib/postgresql
       - ${QORL_IMDB_DATA_DIR:-./data/raw/tables}:/qorl/imdb-data:ro
-      - ${QORL_IMDB_SOURCE_DIR:-./benchmarks/raw/job/source}:/qorl/imdb-source:ro
       - ${QORL_POSTGRES_CONFIG_FILE:?Select a PostgreSQL config}:/etc/qorl/postgres.conf:ro
       - ${QORL_POSTGRES_EXPECTED_FILE:?Select a PostgreSQL config}:/usr/share/qorl/postgres-config.expected.json:ro
       - ${QORL_POSTGRES_ASSERT_SCRIPT:?Select a PostgreSQL config}:/usr/local/bin/qorl-assert-config:ro

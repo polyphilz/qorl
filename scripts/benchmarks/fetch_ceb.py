@@ -6,57 +6,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import tarfile
 import tempfile
-import urllib.request
 from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
-from qorl.util.hashing import sha256_stream
+from scripts.shared.download import download
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/ceb/manifest.json"
 DEFAULT_RAW_DIR = REPOSITORY_ROOT / "benchmarks/raw/ceb"
 TREE_NAMES = {"full": "imdb", "unique_plans": "imdb-unique-plans"}
 QUERY_ARCHIVE_PATH_PARTS = 5
-
-
-def verify_file(path: Path, specification: dict[str, Any]) -> None:
-    if not path.is_file():
-        raise RuntimeError(f"required archive is missing: {path}")
-    if path.stat().st_size != specification["bytes"]:
-        raise RuntimeError(f"archive byte length differs: {path}")
-    with path.open("rb") as source:
-        actual = sha256_stream(source)
-    if actual != specification["sha256"]:
-        raise RuntimeError(
-            f"archive SHA-256 differs: expected={specification['sha256']} "
-            f"actual={actual}"
-        )
-
-
-def download(url: str, target: Path, specification: dict[str, Any]) -> None:
-    if target.exists():
-        verify_file(target, specification)
-        print(f"verified cached CEB archive: {target}")
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_name(f".{target.name}.part.{os.getpid()}")
-    request = urllib.request.Request(url, headers={"User-Agent": "qorl-ceb/1"})
-    try:
-        with urllib.request.urlopen(request) as response, partial.open("xb") as output:
-            shutil.copyfileobj(response, output, length=1024 * 1024)
-            output.flush()
-            os.fsync(output.fileno())
-        verify_file(partial, specification)
-        partial.replace(target)
-    except BaseException:
-        partial.unlink(missing_ok=True)
-        raise
-    print(f"downloaded and verified CEB archive: {target}")
 
 
 def safe_path(name: str) -> PurePosixPath:
@@ -197,7 +160,12 @@ def main() -> None:
         raise RuntimeError("manifest is not ceb")
     specification = manifest["source"]["archive"]
     archive = args.raw_dir / specification["filename"]
-    download(specification["url"], archive, specification)
+    download(
+        specification["url"],
+        archive,
+        expected_size_in_bytes=specification["bytes"],
+        expected_checksum=specification["sha256"],
+    )
     extract(archive, args.raw_dir / "source", manifest)
     print("ceb recovered source inputs verified")
 

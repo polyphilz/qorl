@@ -29,7 +29,12 @@ def test_fetch_uses_source_without_recovery_report(
 
     archive = manifest["source"]["archive"]
     path = raw / archive["filename"]
-    download.assert_called_once_with(archive["url"], path, archive)
+    download.assert_called_once_with(
+        archive["url"],
+        path,
+        expected_size_in_bytes=archive["bytes"],
+        expected_checksum=archive["sha256"],
+    )
     extract.assert_called_once_with(path, raw / "source", manifest)
 
 

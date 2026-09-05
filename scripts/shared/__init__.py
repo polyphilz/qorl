@@ -1,1 +1,1 @@
-"""Shared helpers for preparation scripts."""
+"""Shared utilities for repository scripts."""

@@ -1,10 +1,13 @@
+import io
 import json
 import sys
+import tarfile
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
+from qorl.util.hashing import sha256_bytes
 from scripts.benchmarks import fetch_job
 
 
@@ -46,6 +49,7 @@ def test_job_fetch_downloads_only_queries(
     monkeypatch.setattr(fetch_job, "extract_source", Mock())
     raw = tmp_path / "job"
     (raw / "source").mkdir(parents=True)
+    archive = value["source"]["archive"]
     for path in (repository_root / "benchmarks/job/queries").glob("*.sql"):
         (raw / "source" / path.name).symlink_to(path)
     if not valid:
@@ -59,5 +63,59 @@ def test_job_fetch_downloads_only_queries(
     else:
         with pytest.raises(RuntimeError, match="JOB query count or checksum"):
             fetch_job.main()
-    archive = value["source"]["archive"]
-    download.assert_called_once_with(archive["url"], raw / archive["filename"], archive)
+    download.assert_called_once_with(
+        archive["url"],
+        raw / archive["filename"],
+        expected_size_in_bytes=archive["bytes"],
+        expected_checksum=archive["sha256"],
+    )
+
+
+@pytest.mark.parametrize("mismatch", ["bytes", "sha256"])
+def test_job_fetch_rejects_invalid_archive(
+    repository_root: Path, tmp_path: Path, monkeypatch, mismatch: str
+) -> None:
+    manifest = json.loads(
+        (repository_root / "benchmarks/job/manifest.json").read_text()
+    )
+    contents = b"archive"
+    archive = manifest["source"]["archive"]
+    archive["bytes"] = len(contents)
+    archive["sha256"] = sha256_bytes(contents)
+    if mismatch == "bytes":
+        archive["bytes"] += 1
+    else:
+        archive["sha256"] = sha256_bytes(b"different")
+    config = tmp_path / "manifest.json"
+    config.write_text(json.dumps(manifest))
+    (tmp_path / archive["filename"]).write_bytes(contents)
+    extraction = Mock()
+    monkeypatch.setattr(fetch_job, "extract_source", extraction)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fetch_job", "--manifest", str(config), "--raw-dir", str(tmp_path)],
+    )
+
+    message = "Size mismatch" if mismatch == "bytes" else "SHA-256 mismatch"
+    with pytest.raises(RuntimeError, match=message):
+        fetch_job.main()
+    extraction.assert_not_called()
+
+
+@pytest.mark.parametrize("member", ["../outside", "/absolute", "root/../../outside"])
+def test_source_paths_cannot_escape(member: str) -> None:
+    with pytest.raises(RuntimeError, match="unsafe archive member"):
+        fetch_job.safe_member_path(member)
+
+
+def test_extract_source_strips_the_upstream_root(tmp_path: Path) -> None:
+    archive = tmp_path / "source.tar.gz"
+    contents = b"SELECT 1;"
+    with tarfile.open(archive, "w:gz") as output:
+        member = tarfile.TarInfo("upstream/1a.sql")
+        member.size = len(contents)
+        output.addfile(member, io.BytesIO(contents))
+    target = tmp_path / "source"
+    fetch_job.extract_source(archive, target)
+    assert (target / "1a.sql").read_bytes() == contents

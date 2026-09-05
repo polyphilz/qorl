@@ -1,5 +1,5 @@
 {
-  "include": ["src", "training/src"],
+  "include": ["src", "training/src", "scripts"],
   "extraPaths": ["src", "training/src"],
   "pythonVersion": "3.12",
   "typeCheckingMode": "strict",
