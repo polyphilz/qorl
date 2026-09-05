@@ -8,7 +8,6 @@ from urllib.response import addinfourl
 
 import pytest
 
-from qorl.util.hashing import sha256_bytes
 from scripts.shared import download as downloader
 
 
@@ -24,63 +23,22 @@ def http_response(contents: bytes) -> HTTPResponse:
     return response
 
 
-def test_cached_file_is_verified_without_network(tmp_path: Path, monkeypatch) -> None:
+def test_cached_file_is_preserved_without_network(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / "archive.tgz"
     contents = b"archive"
     target.write_bytes(contents)
     network = Mock(side_effect=AssertionError("cached file must not be downloaded"))
     monkeypatch.setattr(downloader.urllib.request, "urlopen", network)
 
-    downloader.download(
-        "https://example.invalid/archive", target, len(contents), sha256_bytes(contents)
-    )
+    downloader.download("https://example.invalid/archive", target)
 
     network.assert_not_called()
     assert target.read_bytes() == contents
 
 
-@pytest.mark.parametrize("cached", [False, True], ids=["downloaded", "cached"])
-@pytest.mark.parametrize("mismatch", ["size", "checksum"])
-def test_invalid_file_reports_expected_and_actual_values(
-    tmp_path: Path, monkeypatch, cached: bool, mismatch: str
-) -> None:
-    target = tmp_path / "archive.tgz"
-    contents = b"archive"
-    expected_size = len(contents) + (1 if mismatch == "size" else 0)
-    expected_checksum = sha256_bytes(
-        b"different" if mismatch == "checksum" else contents
-    )
-    if cached:
-        target.write_bytes(contents)
-    network = Mock(return_value=http_response(contents))
-    monkeypatch.setattr(downloader.urllib.request, "urlopen", network)
-    label = "Size mismatch" if mismatch == "size" else "SHA-256 mismatch"
-
-    with pytest.raises(RuntimeError, match=label) as error:
-        downloader.download(
-            "https://example.invalid/archive", target, expected_size, expected_checksum
-        )
-
-    message = str(error.value)
-    assert target.name in message
-    if mismatch == "size":
-        assert f"expected {expected_size} bytes" in message
-        assert f"got {len(contents)} bytes" in message
-    else:
-        assert f"expected {expected_checksum}" in message
-        assert f"got {sha256_bytes(contents)}" in message
-    if cached:
-        network.assert_not_called()
-        assert target.read_bytes() == contents
-        assert list(tmp_path.iterdir()) == [target]
-    else:
-        network.assert_called_once()
-        assert not list(tmp_path.iterdir())
-
-
 @pytest.mark.parametrize("contents", [b"archive", b""], ids=["nonempty", "empty"])
 @pytest.mark.parametrize("response_kind", ["http", "file"])
-def test_download_verifies_and_publishes_the_file(
+def test_download_publishes_the_file(
     tmp_path: Path, monkeypatch, contents: bytes, response_kind: str
 ) -> None:
     target = tmp_path / "nested/archive.tgz"
@@ -92,9 +50,7 @@ def test_download_verifies_and_publishes_the_file(
     network = Mock(return_value=response)
     monkeypatch.setattr(downloader.urllib.request, "urlopen", network)
 
-    downloader.download(
-        "https://example.invalid/archive", target, len(contents), sha256_bytes(contents)
-    )
+    downloader.download("https://example.invalid/archive", target)
 
     assert target.read_bytes() == contents
     assert list(target.parent.iterdir()) == [target]
@@ -118,9 +74,7 @@ def test_network_failure_removes_partial_downloads(
     monkeypatch.setattr(downloader.urllib.request, "urlopen", network)
 
     with pytest.raises(OSError, match=f"{failure} failed"):
-        downloader.download(
-            "https://example.invalid/archive", target, 7, sha256_bytes(b"archive")
-        )
+        downloader.download("https://example.invalid/archive", target)
 
     assert not list(tmp_path.iterdir())
 
@@ -138,8 +92,6 @@ def test_progress_uses_kib_and_is_opt_in(
     downloader.download(
         "https://example.invalid/archive",
         tmp_path / "archive.tgz",
-        len(contents),
-        sha256_bytes(contents),
         print_progress=print_progress,
         progress_interval_in_kib=2,
     )
@@ -179,21 +131,7 @@ def test_nonpositive_progress_interval_is_rejected(
         downloader.download(
             "https://example.invalid/archive",
             tmp_path / "archive.tgz",
-            0,
-            sha256_bytes(b""),
             progress_interval_in_kib=interval,
-        )
-    network.assert_not_called()
-
-
-def test_directory_target_is_rejected_without_network(
-    tmp_path: Path, monkeypatch
-) -> None:
-    network = Mock()
-    monkeypatch.setattr(downloader.urllib.request, "urlopen", network)
-    with pytest.raises(RuntimeError, match="Expected a regular file"):
-        downloader.download(
-            "https://example.invalid/archive", tmp_path, 0, sha256_bytes(b"")
         )
     network.assert_not_called()
 
@@ -210,8 +148,6 @@ def test_unsupported_response_is_closed_and_rejected(
         downloader.download(
             "https://example.invalid/archive",
             tmp_path / "archive",
-            0,
-            sha256_bytes(b""),
         )
 
     assert response.closed

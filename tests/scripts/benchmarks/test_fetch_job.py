@@ -3,7 +3,7 @@ import json
 import sys
 import tarfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -44,9 +44,10 @@ def test_job_fetch_downloads_only_queries(
     assert "dataset" not in value
     assert "schema" not in value["source"]
     assert "indexes" not in value["source"]
-    download = Mock()
-    monkeypatch.setattr(fetch_job, "download", download)
-    monkeypatch.setattr(fetch_job, "extract_source", Mock())
+    operations = Mock()
+    monkeypatch.setattr(fetch_job, "download", operations.download)
+    monkeypatch.setattr(fetch_job, "verify_file", operations.verify_file)
+    monkeypatch.setattr(fetch_job, "extract_source", operations.extract_source)
     raw = tmp_path / "job"
     (raw / "source").mkdir(parents=True)
     archive = value["source"]["archive"]
@@ -63,23 +64,31 @@ def test_job_fetch_downloads_only_queries(
     else:
         with pytest.raises(RuntimeError, match="JOB query count or checksum"):
             fetch_job.main()
-    download.assert_called_once_with(
-        archive["url"],
-        raw / archive["filename"],
-        expected_size_in_bytes=archive["bytes"],
-        expected_checksum=archive["sha256"],
-    )
+    path = raw / archive["filename"]
+    assert operations.mock_calls == [
+        call.download(archive["url"], path),
+        call.verify_file(
+            path,
+            expected_size_in_bytes=archive["bytes"],
+            expected_checksum=archive["sha256"],
+        ),
+        call.extract_source(path, raw / "source"),
+    ]
 
 
+@pytest.mark.parametrize("cached", [False, True], ids=["downloaded", "cached"])
 @pytest.mark.parametrize("mismatch", ["bytes", "sha256"])
 def test_job_fetch_rejects_invalid_archive(
-    repository_root: Path, tmp_path: Path, monkeypatch, mismatch: str
+    repository_root: Path, tmp_path: Path, monkeypatch, cached: bool, mismatch: str
 ) -> None:
     manifest = json.loads(
         (repository_root / "benchmarks/job/manifest.json").read_text()
     )
     contents = b"archive"
+    upstream = tmp_path / "upstream.tgz"
+    upstream.write_bytes(contents)
     archive = manifest["source"]["archive"]
+    archive["url"] = upstream.as_uri()
     archive["bytes"] = len(contents)
     archive["sha256"] = sha256_bytes(contents)
     if mismatch == "bytes":
@@ -88,7 +97,8 @@ def test_job_fetch_rejects_invalid_archive(
         archive["sha256"] = sha256_bytes(b"different")
     config = tmp_path / "manifest.json"
     config.write_text(json.dumps(manifest))
-    (tmp_path / archive["filename"]).write_bytes(contents)
+    if cached:
+        (tmp_path / archive["filename"]).write_bytes(contents)
     extraction = Mock()
     monkeypatch.setattr(fetch_job, "extract_source", extraction)
     monkeypatch.setattr(
@@ -101,6 +111,7 @@ def test_job_fetch_rejects_invalid_archive(
     with pytest.raises(RuntimeError, match=message):
         fetch_job.main()
     extraction.assert_not_called()
+    assert (tmp_path / archive["filename"]).read_bytes() == contents
 
 
 @pytest.mark.parametrize("member", ["../outside", "/absolute", "root/../../outside"])

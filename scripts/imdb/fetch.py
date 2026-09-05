@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 
 from scripts.imdb.schemas import ImdbManifest
 from scripts.shared.download import download
+from scripts.shared.verify import verify_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 IMDB_MANIFEST = REPOSITORY_ROOT / "scripts/imdb/manifest.json"
@@ -55,10 +56,13 @@ def main() -> None:
     download(
         dataset.source_url,
         archive,
-        expected_size_in_bytes=dataset.archive.bytes,
-        expected_checksum=dataset.archive.sha256,
         print_progress=True,
         progress_interval_in_kib=PROGRESS_INTERVAL_IN_KIB,
+    )
+    verify_file(
+        archive,
+        expected_size_in_bytes=dataset.archive.bytes,
+        expected_checksum=dataset.archive.sha256,
     )
     extract_dataset(archive, IMDB_RAW_DATA_PATH / "tables")
 

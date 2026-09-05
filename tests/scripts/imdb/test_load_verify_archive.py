@@ -6,12 +6,14 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError
 
 from qorl.db.container import PostgresContainer
 from qorl.db.fixture import DatabaseFixture
 from qorl.db.resources import load_runtime_profile
 from qorl.util.hashing import sha256_bytes
 from scripts.imdb import load_verify_archive as load
+from scripts.imdb.schemas import ImdbManifest, ImdbMember
 
 
 @pytest.mark.parametrize(
@@ -64,7 +66,9 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
     )
     (tmp_path / "data/raw/tables").mkdir(parents=True)
     calls = []
-    monkeypatch.setattr(load, "verify_inputs", lambda *_: calls.append("check-inputs"))
+    monkeypatch.setattr(
+        load, "verify_against_manifest", lambda *_: calls.append("check-inputs")
+    )
     for operation in ("create", "start", "stop", "close"):
         monkeypatch.setattr(
             PostgresContainer,
@@ -164,40 +168,86 @@ def test_archive_requires_clean_shutdown_and_writes_no_manifest(
 
 
 @pytest.mark.parametrize(
-    ("contents", "error"),
+    ("change", "error"),
     [
-        (b"expected", None),
-        (None, "required file is missing"),
-        (b"short", "size mismatch"),
-        (b"modified", "SHA-256 mismatch"),
+        (None, None),
+        ("missing", "missing=\\['title.csv'\\]"),
+        ("unexpected", "unexpected=\\['extra.csv'\\]"),
+        ("size", "Size mismatch"),
+        ("checksum", "SHA-256 mismatch"),
     ],
-    ids=["valid", "missing", "wrong-size", "wrong-hash"],
+    ids=["valid", "missing", "unexpected", "wrong-size", "wrong-checksum"],
 )
-def test_verify_file(tmp_path: Path, contents: bytes | None, error: str | None) -> None:
-    path = tmp_path / "title.csv"
-    if contents is not None:
-        path.write_bytes(contents)
-    specification = {"bytes": len(b"expected"), "sha256": sha256_bytes(b"expected")}
+def test_verify_against_manifest_checks_extracted_files(
+    repository_root: Path, tmp_path: Path, change: str | None, error: str | None
+) -> None:
+    manifest = ImdbManifest.model_validate_json(
+        (repository_root / "scripts/imdb/manifest.json").read_text()
+    )
+    contents = b"expected"
+    members = {
+        name: ImdbMember(bytes=len(contents), sha256=sha256_bytes(contents))
+        for name in ("title.csv", "schematext.sql")
+    }
+    manifest = manifest.model_copy(
+        update={"dataset": manifest.dataset.model_copy(update={"members": members})}
+    )
+    manifest_path = tmp_path / "scripts/imdb/manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(manifest.model_dump_json())
+    target = tmp_path / "data/raw/tables"
+    target.mkdir(parents=True)
+    for name in members:
+        if change != "missing" or name != "title.csv":
+            (target / name).write_bytes(contents)
+    if change == "unexpected":
+        (target / "extra.csv").write_bytes(contents)
+    elif change == "size":
+        (target / "title.csv").write_bytes(b"short")
+    elif change == "checksum":
+        (target / "title.csv").write_bytes(b"modified")
 
     if error is None:
-        load.verify_file(path, specification)
+        load.verify_against_manifest(tmp_path)
     else:
         with pytest.raises(RuntimeError, match=error):
-            load.verify_file(path, specification)
+            load.verify_against_manifest(tmp_path)
 
 
-def test_verify_inputs_checks_only_the_extracted_dataset(
-    repository_root: Path, monkeypatch
+def test_verify_against_manifest_rejects_invalid_manifest(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "scripts/imdb/manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}")
+
+    with pytest.raises(ValidationError, match="dataset"):
+        load.verify_against_manifest(tmp_path)
+
+
+def test_load_database_state_renders_sql_file(
+    repository_root: Path, tmp_path: Path, monkeypatch, database_state
 ) -> None:
-    manifest = json.loads((repository_root / "scripts/imdb/manifest.json").read_text())
-    dataset_check = Mock()
-    monkeypatch.setattr(load, "verify_dataset_directory", dataset_check)
+    query = Mock(return_value=json.dumps(database_state))
+    monkeypatch.setattr(load, "admin_psql", query)
+    monkeypatch.chdir(tmp_path)
 
-    load.verify_inputs(repository_root)
-
-    dataset_check.assert_called_once_with(
-        repository_root / "data/raw/tables", manifest["dataset"]["members"]
+    assert (
+        load.load_database_state("container", ["title", "movie_info"]) == database_state
     )
+
+    expected_sql = (
+        (repository_root / "scripts/imdb/get_snapshot.sql")
+        .read_text(encoding="utf-8")
+        .format(
+            table_array="'title', 'movie_info'",
+            row_queries=(
+                "SELECT 'title' AS table_name, count(*)::bigint AS row_count "
+                "FROM public.title\nUNION ALL\n"
+                "SELECT 'movie_info' AS table_name, count(*)::bigint AS row_count "
+                "FROM public.movie_info"
+            ),
+        )
+    )
+    query.assert_called_once_with("container", expected_sql)
 
 
 @pytest.fixture
@@ -301,7 +351,9 @@ def test_load_rejects_invalid_inputs_before_creating_a_container(
 ) -> None:
     (tmp_path / "data/raw/tables").mkdir(parents=True)
     monkeypatch.setattr(
-        load, "verify_inputs", Mock(side_effect=RuntimeError("invalid inputs"))
+        load,
+        "verify_against_manifest",
+        Mock(side_effect=RuntimeError("invalid inputs")),
     )
     container = Mock(side_effect=AssertionError("invalid inputs must not be loaded"))
     monkeypatch.setattr(load, "PostgresContainer", container)

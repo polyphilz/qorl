@@ -3,10 +3,11 @@ import json
 import sys
 import tarfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
+from qorl.util.hashing import sha256_bytes
 from scripts.benchmarks import fetch_ceb
 
 
@@ -16,10 +17,10 @@ def test_fetch_uses_source_without_recovery_report(
     config = tmp_path / "manifest.json"
     config.write_bytes((repository_root / "benchmarks/ceb/manifest.json").read_bytes())
     manifest = json.loads(config.read_text())
-    download = Mock()
-    extract = Mock()
-    monkeypatch.setattr(fetch_ceb, "download", download)
-    monkeypatch.setattr(fetch_ceb, "extract", extract)
+    operations = Mock()
+    monkeypatch.setattr(fetch_ceb, "download", operations.download)
+    monkeypatch.setattr(fetch_ceb, "verify_file", operations.verify_file)
+    monkeypatch.setattr(fetch_ceb, "extract", operations.extract)
     raw = tmp_path / "raw"
     monkeypatch.setattr(
         sys, "argv", ["fetch_ceb", "--manifest", str(config), "--raw-dir", str(raw)]
@@ -29,13 +30,50 @@ def test_fetch_uses_source_without_recovery_report(
 
     archive = manifest["source"]["archive"]
     path = raw / archive["filename"]
-    download.assert_called_once_with(
-        archive["url"],
-        path,
-        expected_size_in_bytes=archive["bytes"],
-        expected_checksum=archive["sha256"],
+    assert operations.mock_calls == [
+        call.download(archive["url"], path),
+        call.verify_file(
+            path,
+            expected_size_in_bytes=archive["bytes"],
+            expected_checksum=archive["sha256"],
+        ),
+        call.extract(path, raw / "source", manifest),
+    ]
+
+
+@pytest.mark.parametrize("cached", [False, True], ids=["downloaded", "cached"])
+@pytest.mark.parametrize("mismatch", ["bytes", "sha256"])
+def test_ceb_fetch_rejects_invalid_archive(
+    repository_root: Path, tmp_path: Path, monkeypatch, cached: bool, mismatch: str
+) -> None:
+    manifest = json.loads(
+        (repository_root / "benchmarks/ceb/manifest.json").read_text()
     )
-    extract.assert_called_once_with(path, raw / "source", manifest)
+    contents = b"archive"
+    upstream = tmp_path / "upstream.tgz"
+    upstream.write_bytes(contents)
+    archive = manifest["source"]["archive"]
+    archive["url"] = upstream.as_uri()
+    archive["bytes"] = len(contents) + (1 if mismatch == "bytes" else 0)
+    archive["sha256"] = sha256_bytes(b"different" if mismatch == "sha256" else contents)
+    config = tmp_path / "manifest.json"
+    config.write_text(json.dumps(manifest))
+    if cached:
+        (tmp_path / archive["filename"]).write_bytes(contents)
+    extraction = Mock()
+    monkeypatch.setattr(fetch_ceb, "extract", extraction)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["fetch_ceb", "--manifest", str(config), "--raw-dir", str(tmp_path)],
+    )
+
+    message = "Size mismatch" if mismatch == "bytes" else "SHA-256 mismatch"
+    with pytest.raises(RuntimeError, match=message):
+        fetch_ceb.main()
+
+    extraction.assert_not_called()
+    assert (tmp_path / archive["filename"]).read_bytes() == contents
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""Download files and check their expected size and SHA-256."""
+"""Download missing files without verifying their contents."""
 
 from __future__ import annotations
 
@@ -9,53 +9,27 @@ from http.client import HTTPResponse
 from pathlib import Path
 from urllib.response import addinfourl
 
-from qorl.util.hashing import sha256_file
-
 BYTES_PER_KIB = 1024
 TRANSFER_BLOCK_BYTES = 1024 * 1024
 DEFAULT_PROGRESS_INTERVAL_IN_KIB = 128_000
 
 
-def verify_file(
-    target: Path, expected_size_in_bytes: int, expected_checksum: str
-) -> None:
-    if not target.is_file():
-        raise RuntimeError(
-            f"Expected a regular file at {target}; it is missing or is not a file."
-        )
-    actual_size = target.stat().st_size
-    if actual_size != expected_size_in_bytes:
-        raise RuntimeError(
-            f"Size mismatch for {target}: expected {expected_size_in_bytes} bytes, "
-            f"got {actual_size} bytes."
-        )
-    actual_checksum = sha256_file(target)
-    if actual_checksum != expected_checksum:
-        raise RuntimeError(
-            f"SHA-256 mismatch for {target}: expected {expected_checksum}, "
-            f"got {actual_checksum}."
-        )
-
-
 def download(
     url: str,
     target: Path,
-    expected_size_in_bytes: int,
-    expected_checksum: str,
     *,
     print_progress: bool = False,
     progress_interval_in_kib: int = DEFAULT_PROGRESS_INTERVAL_IN_KIB,
 ) -> None:
-    """Verify a cached file or download and verify it before publishing it.
+    """Download a missing file, leaving existing targets untouched.
 
     progress_interval_in_kib is measured in KiB (1,024 bytes); the default is 125 MiB.
-    Invalid cached files are left untouched. Failed downloads leave no partial file.
+    Interrupted downloads leave no partial file. Callers verify completed files.
     """
     if progress_interval_in_kib <= 0:
         raise ValueError("progress_interval_in_kib must be greater than zero.")
     if target.exists():
-        verify_file(target, expected_size_in_bytes, expected_checksum)
-        print(f"verified cached file: {target}")
+        print(f"using existing file: {target}")
         return
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -85,6 +59,5 @@ def download(
                     next_progress = (downloaded // interval_bytes + 1) * interval_bytes
             output.flush()
             os.fsync(output.fileno())
-        verify_file(temporary, expected_size_in_bytes, expected_checksum)
         temporary.replace(target)
-    print(f"downloaded and verified: {target}")
+    print(f"downloaded: {target}")

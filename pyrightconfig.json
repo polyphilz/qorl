@@ -1,6 +1,6 @@
 {
   "include": ["src", "training/src", "scripts"],
-  "extraPaths": ["src", "training/src"],
+  "extraPaths": ["src", "training/src", "scripts"],
   "pythonVersion": "3.12",
   "typeCheckingMode": "strict",
   "reportMissingImports": "none",

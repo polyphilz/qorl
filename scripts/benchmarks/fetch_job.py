@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from qorl.util.hashing import sha256_bytes, sha256_file
 from scripts.shared.download import download
+from scripts.shared.verify import verify_file
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = REPOSITORY_ROOT / "benchmarks/job/manifest.json"
@@ -72,8 +73,8 @@ def main() -> None:
         raise RuntimeError("manifest is not the JOB workload")
     archive_specification = manifest["source"]["archive"]
     archive = args.raw_dir / archive_specification["filename"]
-    download(
-        archive_specification["url"],
+    download(archive_specification["url"], archive)
+    verify_file(
         archive,
         expected_size_in_bytes=archive_specification["bytes"],
         expected_checksum=archive_specification["sha256"],
