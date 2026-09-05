@@ -99,7 +99,9 @@ def build_document(
     messages = sample.training_transcript
     if trace is None or messages is None or sample.default is None:
         raise RuntimeError("selected sample is incomplete")
-    tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
+    tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(
+        [task.model_dump() for task in task_set.tasks]
+    )
     task = next(item for item in tasks if item.get("task_id") == sample.task_id)
     candidates: dict[str, CandidateEvidence] = {}
     if selected.kind == ExampleKind.SYNTAX:

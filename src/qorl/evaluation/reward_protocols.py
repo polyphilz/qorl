@@ -326,7 +326,7 @@ def run_audit(
         raise RuntimeError("unexpected reward-protocol case manifest")
 
     task_set = TaskSet.load(repository, config["task_set"])
-    tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    tasks = {task.task_id: task.model_dump() for task in task_set.tasks}
     output_dir.mkdir(parents=True, exist_ok=False)
     report_path = output_dir / "report.json"
     report: dict[str, Any] = {

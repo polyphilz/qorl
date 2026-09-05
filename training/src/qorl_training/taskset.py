@@ -93,7 +93,7 @@ class QorlTaskset(vf.Taskset[QorlTask, QorlTasksetConfig]):
         )
         selection = json.loads(selection_path.read_text(encoding="utf-8"))
         selected = selected_items(selection, self.config.split)
-        tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+        tasks = {task.task_id: task.model_dump() for task in task_set.tasks}
         for index, item in enumerate(selected):
             task = tasks[item["task_id"]]
             expected_partition = (

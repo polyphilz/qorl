@@ -105,9 +105,7 @@ def selected_tasks(
     task_set: TaskSet, selection_path: Path, split: str | None = None
 ) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    if selection.get("source", {}).get("inventory_id") != task_set.inventory.get(
-        "inventory_id"
-    ):
+    if selection.get("source", {}).get("inventory_id") != task_set.task_set_id:
         raise RuntimeError("calibration selection references a different inventory")
     splits = selection.get("splits")
     if not isinstance(splits, dict) or not splits:
@@ -122,7 +120,7 @@ def selected_tasks(
         selected = splits[split]
     except (KeyError, TypeError) as error:
         raise RuntimeError(f"calibration selection has no {split!r} split") from error
-    by_id = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    by_id = {task.task_id: task.model_dump() for task in task_set.tasks}
     task_ids = [item.get("task_id") for item in selected]
     if any(not isinstance(task_id, str) for task_id in task_ids):
         raise RuntimeError("calibration selection contains an invalid task ID")
@@ -174,7 +172,7 @@ def calibrate(
     selection: dict[str, Any] | None = None
     selected_split: str | None = None
     if selection_path is None:
-        tasks = task_set.inventory["tasks"]
+        tasks = [task.model_dump() for task in task_set.tasks]
         calibration_name = task_set.task_set_id
     else:
         selection_path = (
@@ -208,7 +206,7 @@ def calibrate(
         "status": RunStatus.RUNNING.value,
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
-        "inventory_id": task_set.inventory["inventory_id"],
+        "inventory_id": task_set.task_set_id,
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": task_set.data_identity,

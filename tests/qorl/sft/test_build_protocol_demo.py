@@ -32,9 +32,7 @@ def synthetic_demo(
     repository: Path, candidate_attempts: int = MAX_CANDIDATES
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
-    task = next(
-        item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID
-    )
+    task = next(item.model_dump() for item in task_set.tasks if item.task_id == TASK_ID)
     aliases = sorted(item["alias"] for item in task["relations"])
     indexes = {alias: [] for alias in aliases}
     catalog = TaskCatalog.from_task(task, {alias: set() for alias in aliases})

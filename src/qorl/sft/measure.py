@@ -289,7 +289,9 @@ def main() -> None:
             per_task[record.task_id] += 1
 
     task_set = TaskSet.load(repository, "ceb")
-    task_values = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
+    task_values = JSON_OBJECT_LIST_ADAPTER.validate_python(
+        [task.model_dump() for task in task_set.tasks]
+    )
     tasks = {
         require_string(task.get("task_id"), "task.task_id"): task
         for task in task_values

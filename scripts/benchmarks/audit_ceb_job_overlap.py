@@ -16,6 +16,7 @@ from qorl.workload.query_structure import (
     extract_join_structure,
     task_join_fingerprints,
 )
+from qorl.workload.schemas import TASKS_ADAPTER, Task
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_JOB_INVENTORY = REPOSITORY_ROOT / "benchmarks/job/tasks.json"
@@ -75,24 +76,20 @@ def read_ceb_sql(source_dir: Path, source_kind: str) -> list[dict[str, Any]]:
 
 
 def job_fingerprints(
-    inventory: dict[str, Any],
+    inventory: list[Task],
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
     graphs: dict[str, set[str]] = defaultdict(set)
     topologies: dict[str, set[str]] = defaultdict(set)
-    for task in inventory["tasks"]:
-        graph_hash, topology_hash = task_join_fingerprints(task)
-        if graph_hash != task["join_graph_sha256"]:
-            raise RuntimeError(
-                f"checked-in JOB fingerprint disagreement for {task['task_id']}"
-            )
-        graphs[graph_hash].add(task["template_id"])
-        topologies[topology_hash].add(task["template_id"])
+    for task in inventory:
+        graph_hash, topology_hash = task_join_fingerprints(task.model_dump())
+        graphs[graph_hash].add(task.template_id)
+        topologies[topology_hash].add(task.template_id)
     return graphs, topologies
 
 
 def build_report(
     queries: list[dict[str, Any]],
-    job_inventory: dict[str, Any],
+    job_inventory: list[Task],
     source_kind: str,
     source_repository: str | None,
     source_commit: str | None,
@@ -159,9 +156,9 @@ def build_report(
             **({"commit": source_commit} if source_commit else {}),
         },
         "job_inventory": {
-            "inventory_id": job_inventory["inventory_id"],
-            "task_count": job_inventory["task_count"],
-            "template_count": job_inventory["template_count"],
+            "inventory_id": "job",
+            "task_count": len(job_inventory),
+            "template_count": len({task.template_id for task in job_inventory}),
         },
         "summary": {
             "ceb_query_count": len(queries),
@@ -184,7 +181,7 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
-    job_inventory = json.loads(args.job_inventory.read_text(encoding="utf-8"))
+    job_inventory = TASKS_ADAPTER.validate_json(args.job_inventory.read_bytes())
     report = build_report(
         read_ceb_sql(args.ceb_source_dir, args.source_kind),
         job_inventory,

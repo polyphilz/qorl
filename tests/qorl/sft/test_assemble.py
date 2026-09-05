@@ -12,15 +12,21 @@ from qorl.workload.taskset import TaskSet
 def test_finalize_without_cross_workload_report(
     repository_root: Path, tmp_path: Path, monkeypatch
 ) -> None:
-    source = TaskSet.load(repository_root, "ceb").inventory
+    source = TaskSet.load(repository_root, "ceb")
     tasks = [
-        next(task for task in source["tasks"] if task["partition"] == partition)
+        next(
+            task.model_dump()
+            for task in source.tasks
+            if task.model_dump()["partition"] == partition
+        )
         for partition in ("train", "validation")
     ]
-    inventory = {**source, "tasks": tasks, "task_count": len(tasks)}
     ceb = tmp_path / "benchmarks/ceb"
     ceb.mkdir(parents=True)
-    (ceb / "tasks.json").write_text(json.dumps(inventory))
+    (ceb / "tasks.json").write_text(json.dumps(tasks))
+    (ceb / "manifest.json").write_bytes(
+        (repository_root / "benchmarks/ceb/manifest.json").read_bytes()
+    )
     output = tmp_path / "dataset"
     for ordinal, task in enumerate(tasks):
         partition = task["partition"]
@@ -33,7 +39,7 @@ def test_finalize_without_cross_workload_report(
                 "partition": partition,
                 "task_id": task["task_id"],
                 "template_id": task["template_id"],
-                "data_identity": source["database"],
+                "data_identity": source.data_identity,
                 "runtime_identity": {},
                 "inspection_recipe": "test",
                 "in_author_unique_plans_subset": ordinal == 0,
@@ -72,7 +78,9 @@ class TestProtocolDataset:
                 repository_root / "experiments/001-protocol-sft-v1/dataset.json"
             ).read_text()
         )["seed"]
-        tasks = TaskSet.load(repository_root, "ceb").inventory["tasks"]
+        tasks = [
+            task.model_dump() for task in TaskSet.load(repository_root, "ceb").tasks
+        ]
         train = select_tasks(tasks, "train", 256, seed)
         validation = select_tasks(tasks, "validation", 64, seed)
 

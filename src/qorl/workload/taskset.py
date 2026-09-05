@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
+
+from pydantic import ValidationError
+
+from qorl.workload.schemas import TASKS_ADAPTER, BenchmarkManifest, Task
 
 TASK_SET_PATHS = {
     "job": Path("benchmarks/job/tasks.json"),
@@ -18,16 +21,17 @@ class TaskSetError(RuntimeError):
 
 @dataclass(frozen=True)
 class TaskSet:
-    """A versioned collection of SQL tasks bound to a data identity."""
+    """A benchmark's SQL tasks and the fixture named by its source manifest."""
 
     repository: Path
     task_set_id: str
     inventory_path: Path
-    inventory: dict[str, Any]
+    fixture_id: str
+    tasks: list[Task]
 
     @property
     def data_identity(self) -> dict[str, str]:
-        return {"fixture_id": self.inventory["fixture_id"]}
+        return {"fixture_id": self.fixture_id}
 
     @classmethod
     def load(
@@ -44,23 +48,27 @@ class TaskSet:
         if not inventory_path.is_file():
             raise TaskSetError(f"required task inventory is missing: {inventory_path}")
 
-        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
-        tasks = inventory.get("tasks")
-        if not isinstance(tasks, list) or inventory.get("task_count") != len(tasks):
-            raise TaskSetError("task inventory count is incorrect")
-        task_ids = [task.get("task_id") for task in tasks]
-        if any(not isinstance(task_id, str) for task_id in task_ids):
-            raise TaskSetError("task inventory contains an invalid task ID")
+        try:
+            tasks = TASKS_ADAPTER.validate_json(inventory_path.read_bytes())
+            manifest = BenchmarkManifest.model_validate_json(
+                inventory_path.with_name("manifest.json").read_bytes()
+            )
+        except (ValidationError, OSError) as error:
+            raise TaskSetError(
+                f"invalid benchmark inventory or manifest: {error}"
+            ) from error
+        if manifest.workload_id != task_set_id:
+            raise TaskSetError("benchmark manifest references a different workload")
+        task_ids = [task.task_id for task in tasks]
         if len(task_ids) != len(set(task_ids)):
             raise TaskSetError("task inventory contains duplicate task IDs")
-        if not isinstance(inventory.get("fixture_id"), str):
-            raise TaskSetError("task inventory requires a fixture ID")
 
         return cls(
             repository=repository,
             task_set_id=task_set_id,
             inventory_path=inventory_path,
-            inventory=inventory,
+            fixture_id=manifest.fixture_id,
+            tasks=tasks,
         )
 
     def load_sql(self, task: dict[str, Any]) -> str:

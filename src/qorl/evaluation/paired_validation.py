@@ -49,7 +49,7 @@ def load_tasks(
     selection_path = repository / config["selection"]
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
     selected = selection["splits"][config["split"]]
-    tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    tasks = {task.task_id: task.model_dump() for task in task_set.tasks}
     chosen = [tasks[item["task_id"]] for item in selected]
     if not chosen or len({task["task_id"] for task in chosen}) != len(chosen):
         raise RuntimeError("paired validation requires unique tasks")

@@ -76,12 +76,11 @@ class TestQueryStructure:
         )
         assert task_join_fingerprints(first) == task_join_fingerprints(second)
 
-    def test_shared_code_preserves_checked_in_job_hash(
-        self, repository_root: Path
-    ) -> None:
+    def test_shared_code_matches_job_sql_structure(self, repository_root: Path) -> None:
         inventory = json.loads(
             (repository_root / "benchmarks/job/tasks.json").read_text(encoding="utf-8")
         )
-        task = inventory["tasks"][0]
-        graph_hash, _topology_hash = task_join_fingerprints(task)
-        assert graph_hash == task["join_graph_sha256"]
+        task = inventory[0]
+        sql_path = repository_root / "benchmarks/job" / task["sql_path"]
+        structure = extract_join_structure(sql_path.read_text(), task["task_id"])
+        assert task_join_fingerprints(task) == task_join_fingerprints(structure)

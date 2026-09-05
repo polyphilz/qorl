@@ -182,7 +182,9 @@ def selected_tasks(
         selected = getattr(selection.splits, split)
     except AttributeError as error:
         raise RuntimeError(f"selection has no {split!r} split") from error
-    tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(task_set.inventory["tasks"])
+    tasks = JSON_OBJECT_LIST_ADAPTER.validate_python(
+        [task.model_dump() for task in task_set.tasks]
+    )
     by_id = {
         require_string(task.get("task_id"), "task.task_id"): task for task in tasks
     }

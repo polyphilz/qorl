@@ -31,11 +31,7 @@ def test_calibration_starts_and_records_the_selected_pool(
     task_set = TaskSet.load(repository_root, "job")
     task_set = replace(
         task_set,
-        inventory={
-            **task_set.inventory,
-            "tasks": task_set.inventory["tasks"][:5],
-            "task_count": 5,
-        },
+        tasks=task_set.tasks[:5],
     )
     started: list[ContainerPool] = []
     executions: list[str] = []
@@ -115,13 +111,13 @@ class TestCalibration:
         self, repository_root: Path, tmp_path: Path
     ) -> None:
         task_set = TaskSet.load(repository_root, "ceb")
-        first, second = task_set.inventory["tasks"][:2]
+        first, second = task_set.tasks[:2]
         selection = {
             "inventory_id": "test-selection",
-            "source": {"inventory_id": task_set.inventory["inventory_id"]},
+            "source": {"inventory_id": task_set.task_set_id},
             "splits": {
-                "train": [{"task_id": first["task_id"]}],
-                "validation": [{"task_id": second["task_id"]}],
+                "train": [{"task_id": first.task_id}],
+                "validation": [{"task_id": second.task_id}],
             },
         }
         path = tmp_path / "selection.json"
@@ -132,7 +128,7 @@ class TestCalibration:
         _, split, tasks = selected_tasks(task_set, path, "validation")
 
         assert split == "validation"
-        assert [task["task_id"] for task in tasks] == [second["task_id"]]
+        assert [task["task_id"] for task in tasks] == [second.task_id]
 
     def test_buffer_stability_requires_same_plan_and_close_counts(self) -> None:
         first = observation(explain(hits=100, reads=5), 1)

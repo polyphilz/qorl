@@ -92,7 +92,7 @@ def build_demo(
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
     task = next(
-        (item for item in task_set.inventory["tasks"] if item["task_id"] == TASK_ID),
+        (item.model_dump() for item in task_set.tasks if item.task_id == TASK_ID),
         None,
     )
     if task is None:

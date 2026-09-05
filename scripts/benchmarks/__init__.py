@@ -1,1 +1,1 @@
-"""JOB and CEB query preparation."""
+"""Benchmark scripts."""

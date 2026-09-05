@@ -83,7 +83,7 @@ def test_unexpected_rollout_error_is_recorded(
         tool_call_parser="qwen3_coder",
     )
     task_set = TaskSet.load(repository_root, "ceb")
-    task = task_set.inventory["tasks"][0]
+    task = task_set.tasks[0].model_dump()
     request = SampleRequest(
         task=task,
         task_id=task["task_id"],

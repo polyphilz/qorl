@@ -70,9 +70,9 @@ def validate_protocol_demo(
     task_set = TaskSet.load(repository, metadata.get("task_set_id"))
     task = next(
         (
-            item
-            for item in task_set.inventory["tasks"]
-            if item["task_id"] == metadata.get("task_id")
+            item.model_dump()
+            for item in task_set.tasks
+            if item.task_id == metadata.get("task_id")
         ),
         None,
     )
@@ -84,8 +84,7 @@ def validate_protocol_demo(
     )
     require(task["partition"] == partition, "demo task partition mismatch")
     require(
-        metadata.get("data_identity", {}).get("fixture_id")
-        == task_set.inventory["fixture_id"],
+        metadata.get("data_identity", {}).get("fixture_id") == task_set.fixture_id,
         "demo data identity differs from its task inventory",
     )
     require(

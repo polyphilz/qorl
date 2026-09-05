@@ -117,9 +117,7 @@ class CalibratedTimeouts:
             )
         if list(by_task_id) != selected_ids:
             raise RuntimeError("calibrated timeouts do not match their selection")
-        if not set(by_task_id) <= {
-            task["task_id"] for task in task_set.inventory["tasks"]
-        }:
+        if not set(by_task_id) <= {task.task_id for task in task_set.tasks}:
             raise RuntimeError("calibrated timeouts contain unknown tasks")
         return cls(path, sha256_file(path), manifest, by_task_id)
 

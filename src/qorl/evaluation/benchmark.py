@@ -209,7 +209,7 @@ def run_benchmark(
         "status": RunStatus.RUNNING.value,
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
-        "inventory_id": task_set.inventory["inventory_id"],
+        "inventory_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": task_set.data_identity,
         "runtime_identity": postgres_config.runtime_identity().model_dump(
@@ -258,7 +258,7 @@ def run_benchmark(
             "score": "clip(default_median / candidate_median, 0.1, 10)",
         },
         "worker_pool": None,
-        "task_count": task_set.inventory["task_count"],
+        "task_count": len(task_set.tasks),
         "completed_task_count": 0,
         "failed_task_count": 0,
         "summary": None,
@@ -267,7 +267,7 @@ def run_benchmark(
     write_json(manifest_path, manifest)
 
     project_name = f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
-    tasks = task_set.inventory["tasks"]
+    tasks = [task.model_dump() for task in task_set.tasks]
     results_by_task: dict[str, dict[str, Any]] = {}
     run = TaskRun(
         repository,

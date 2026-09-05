@@ -53,9 +53,9 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
     ) -> None:
         active = runtime.current()
         task = next(
-            task
-            for task in active.task_set.inventory["tasks"]
-            if task["task_id"] == data.task_id
+            task.model_dump()
+            for task in active.task_set.tasks
+            if task.task_id == data.task_id
         )
         config_path = self.config.run_config
         if not config_path.is_absolute():

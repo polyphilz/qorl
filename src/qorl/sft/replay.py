@@ -56,7 +56,7 @@ def main() -> None:
         output = repository / output
 
     task_set = TaskSet.load(repository, "ceb")
-    tasks = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    tasks = {task.task_id: task.model_dump() for task in task_set.tasks}
 
     samples: dict[str, dict[str, Any]] = {}
     for _, document in load_documents(dataset):

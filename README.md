@@ -9,8 +9,8 @@ inputs, and [`model/configs/`](model/README.md) holds model and sampling setting
 
 IMDb preparation is under [`scripts/imdb/`](scripts/imdb/README.md); raw inputs,
 the prepared archive, and verification reports live in ignored `data/`.
-Query preparation is under `scripts/benchmarks/`. Workload identifiers are `job` and `ceb`, and the
-database fixture identifier is `imdb`.
+JOB and CEB SQL and task inventories are checked in under `benchmarks/`.
+Workload identifiers are `job` and `ceb`; the database fixture identifier is `imdb`.
 
 ```bash
 uv sync

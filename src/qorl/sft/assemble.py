@@ -163,7 +163,7 @@ def finalize_dataset(
     dataset_seed: int,
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
-    template_ids = {task["template_id"] for task in task_set.inventory["tasks"]}
+    template_ids = {task.template_id for task in task_set.tasks}
 
     records = load_documents(output_dir)
     counts = Counter(document["metadata"]["partition"] for _, document in records)

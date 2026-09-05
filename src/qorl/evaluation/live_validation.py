@@ -72,7 +72,7 @@ def validation_tasks(
         for item in manifest["demonstrations"]
         if item["partition"] == "validation"
     ]
-    by_id = {task["task_id"]: task for task in task_set.inventory["tasks"]}
+    by_id = {task.task_id: task.model_dump() for task in task_set.tasks}
     if len(ids) != EXPECTED_VALIDATION_TASKS or len(ids) != len(set(ids)):
         raise RuntimeError("protocol dataset does not identify 64 validation tasks")
     if missing := sorted(set(ids) - set(by_id)):

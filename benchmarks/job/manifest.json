@@ -12,15 +12,5 @@
       "bytes": 12313,
       "sha256": "6a57357a67950dbd507f8a7cebdbed1d0a3806b3de445b8dd20f82f0d4aa7593"
     }
-  },
-  "queries": {
-    "glob": "[0-9]*.sql",
-    "count": 113,
-    "sha256_manifest": "71175e8e0a4390cc5d62a2be6fbf7788c614edccd3591539b06922ffc4e6d210",
-    "manifest_algorithm": "SHA-256 of sorted '<file-sha256><two spaces><filename><newline>' records"
-  },
-  "preparation": {
-    "script": "scripts/benchmarks/build_job_task_inventory.py",
-    "method": "copy the pinned SQL files without changing their bytes and build the task inventory"
   }
 }
