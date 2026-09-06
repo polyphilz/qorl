@@ -21,7 +21,7 @@ class TestPostgresConfig:
         assert "QORL_IMDB_FIXTURE_ID" not in compose
         assert not (repository_root / "compose.fixture-build.yaml").exists()
         launcher = (repository_root / "src/qorl/worker_pool/containers.py").read_text()
-        assert 'str(self.repository / "compose.yaml")' in launcher
+        assert 'str(REPOSITORY_ROOT / "compose.yaml")' in launcher
 
     def test_each_config_has_only_the_three_declared_files(
         self, repository_root: Path

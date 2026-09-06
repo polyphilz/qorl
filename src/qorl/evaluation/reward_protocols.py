@@ -346,19 +346,18 @@ def run_audit(
     }
     write_json(report_path, report)
 
-    project_name = f"qorl-reward-audit-{os.getpid()}"
+    compose_project_name = f"qorl-reward-audit-{os.getpid()}"
     with contextlib.closing(
         start_pool(
-            repository,
-            project_name,
+            compose_project_name,
             repository / "data/imdb.tar.gz",
             postgres_config=postgres_config,
             pool_config=pool_config,
         )
     ) as pool:
-        report["database_pool"] = pool.manifest()
+        report["database_pool"] = pool.manifest().model_dump()
         with pool.claim_worker() as slot:
-            report["worker"] = slot.resources.manifest()
+            report["worker"] = slot.resources.manifest().model_dump()
             write_json(report_path, report)
             worker = slot.client
             capture_environment(pool, slot, output_dir, "pre")
@@ -443,7 +442,7 @@ def main() -> None:
             case_path,
             output_dir,
             postgres_config=PostgresConfig.load(arguments.postgres_config),
-            pool_config=load_pool_config(repository, arguments.pool_config),
+            pool_config=load_pool_config(arguments.pool_config),
         )
     )
 

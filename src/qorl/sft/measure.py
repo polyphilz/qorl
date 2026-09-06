@@ -118,7 +118,9 @@ def measure_once(
         return slot, MeasurementAttempt(
             attempt=request.attempt,
             completed_at_utc=utc_now(),
-            worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
+            worker=JSON_OBJECT_ADAPTER.validate_python(
+                slot.resources.manifest().model_dump()
+            ),
             baseline=baseline,
             candidate=candidate,
             outcome=outcome,
@@ -257,7 +259,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     dataset = (repository / arguments.dataset).resolve()
     config_path = (repository / arguments.config).resolve()
     timeout_path = (repository / arguments.timeouts).resolve()

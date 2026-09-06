@@ -102,7 +102,6 @@ def build_demo(
     with (
         contextlib.closing(
             start_pool(
-                repository,
                 "qorl-protocol-demo",
                 repository / "data/imdb.tar.gz",
                 postgres_config=postgres_config,
@@ -208,7 +207,7 @@ def main() -> None:
     document = build_demo(
         repository,
         postgres_config=PostgresConfig.load(arguments.postgres_config),
-        pool_config=load_pool_config(repository, arguments.pool_config),
+        pool_config=load_pool_config(arguments.pool_config),
     )
     summary = validate_protocol_demo(document, repository)
     output.parent.mkdir(parents=True, exist_ok=True)

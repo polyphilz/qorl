@@ -27,7 +27,7 @@ class TaskRun:
     def __init__(
         self,
         repository: Path,
-        project_name: str,
+        compose_project_name: str,
         output_dir: Path,
         manifest_path: Path,
         manifest: dict[str, Any],
@@ -39,7 +39,7 @@ class TaskRun:
         pool_config: PoolConfig,
     ) -> None:
         self.repository = repository
-        self.project_name = project_name
+        self.compose_project_name = compose_project_name
         self.output_dir = output_dir
         self.manifest_path = manifest_path
         self.manifest = manifest
@@ -59,13 +59,12 @@ class TaskRun:
             raise RuntimeError("task run is already started")
         try:
             self.pool = start_pool(
-                self.repository,
-                self.project_name,
+                self.compose_project_name,
                 self.repository / "data/imdb.tar.gz",
                 postgres_config=self.postgres_config,
                 pool_config=self.pool_config,
             )
-            self.manifest[self.pool_field] = self.pool.manifest()
+            self.manifest[self.pool_field] = self.pool.manifest().model_dump()
             self.write()
             if self.capture_environment:
                 self.capture("pre")

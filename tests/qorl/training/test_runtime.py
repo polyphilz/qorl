@@ -74,7 +74,7 @@ class WorkerPoolTest(unittest.TestCase):
 
     def test_resources_are_distinct_and_parameterized(self) -> None:
         resources = load_pool_config(
-            ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
+            Path("docker/worker_pool/configs/002-poolconf-4x8")
         ).workers
 
         self.assertEqual([item.index for item in resources], [0, 1, 2, 3])
@@ -89,18 +89,15 @@ class WorkerPoolTest(unittest.TestCase):
         self.assertEqual(resources[0].memory_bytes, 8 * 1024**3)
 
     def test_claim_returns_workers_to_the_pool(self) -> None:
-        profile = load_pool_config(
-            ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
-        )
+        profile = load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8"))
         runtime = QorlRuntime(
-            ROOT,
             TaskSet.load(ROOT, "ceb"),
             profile,
             "test-pool",
             PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),
         )
         self.addCleanup(runtime.close)
-        self.assertEqual(runtime.repository, ROOT.resolve())
+        self.assertEqual(runtime.compose_project_name, "test-pool")
 
         with runtime.claim_worker() as first, runtime.claim_worker() as second:
             self.assertNotEqual(first.resources.index, second.resources.index)
@@ -117,7 +114,7 @@ class WorkerPoolTest(unittest.TestCase):
                 (topology / "core_id").write_text(str(cpu % 16))
 
             profile = load_pool_config(
-                ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
+                Path("docker/worker_pool/configs/002-poolconf-4x8")
             )
             validate_host_topology(profile.workers, root)
 

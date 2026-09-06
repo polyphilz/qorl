@@ -10,20 +10,30 @@ import pytest
 from qorl.measure import run
 from qorl.measure.run import TaskRun
 from qorl.postgres.config import PostgresConfig
-from qorl.worker_pool.schemas import PoolConfig
+from qorl.worker_pool.schemas import PoolConfig, PoolManifest
 
 
 class FakePool:
-    def __init__(self) -> None:
+    def __init__(
+        self, postgres_config: PostgresConfig, pool_config: PoolConfig
+    ) -> None:
         self.workers = tuple(
-            SimpleNamespace(resources=SimpleNamespace(index=index))
-            for index in range(2)
+            SimpleNamespace(resources=resources)
+            for resources in pool_config.workers[:2]
+        )
+        self.record = PoolManifest(
+            id=pool_config.profile_id,
+            path=str(pool_config.path),
+            config_sha256=pool_config.sha256,
+            worker_count=len(self.workers),
+            workers=[slot.resources.manifest() for slot in self.workers],
+            postgres_config=postgres_config.manifest(),
         )
         self.captures: list[tuple[int, Path, str]] = []
         self.closed = False
 
-    def manifest(self) -> dict[str, object]:
-        return {"worker_count": len(self.workers)}
+    def manifest(self) -> PoolManifest:
+        return self.record
 
     def close(self) -> None:
         self.closed = True
@@ -58,7 +68,7 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
     postgres_config: PostgresConfig,
     pool_config: PoolConfig,
 ) -> None:
-    pool = FakePool()
+    pool = FakePool(postgres_config, pool_config)
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     monkeypatch.setattr(
         run,
@@ -87,7 +97,7 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
         2,
         4,
     ]
-    assert manifest["database_pool"] == {"worker_count": 2}
+    assert manifest["database_pool"] == pool.manifest().model_dump()
     assert pool.closed
     assert [(path, phase) for index, path, phase in pool.captures if index == 0] == [
         (tmp_path / "environment/worker-0", "pre"),
@@ -101,7 +111,7 @@ def test_task_run_can_leave_capture_to_each_policy(
     postgres_config: PostgresConfig,
     pool_config: PoolConfig,
 ) -> None:
-    pool = FakePool()
+    pool = FakePool(postgres_config, pool_config)
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     monkeypatch.setattr(
         run,
@@ -135,7 +145,7 @@ def test_task_run_cancels_pending_tasks_after_an_unhandled_error(
     postgres_config: PostgresConfig,
     pool_config: PoolConfig,
 ) -> None:
-    pool = FakePool()
+    pool = FakePool(postgres_config, pool_config)
     monkeypatch.setattr(run, "start_pool", lambda *_, **__: pool)
     monkeypatch.setattr(
         run,

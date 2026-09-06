@@ -112,7 +112,7 @@ def calibrate_on_worker(
             max_warmup_runs=max_warmup_runs,
             num_trials=num_trials,
         )
-        result["worker"] = slot.resources.manifest()
+        result["worker"] = slot.resources.manifest().model_dump()
         return slot, result
 
 
@@ -138,7 +138,7 @@ def calibrate(
     """Calibrate the complete JOB benchmark and write per-task and pool reports."""
     validate_run_counts(max_warmup_runs, num_trials)
     postgres_config = PostgresConfig.load(postgres_config_path)
-    pool_config = load_pool_config(repository, pool_config_path)
+    pool_config = load_pool_config(pool_config_path)
     task_set = TaskSet.load(repository, "job")
     tasks = task_set.tasks
     worker_count = len(pool_config.workers)
@@ -191,11 +191,11 @@ def calibrate(
     manifest_path = output_dir / "calibration.json"
     write_json(manifest_path, manifest)
 
-    project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
+    compose_project_name = f"qorl-cal-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     failures = 0
     run = TaskRun(
         repository,
-        project_name,
+        compose_project_name,
         output_dir,
         manifest_path,
         manifest,

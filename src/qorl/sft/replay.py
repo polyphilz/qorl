@@ -48,7 +48,7 @@ def main() -> None:
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     dataset = arguments.dataset
     output = arguments.output
     if not dataset.is_absolute():
@@ -68,7 +68,6 @@ def main() -> None:
     with (
         contextlib.closing(
             start_pool(
-                repository,
                 "qorl-protocol-sft-replay",
                 repository / "data/imdb.tar.gz",
                 postgres_config=postgres_config,

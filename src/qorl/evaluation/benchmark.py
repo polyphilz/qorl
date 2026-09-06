@@ -135,7 +135,7 @@ def run_task_on_worker(
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
         result = run_task(slot.client, task_set, task, policy, agent)
-        result["worker"] = slot.resources.manifest()
+        result["worker"] = slot.resources.manifest().model_dump()
         return slot, result
 
 
@@ -191,7 +191,7 @@ def run_benchmark(
     pool_config_path: Path,
 ) -> Path:
     postgres_config = PostgresConfig.load(postgres_config_path)
-    pool_config = load_pool_config(repository, pool_config_path)
+    pool_config = load_pool_config(pool_config_path)
     task_set = TaskSet.load(repository, "job")
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
@@ -265,12 +265,12 @@ def run_benchmark(
     manifest_path = output_dir / "run.json"
     write_json(manifest_path, manifest)
 
-    project_name = f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
+    compose_project_name = f"qorl-run-{started_at:%Y%m%d%H%M%S}-{os.getpid()}".lower()
     tasks = [task.model_dump() for task in task_set.tasks]
     results_by_task: dict[str, dict[str, Any]] = {}
     run = TaskRun(
         repository,
-        project_name,
+        compose_project_name,
         output_dir,
         manifest_path,
         manifest,

@@ -464,7 +464,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     run_policy = json.loads(
         (repository / "model/configs/000-modelconf/modelconf.json").read_text()
     )["policy"]

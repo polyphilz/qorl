@@ -13,6 +13,7 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.schemas import MeasurementProtocolId
+from qorl.paths import REPOSITORY_ROOT
 from qorl.training import runtime
 
 
@@ -59,7 +60,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
         config_path = self.config.run_config
         if not config_path.is_absolute():
-            config_path = active.repository / config_path
+            config_path = REPOSITORY_ROOT / config_path
         policy_data = json.loads(config_path.read_text(encoding="utf-8"))["policy"]
         policy_config = replace(
             QoAgentConfig.from_dict(policy_data),
@@ -110,8 +111,8 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             "runtime_identity": {
                 "postgres_config_id": active.postgres_config.config_id
             },
-            "database_pool": active.pool_manifest(),
-            "database_worker": slot.resources.manifest(),
+            "database_pool": active.pool_manifest().model_dump(),
+            "database_worker": slot.resources.manifest().model_dump(),
             "candidate_timeout_manifest": (
                 active.calibrated_timeouts.identity()
                 if active.calibrated_timeouts is not None

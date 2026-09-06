@@ -430,7 +430,9 @@ def replay_action(
         sampling_mode=prefix.sample.sampling_mode,
         steered=False,
         guidance=None,
-        worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
+        worker=JSON_OBJECT_ADAPTER.validate_python(
+            slot.resources.manifest().model_dump()
+        ),
         data_identity={"fixture_id": task_set.fixture_id},
         runtime_identity={"postgres_config_id": pool.postgres_config.config_id},
         sampler=prefix.sample.sampler,
@@ -745,7 +747,7 @@ def main() -> None:
     if arguments.postgres_config is None or arguments.pool_config is None:
         parser.error("--postgres-config and --pool-config are required for generation")
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:

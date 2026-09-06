@@ -176,7 +176,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
     config = load_record(config_path, DatasetConfig)

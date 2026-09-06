@@ -101,7 +101,9 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
         load.PostgresClient, "admin_sql", lambda _, sql: calls.append("load-sql")
     )
 
-    def command(pool: ContainerPool, arguments: list[str]) -> str:
+    def execute(
+        pool: ContainerPool, arguments: list[str]
+    ) -> subprocess.CompletedProcess[str]:
         assert arguments == [
             "docker",
             "exec",
@@ -111,9 +113,9 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
         calls.append("assert-config")
         if failure == "config":
             raise RuntimeError("config check failed")
-        return ""
+        return subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(ContainerPool, "command", command)
+    monkeypatch.setattr(ContainerPool, "execute", execute)
 
     def verify(*args, **kwargs):
         assert kwargs["manifest"] is input_manifests[0]
@@ -171,10 +173,9 @@ def test_load_requires_fetched_inputs_and_preserves_existing_archive(
 def test_archive_requires_clean_shutdown_and_writes_no_manifest(
     repository_root: Path, tmp_path: Path, monkeypatch, state: str
 ) -> None:
-    profile = load_pool_config(repository_root, load.POOL_CONFIG)
+    profile = load_pool_config(load.POOL_CONFIG)
     archive = tmp_path / "imdb.tar.gz"
     pool = ContainerPool(
-        repository_root,
         "test-archive",
         profile,
         load.PostgresConfig.load(load.POSTGRES_CONFIG),
@@ -186,17 +187,17 @@ def test_archive_requires_clean_shutdown_and_writes_no_manifest(
     slot.pgdata_relative_path = "18/docker"
     calls = []
 
-    def command(arguments):
+    def execute(arguments):
         calls.append(arguments)
         if arguments[:2] == ["docker", "inspect"]:
-            return state
+            return subprocess.CompletedProcess(arguments, 0, state, "")
         assert "volume:/source:ro" in arguments
         assert "--network=none" in arguments
         assert arguments[-1] == "18/docker"
         (tmp_path / ".imdb.tar.gz.part").write_bytes(b"prepared archive")
-        return ""
+        return subprocess.CompletedProcess(arguments, 0, "", "")
 
-    monkeypatch.setattr(pool, "command", command)
+    monkeypatch.setattr(pool, "execute", execute)
     if state != "false 0":
         with pytest.raises(RuntimeError, match="stopped cleanly"):
             load.archive_database(pool, slot, archive)

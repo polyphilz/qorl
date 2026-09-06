@@ -266,7 +266,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     config_path = repository / CONFIG
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if config.get("schema_version") != 1:

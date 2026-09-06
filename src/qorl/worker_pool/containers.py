@@ -1,22 +1,31 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import queue
 import re
 import subprocess
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path, PurePosixPath
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import PostgresIndexes
 from qorl.worker_pool.config import validate_host_topology
 from qorl.worker_pool.exceptions import ContainerError
-from qorl.worker_pool.schemas import PoolConfig, WorkerSlot
+from qorl.worker_pool.schemas import (
+    ComposeEnvironment,
+    PoolConfig,
+    PoolManifest,
+    WorkerSlot,
+)
 
 STOP_TIMEOUT_SECONDS = 60
+logger = logging.getLogger(__name__)
 
 
 class ContainerPool:
@@ -24,21 +33,19 @@ class ContainerPool:
 
     def __init__(
         self,
-        repository: Path,
-        project_name: str,
+        compose_project_name: str,
         pool_config: PoolConfig,
         postgres_config: PostgresConfig,
     ) -> None:
-        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", project_name):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", compose_project_name):
             raise ValueError("invalid Compose project name")
-        self.repository = repository.resolve()
-        self.project_name = project_name
+        self.compose_project_name = compose_project_name
         self.pool_config = pool_config
         self.postgres_config = postgres_config
         self.settings = postgres_config.agent_settings
         self.indexes = PostgresIndexes(by_table={})
         self.workers = tuple(
-            WorkerSlot(resources, f"{project_name}-{resources.index}")
+            WorkerSlot(resources, f"{compose_project_name}-{resources.index}")
             for resources in pool_config.workers
         )
         self._available: queue.Queue[WorkerSlot] = queue.Queue()
@@ -52,18 +59,23 @@ class ContainerPool:
         self,
         command: list[str],
         *,
-        input_text: str | None = None,
+        stdin: str | None = None,
         check: bool = True,
-        environment: Mapping[str, str] | None = None,
+        environment: ComposeEnvironment | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        """Run a command, supplying stdin text when given.
+
+        With no stdin or environment overrides, inherit the process's input and
+        environment. Compose overrides are merged with the OS environment.
+        """
         completed = subprocess.run(
             command,
-            cwd=self.repository,
-            input=input_text,
+            cwd=REPOSITORY_ROOT,
+            input=stdin,
             text=True,
             capture_output=True,
             check=False,
-            env=environment,
+            env=None if environment is None else {**os.environ, **environment.to_env()},
         )
         if check and completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
@@ -72,49 +84,42 @@ class ContainerPool:
             )
         return completed
 
-    def command(
-        self,
-        command: list[str],
-        *,
-        input_text: str | None = None,
-        check: bool = True,
-    ) -> str:
-        return self.execute(command, input_text=input_text, check=check).stdout
-
     def exec(
-        self, slot: WorkerSlot, command: list[str], query: str
+        self,
+        slot: WorkerSlot,
+        command: list[str],
+        query: str,
     ) -> subprocess.CompletedProcess[str]:
         return self.execute(
             ["docker", "exec", "--interactive", slot.container_id, *command],
-            input_text=query,
+            stdin=query,
             check=False,
         )
 
     def compose_command(
-        self, slot: WorkerSlot, *arguments: str, check: bool = True
+        self,
+        slot: WorkerSlot,
+        arguments: list[str],
     ) -> str:
+        """Run Compose with typed per-worker overrides and raise on failure."""
         resources = slot.resources
         config = self.postgres_config
-        environment = {
-            **os.environ,
-            "QORL_POSTGRES_CPUSET": resources.cpuset,
-            "QORL_POSTGRES_CPUSET_MEMS": resources.cpuset_mems,
-            "QORL_POSTGRES_MEMORY_LIMIT": resources.memory_limit,
-            "QORL_POSTGRES_MEMORY_BYTES": str(resources.memory_bytes),
-            "QORL_POSTGRES_MEMORY_SWAP_LIMIT": resources.memory_limit,
-            "QORL_POSTGRES_MEMORY_SWAP_BYTES": str(resources.memory_swap_bytes),
-            "QORL_POSTGRES_SHM_SIZE": resources.shm_size,
-            "QORL_POSTGRES_SHM_BYTES": str(resources.shm_bytes),
-            "QORL_POSTGRES_PORT": str(resources.port),
-            "QORL_POSTGRES_CONFIG_FILE": str(config.pg_conf_path),
-            "QORL_POSTGRES_EXPECTED_FILE": str(config.expected_path),
-            "QORL_POSTGRES_ASSERT_SCRIPT": str(
-                self.repository / "docker/postgres/scripts/assert-config.sh"
-            ),
-            "QORL_POSTGRES_DUMP_SCRIPT": str(
-                self.repository / "docker/postgres/scripts/dump-postgres-state.sh"
-            ),
-        }
+        environment = ComposeEnvironment(
+            cpuset=resources.cpuset,
+            cpuset_mems=resources.cpuset_mems,
+            memory_limit=resources.memory_limit,
+            memory_bytes=resources.memory_bytes,
+            memory_swap_limit=resources.memory_limit,
+            memory_swap_bytes=resources.memory_swap_bytes,
+            shm_size=resources.shm_size,
+            shm_bytes=resources.shm_bytes,
+            port=resources.port,
+            config_file=config.pg_conf_path,
+            expected_file=config.expected_path,
+            assert_script=REPOSITORY_ROOT / "docker/postgres/scripts/assert-config.sh",
+            dump_script=REPOSITORY_ROOT
+            / "docker/postgres/scripts/dump-postgres-state.sh",
+        )
         return self.execute(
             [
                 "docker",
@@ -122,21 +127,31 @@ class ContainerPool:
                 "--project-name",
                 slot.compose_project_name,
                 "--file",
-                str(self.repository / "compose.yaml"),
+                str(REPOSITORY_ROOT / "compose.yaml"),
                 *arguments,
             ],
-            check=check,
             environment=environment,
         ).stdout
 
+    def _parallel(self, operation: Callable[[WorkerSlot], None]) -> None:
+        """Finish active operations before propagating failure or allowing cleanup."""
+        with ThreadPoolExecutor(max_workers=len(self.workers)) as executor:
+            futures = [executor.submit(operation, slot) for slot in self.workers]
+            try:
+                for future in as_completed(futures):
+                    future.result()
+            except BaseException:
+                for future in futures:
+                    future.cancel()
+                raise
+
     def create(self) -> None:
         validate_host_topology(self.pool_config.workers)
-        for slot in self.workers:
-            self._create(slot)
+        self._parallel(self._create)
 
     def _create(self, slot: WorkerSlot) -> None:
-        self.compose_command(slot, "config", "--quiet")
-        if self.compose_command(slot, "ps", "--all", "--quiet").strip():
+        self.compose_command(slot, ["config", "--quiet"])
+        if self.compose_command(slot, ["ps", "--all", "--quiet"]).strip():
             raise ContainerError(
                 f"Docker project already exists: {slot.compose_project_name}"
             )
@@ -148,14 +163,15 @@ class ContainerPool:
             == 0
         ):
             raise ContainerError(f"Docker volume already exists: {volume}")
-        self.compose_command(slot, "create", "--no-build", "postgres")
+        # A failed Compose create can still leave resources that need cleanup.
         slot.created = True
+        self.compose_command(slot, ["create", "--no-build", "postgres"])
         slot.container_id = self.compose_command(
-            slot, "ps", "--all", "--quiet", "postgres"
+            slot, ["ps", "--all", "--quiet", "postgres"]
         ).strip()
         if not slot.container_id:
             raise ContainerError("Docker did not create the PostgreSQL container")
-        slot.volume = self.command(
+        slot.volume = self.execute(
             [
                 "docker",
                 "inspect",
@@ -163,13 +179,13 @@ class ContainerPool:
                 "--format",
                 '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql"}}{{.Name}}{{end}}{{end}}',
             ]
-        ).strip()
+        ).stdout.strip()
         if not slot.volume:
             raise ContainerError("Docker did not create the PostgreSQL data volume")
-        slot.image_id = self.command(
+        slot.image_id = self.execute(
             ["docker", "inspect", slot.container_id, "--format", "{{.Image}}"]
-        ).strip()
-        environment = self.command(
+        ).stdout.strip()
+        environment = self.execute(
             [
                 "docker",
                 "inspect",
@@ -177,7 +193,7 @@ class ContainerPool:
                 "--format",
                 "{{range .Config.Env}}{{println .}}{{end}}",
             ]
-        )
+        ).stdout
         pgdata = next(
             (
                 line.removeprefix("PGDATA=")
@@ -195,10 +211,9 @@ class ContainerPool:
         archive = archive.resolve()
         if not archive.is_file():
             raise ContainerError(f"database archive is missing: {archive}")
-        for slot in self.workers:
-            if not slot.created:
-                raise ContainerError("create the container before restoring IMDb")
-            self._restore(slot, archive)
+        if not all(slot.created for slot in self.workers):
+            raise ContainerError("create the container before restoring IMDb")
+        self._parallel(partial(self._restore, archive=archive))
 
     def _restore(self, slot: WorkerSlot, archive: Path) -> None:
         restore_script = r"""
@@ -209,7 +224,7 @@ gzip --decompress --stdout "/archive/$1" \
 test -f "/target/$2/PG_VERSION"
 test ! -e "/target/$2/postmaster.pid"
 """
-        self.command(
+        self.execute(
             [
                 "docker",
                 "run",
@@ -233,13 +248,15 @@ test ! -e "/target/$2/postmaster.pid"
         )
 
     def start(self) -> None:
-        for slot in self.workers:
-            if not slot.created:
-                raise ContainerError("create the container before starting PostgreSQL")
-            self.compose_command(
-                slot, "up", "--detach", "--wait", "--no-build", "postgres"
-            )
-            self.command(["docker", "exec", slot.container_id, "qorl-assert-config"])
+        if not all(slot.created for slot in self.workers):
+            raise ContainerError("create the container before starting PostgreSQL")
+        self._parallel(self._start)
+
+    def _start(self, slot: WorkerSlot) -> None:
+        self.compose_command(
+            slot, ["up", "--detach", "--wait", "--no-build", "postgres"]
+        )
+        self.execute(["docker", "exec", slot.container_id, "qorl-assert-config"])
 
     def load_indexes(self) -> None:
         """Populate the shared catalog from one worker after restoring or loading IMDb."""
@@ -248,13 +265,20 @@ test ! -e "/target/$2/postmaster.pid"
     def stop(self) -> None:
         for slot in self.workers:
             self.compose_command(
-                slot, "stop", "--timeout", str(STOP_TIMEOUT_SECONDS), "postgres"
+                slot, ["stop", "--timeout", str(STOP_TIMEOUT_SECONDS), "postgres"]
             )
 
     def close(self) -> None:
+        """Attempt every owned project's removal; log failures and retain them for retry."""
         for slot in reversed(self.workers):
             if slot.created:
-                self.compose_command(slot, "down", "--volumes", check=False)
+                try:
+                    self.compose_command(slot, ["down", "--volumes"])
+                except (ContainerError, OSError) as error:
+                    logger.error(
+                        "Cleanup failed for %s: %s", slot.compose_project_name, error
+                    )
+                    continue
                 slot.created = False
                 slot.container_id = ""
 
@@ -266,20 +290,19 @@ test ! -e "/target/$2/postmaster.pid"
         finally:
             self._available.put(slot)
 
-    def manifest(self) -> dict[str, object]:
-        return {
-            "id": self.pool_config.profile_id,
-            "path": str(self.pool_config.path),
-            "config_sha256": self.pool_config.sha256,
-            "worker_count": len(self.workers),
-            "workers": [slot.resources.manifest() for slot in self.workers],
-            "postgres_config": self.postgres_config.manifest().model_dump(),
-        }
+    def manifest(self) -> PoolManifest:
+        return PoolManifest(
+            id=self.pool_config.profile_id,
+            path=str(self.pool_config.path),
+            config_sha256=self.pool_config.sha256,
+            worker_count=len(self.workers),
+            workers=[slot.resources.manifest() for slot in self.workers],
+            postgres_config=self.postgres_config.manifest(),
+        )
 
 
 def start_pool(
-    repository: Path,
-    project_name: str,
+    compose_project_name: str,
     archive: Path,
     *,
     postgres_config: PostgresConfig,
@@ -288,8 +311,7 @@ def start_pool(
     if not archive.is_file():
         raise ContainerError(f"database archive is missing: {archive}")
     pool = ContainerPool(
-        repository,
-        project_name,
+        compose_project_name,
         pool_config,
         postgres_config,
     )

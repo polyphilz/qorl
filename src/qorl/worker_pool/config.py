@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.util.hashing import sha256_file
 from qorl.worker_pool.schemas import PoolConfig, WorkerPoolConfig, WorkerResources
 
@@ -32,11 +33,8 @@ def size_bytes(limit: str) -> int:
     return gib * 1024**3
 
 
-def load_pool_config(
-    repository: Path,
-    configured: Path,
-) -> PoolConfig:
-    path = configured if configured.is_absolute() else repository / configured
+def load_pool_config(configured: Path) -> PoolConfig:
+    path = REPOSITORY_ROOT / configured
     if path.is_dir():
         path = path / "poolconf.json"
     path = path.resolve()
@@ -70,7 +68,7 @@ def load_pool_config(
     if len({worker.port for worker in resources}) != len(resources):
         raise ValueError("PostgreSQL worker ports must be distinct")
     try:
-        recorded_path = path.relative_to(repository)
+        recorded_path = path.relative_to(REPOSITORY_ROOT)
     except ValueError:
         recorded_path = path
     return PoolConfig(

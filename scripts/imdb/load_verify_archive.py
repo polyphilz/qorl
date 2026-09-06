@@ -267,7 +267,7 @@ def archive_database(pool: ContainerPool, slot: WorkerSlot, archive: Path) -> No
     partial = archive.with_name(f".{archive.name}.part")
     if archive.exists() or partial.exists():
         raise RuntimeError(f"refusing to overwrite an archive: {archive}")
-    state = pool.command(
+    state = pool.execute(
         [
             "docker",
             "inspect",
@@ -275,7 +275,7 @@ def archive_database(pool: ContainerPool, slot: WorkerSlot, archive: Path) -> No
             "--format",
             "{{.State.Running}} {{.State.ExitCode}}",
         ]
-    ).strip()
+    ).stdout.strip()
     if state != "false 0":
         raise RuntimeError("PostgreSQL must be stopped cleanly before archiving")
     archive.parent.mkdir(parents=True, exist_ok=True)
@@ -291,7 +291,7 @@ tar --create --directory="$source" --sort=name --mtime=@0 \
 test -s "$partial"
 """
     try:
-        pool.command(
+        pool.execute(
             [
                 "docker",
                 "run",
@@ -338,9 +338,9 @@ def main() -> None:
         (repository / "scripts/imdb/manifest.json").read_text(encoding="utf-8")
     )
     verify_input_csvs_against_manifest(repository, manifest)
-    pool_config = load_pool_config(repository, POOL_CONFIG)
+    pool_config = load_pool_config(POOL_CONFIG)
     postgres_config = PostgresConfig.load(POSTGRES_CONFIG)
-    pool = ContainerPool(repository, "qorl-imdb-load", pool_config, postgres_config)
+    pool = ContainerPool("qorl-imdb-load", pool_config, postgres_config)
     if len(pool.workers) != 1:
         raise RuntimeError("IMDb preparation requires a single-worker pool")
     slot = pool.workers[0]
@@ -351,7 +351,7 @@ def main() -> None:
         slot.client.admin_sql(
             (repository / "scripts/imdb/load.sql").read_text(encoding="utf-8")
         )
-        pool.command(["docker", "exec", slot.container_id, "qorl-assert-config"])
+        pool.execute(["docker", "exec", slot.container_id, "qorl-assert-config"])
         pool.load_indexes()
         verify_load(
             client=slot.client,

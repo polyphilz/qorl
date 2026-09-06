@@ -36,10 +36,8 @@ def postgres_indexes() -> PostgresIndexes:
 
 
 @pytest.fixture
-def pool_config(repository_root: Path) -> PoolConfig:
-    return load_pool_config(
-        repository_root, Path("docker/worker_pool/configs/002-poolconf-4x8")
-    )
+def pool_config() -> PoolConfig:
+    return load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8"))
 
 
 @pytest.fixture

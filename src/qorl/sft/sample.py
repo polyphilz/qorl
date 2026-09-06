@@ -246,7 +246,9 @@ def evaluate_request(
             sampling_mode=request.sampling_mode,
             steered=False,
             guidance=None,
-            worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
+            worker=JSON_OBJECT_ADAPTER.validate_python(
+                slot.resources.manifest().model_dump()
+            ),
             data_identity={"fixture_id": task_set.fixture_id},
             runtime_identity={"postgres_config_id": pool.postgres_config.config_id},
             sampler=sampler_identity,
@@ -409,7 +411,7 @@ def main() -> None:
 
     repository = arguments.repository.resolve()
     postgres_config = PostgresConfig.load(arguments.postgres_config)
-    pool_config = load_pool_config(repository, arguments.pool_config)
+    pool_config = load_pool_config(arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
     timeout_path = (repository / arguments.timeouts).resolve()

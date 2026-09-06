@@ -90,11 +90,8 @@ def test_unexpected_rollout_error_is_recorded(
         seed=1,
         sampling_mode=SamplingMode.NORMAL,
     )
-    profile = load_pool_config(
-        repository_root, Path("docker/worker_pool/configs/002-poolconf-4x8")
-    )
+    profile = load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8"))
     pool = ContainerPool(
-        repository_root,
         "test-sft-sample",
         profile,
         PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),

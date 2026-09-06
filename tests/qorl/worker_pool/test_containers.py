@@ -1,9 +1,12 @@
 import subprocess
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event, Lock
 from unittest.mock import Mock
 
 import pytest
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.catalog import TaskCatalog
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import PostgresIndexes
@@ -12,17 +15,16 @@ from qorl.worker_pool import containers
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool, start_pool
 from qorl.worker_pool.exceptions import ContainerError
+from qorl.worker_pool.schemas import ComposeEnvironment, PoolManifest, WorkerSlot
 
 
 @pytest.fixture(params=["000-poolconf-1x32", "001-poolconf-2x16", "002-poolconf-4x8"])
 def pool(
     repository_root: Path, request, monkeypatch, postgres_config: PostgresConfig
 ) -> ContainerPool:
-    config = load_pool_config(
-        repository_root, Path("docker/worker_pool/configs") / request.param
-    )
+    config = load_pool_config(Path("docker/worker_pool/configs") / request.param)
     monkeypatch.setattr(containers, "validate_host_topology", lambda *_: None)
-    return ContainerPool(repository_root, "test-imdb", config, postgres_config)
+    return ContainerPool("test-imdb", config, postgres_config)
 
 
 @pytest.fixture
@@ -51,7 +53,7 @@ def docker_commands(
                 output = "POSTGRES_DB=qorl\nPGDATA=/var/lib/postgresql/18/docker\n"
             else:
                 output = f"{slot.compose_project_name}_qorl-postgres-data"
-        elif "pg_indexes" in (kwargs.get("input_text") or ""):
+        elif "pg_indexes" in (kwargs.get("stdin") or ""):
             output = postgres_indexes.model_dump_json()
         return subprocess.CompletedProcess(command, code, output, "")
 
@@ -72,7 +74,10 @@ def test_create_restore_start_stop_and_close(pool, docker_commands, tmp_path: Pa
     commands = [command for command, _ in docker_commands]
     restores = [command for command in commands if command[:2] == ["docker", "run"]]
     assert len(restores) == len(pool.workers)
-    for slot, restore in zip(pool.workers, restores, strict=True):
+    for slot in pool.workers:
+        restore = next(
+            command for command in restores if f"{slot.volume}:/target" in command
+        )
         assert slot.image_id == "sha256:installed-image"
         assert slot.pgdata_relative_path == "18/docker"
         assert "--network=none" in restore
@@ -104,22 +109,19 @@ def test_compose_receives_only_the_selected_configs(pool, docker_commands):
         )
         resources = slot.resources
         environment = kwargs["environment"]
-        assert environment["QORL_POSTGRES_CPUSET"] == resources.cpuset
-        assert environment["QORL_POSTGRES_CPUSET_MEMS"] == resources.cpuset_mems
-        assert environment["QORL_POSTGRES_MEMORY_LIMIT"] == resources.memory_limit
-        assert environment["QORL_POSTGRES_MEMORY_BYTES"] == str(resources.memory_bytes)
-        assert environment["QORL_POSTGRES_MEMORY_SWAP_LIMIT"] == resources.memory_limit
-        assert environment["QORL_POSTGRES_MEMORY_SWAP_BYTES"] == "0"
-        assert environment["QORL_POSTGRES_SHM_SIZE"] == resources.shm_size
-        assert environment["QORL_POSTGRES_SHM_BYTES"] == str(resources.shm_bytes)
-        assert environment["QORL_POSTGRES_PORT"] == str(resources.port)
-        assert environment["QORL_POSTGRES_CONFIG_FILE"] == str(
-            pool.postgres_config.pg_conf_path
-        )
-        assert environment["QORL_POSTGRES_EXPECTED_FILE"] == str(
-            pool.postgres_config.expected_path
-        )
-        assert command[5] == str(pool.repository / "compose.yaml")
+        assert isinstance(environment, ComposeEnvironment)
+        assert environment.cpuset == resources.cpuset
+        assert environment.cpuset_mems == resources.cpuset_mems
+        assert environment.memory_limit == resources.memory_limit
+        assert environment.memory_bytes == resources.memory_bytes
+        assert environment.memory_swap_limit == resources.memory_limit
+        assert environment.memory_swap_bytes == 0
+        assert environment.shm_size == resources.shm_size
+        assert environment.shm_bytes == resources.shm_bytes
+        assert environment.port == resources.port
+        assert environment.config_file == pool.postgres_config.pg_conf_path
+        assert environment.expected_file == pool.postgres_config.expected_path
+        assert command[5] == str(REPOSITORY_ROOT / "compose.yaml")
 
 
 def test_sql_client_executes_inside_its_assigned_container(pool, monkeypatch):
@@ -133,7 +135,7 @@ def test_sql_client_executes_inside_its_assigned_container(pool, monkeypatch):
     command = execute.call_args.args[0]
     assert command[:4] == ["docker", "exec", "--interactive", "assigned-container"]
     assert command[4:8] == ["bash", "-Eeuo", "pipefail", "-c"]
-    assert execute.call_args.kwargs == {"input_text": "SELECT 1;", "check": False}
+    assert execute.call_args.kwargs == {"stdin": "SELECT 1;", "check": False}
 
 
 def test_clients_share_the_pools_settings(pool: ContainerPool) -> None:
@@ -153,7 +155,6 @@ def test_start_pool_loads_one_shared_index_catalog(
     monkeypatch.setattr(containers, "ContainerPool", Mock(return_value=pool))
 
     started = start_pool(
-        pool.repository,
         "test",
         archive,
         postgres_config=pool.postgres_config,
@@ -164,7 +165,7 @@ def test_start_pool_loads_one_shared_index_catalog(
     queries = [
         (position, command)
         for position, (command, options) in enumerate(docker_commands)
-        if "pg_indexes" in (options.get("input_text") or "")
+        if "pg_indexes" in (options.get("stdin") or "")
     ]
     assert len(queries) == 1
     position, command = queries[0]
@@ -174,7 +175,7 @@ def test_start_pool_loads_one_shared_index_catalog(
         for i, (command, _) in enumerate(docker_commands)
         if command[-1] == "qorl-assert-config"
     )
-    task = TaskSet.load(pool.repository, "job").tasks[0]
+    task = TaskSet.load(REPOSITORY_ROOT, "job").tasks[0]
     command_count = len(docker_commands)
     for slot in started.workers:
         assert TaskCatalog.from_postgres(task, slot.client.indexes).indexes[
@@ -219,7 +220,6 @@ def test_missing_archive_is_reported_before_creating_containers(
     monkeypatch.setattr(ContainerPool, "create", create)
     with pytest.raises(ContainerError, match="database archive is missing"):
         start_pool(
-            pool.repository,
             "missing",
             tmp_path / "missing.tar.gz",
             pool_config=pool.pool_config,
@@ -267,8 +267,8 @@ def test_startup_failure_cleans_owned_resources(
     def load_indexes(self):
         raise ContainerError("startup failed")
 
-    def compose(self, slot, *args, **kwargs):
-        assert args == ("down", "--volumes")
+    def compose(self, slot, arguments):
+        assert arguments == ["down", "--volumes"]
         closed.append(slot)
         return ""
 
@@ -279,7 +279,6 @@ def test_startup_failure_cleans_owned_resources(
     monkeypatch.setattr(ContainerPool, "compose_command", compose)
     with pytest.raises(ContainerError, match="startup failed"):
         start_pool(
-            pool.repository,
             "failure",
             archive,
             pool_config=pool.pool_config,
@@ -293,7 +292,256 @@ def test_startup_failure_cleans_owned_resources(
 
 def test_manifest_records_selected_config(pool):
     manifest = pool.manifest()
-    assert manifest["worker_count"] == len(pool.workers)
-    assert manifest["id"] == pool.pool_config.profile_id
-    assert manifest["workers"] == [slot.resources.manifest() for slot in pool.workers]
-    assert manifest["postgres_config"] == pool.postgres_config.manifest().model_dump()
+    assert isinstance(manifest, PoolManifest)
+    assert manifest.worker_count == len(pool.workers)
+    assert manifest.id == pool.pool_config.profile_id
+    assert manifest.workers == [slot.resources.manifest() for slot in pool.workers]
+    assert manifest.postgres_config == pool.postgres_config.manifest()
+    assert manifest.model_dump() == {
+        "id": pool.pool_config.profile_id,
+        "path": str(pool.pool_config.path),
+        "config_sha256": pool.pool_config.sha256,
+        "worker_count": len(pool.workers),
+        "workers": [slot.resources.manifest().model_dump() for slot in pool.workers],
+        "postgres_config": pool.postgres_config.manifest().model_dump(),
+    }
+
+
+@pytest.mark.parametrize("phase", ["create", "restore", "start"])
+def test_startup_stages_run_workers_concurrently(pool, tmp_path, monkeypatch, phase):
+    archive = tmp_path / "imdb.tar.gz"
+    archive.write_bytes(b"archive")
+    rendezvous = Barrier(len(pool.workers), timeout=5)
+    visited: list[int] = []
+    lock = Lock()
+    for slot in pool.workers:
+        slot.created = True
+
+    def operation(slot: WorkerSlot, archive: Path | None = None) -> None:
+        if phase == "restore":
+            assert archive == tmp_path / "imdb.tar.gz"
+        with lock:
+            visited.append(slot.resources.index)
+        rendezvous.wait()
+
+    monkeypatch.setattr(pool, f"_{phase}", operation)
+    if phase == "restore":
+        pool.restore(archive)
+    else:
+        getattr(pool, phase)()
+    assert sorted(visited) == [slot.resources.index for slot in pool.workers]
+
+
+@pytest.mark.parametrize("phase", ["create", "restore", "start"])
+def test_startup_joins_active_operations_before_cleanup(
+    pool_config, postgres_config, tmp_path, monkeypatch, phase
+):
+    pool = ContainerPool("concurrent-failure", pool_config, postgres_config)
+    archive = tmp_path / "imdb.tar.gz"
+    archive.write_bytes(b"archive")
+    rendezvous = Barrier(len(pool.workers), timeout=5)
+    failed = Event()
+    release = Event()
+    cleanup_started = Event()
+    finished = [Event() for _ in pool.workers]
+    cleaned: list[int] = []
+
+    def operation(slot: WorkerSlot, archive: Path | None = None) -> None:
+        slot.created = True
+        try:
+            rendezvous.wait()
+            if slot.resources.index == 0:
+                failed.set()
+                raise ContainerError("startup failed")
+            assert release.wait(5)
+        finally:
+            finished[slot.resources.index].set()
+
+    def create() -> None:
+        for slot in pool.workers:
+            slot.created = True
+
+    def compose(slot: WorkerSlot, arguments: list[str]) -> str:
+        assert arguments == ["down", "--volumes"]
+        cleanup_started.set()
+        assert all(done.is_set() for done in finished)
+        cleaned.append(slot.resources.index)
+        return ""
+
+    monkeypatch.setattr(containers, "validate_host_topology", lambda *_: None)
+    monkeypatch.setattr(containers, "ContainerPool", Mock(return_value=pool))
+    if phase != "create":
+        monkeypatch.setattr(pool, "create", create)
+    if phase == "start":
+        monkeypatch.setattr(pool, "restore", lambda _: None)
+    monkeypatch.setattr(pool, f"_{phase}", operation)
+    monkeypatch.setattr(pool, "compose_command", compose)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        startup = executor.submit(
+            start_pool,
+            "concurrent-failure",
+            archive,
+            postgres_config=postgres_config,
+            pool_config=pool_config,
+        )
+        try:
+            assert failed.wait(5)
+            assert not cleanup_started.wait(0.05)
+            assert not startup.done()
+        finally:
+            release.set()
+        with pytest.raises(ContainerError, match="startup failed"):
+            startup.result(timeout=5)
+    assert cleaned == list(reversed(range(len(pool.workers))))
+    assert not any(slot.created for slot in pool.workers)
+
+
+def test_parallel_failure_cancels_pending_work(pool, monkeypatch):
+    futures: list[Future[None]] = [Future() for _ in pool.workers]
+    futures[0].set_exception(ContainerError("operation failed"))
+    executor = Mock()
+    executor.__enter__ = Mock(return_value=executor)
+    executor.__exit__ = Mock(return_value=False)
+    executor.submit.side_effect = futures
+    monkeypatch.setattr(containers, "ThreadPoolExecutor", Mock(return_value=executor))
+
+    with pytest.raises(ContainerError, match="operation failed"):
+        pool._parallel(Mock())
+
+    assert all(future.cancelled() for future in futures[1:])
+    executor.__exit__.assert_called_once()
+
+
+def test_failed_create_still_cleans_partial_resources(
+    pool, docker_commands, monkeypatch
+):
+    execute = pool.execute
+    failed_slot = pool.workers[0]
+
+    def fail_create(command, **kwargs):
+        if "create" in command and command[3] == failed_slot.compose_project_name:
+            raise ContainerError("partial create")
+        return execute(command, **kwargs)
+
+    monkeypatch.setattr(pool, "execute", fail_create)
+    with pytest.raises(ContainerError, match="partial create"):
+        pool.create()
+    assert failed_slot.created
+    pool.close()
+    assert any(
+        command[3] == failed_slot.compose_project_name
+        for command, _ in docker_commands
+        if command[-2:] == ["down", "--volumes"]
+    )
+    assert not any(slot.created for slot in pool.workers)
+
+
+@pytest.mark.parametrize("error_type", [ContainerError, OSError])
+def test_cleanup_continues_after_failure_and_retains_worker_for_retry(
+    pool, monkeypatch, caplog, error_type
+):
+    for slot in pool.workers:
+        slot.created = True
+        slot.container_id = f"container-{slot.resources.index}"
+    failed_slot = pool.workers[-1]
+    visited: list[int] = []
+
+    def compose(slot: WorkerSlot, arguments: list[str]) -> str:
+        assert arguments == ["down", "--volumes"]
+        visited.append(slot.resources.index)
+        if len(visited) == 1:
+            raise error_type("cannot remove container")
+        return ""
+
+    monkeypatch.setattr(pool, "compose_command", compose)
+    pool.close()
+    assert visited == [slot.resources.index for slot in reversed(pool.workers)]
+    assert failed_slot.created
+    assert failed_slot.container_id
+    assert all(not slot.created for slot in pool.workers[:-1])
+    assert failed_slot.compose_project_name in caplog.text
+    assert "cannot remove container" in caplog.text
+
+    pool.close()
+    assert visited[-1] == failed_slot.resources.index
+    assert len(visited) == len(pool.workers) + 1
+    assert not any(slot.created for slot in pool.workers)
+
+
+def test_cleanup_failure_does_not_replace_startup_error(
+    pool, tmp_path, monkeypatch, caplog
+):
+    archive = tmp_path / "imdb.tar.gz"
+    archive.write_bytes(b"archive")
+
+    def create() -> None:
+        pool.workers[0].created = True
+        raise ContainerError("original startup failure")
+
+    monkeypatch.setattr(containers, "ContainerPool", Mock(return_value=pool))
+    monkeypatch.setattr(pool, "create", create)
+    monkeypatch.setattr(
+        pool, "compose_command", Mock(side_effect=ContainerError("cleanup failure"))
+    )
+    with pytest.raises(ContainerError, match="original startup failure"):
+        start_pool(
+            "failed",
+            archive,
+            postgres_config=pool.postgres_config,
+            pool_config=pool.pool_config,
+        )
+    assert "cleanup failure" in caplog.text
+    assert pool.workers[0].created
+
+
+@pytest.mark.parametrize("stdin", [None, "SELECT 1;"])
+def test_execute_preserves_input_and_inherits_environment(
+    pool, monkeypatch, tmp_path, stdin
+):
+    completed = subprocess.CompletedProcess(["docker", "info"], 0, "output", "")
+    run = Mock(return_value=completed)
+    monkeypatch.setattr(containers.subprocess, "run", run)
+    monkeypatch.chdir(tmp_path)
+
+    assert pool.execute(["docker", "info"], stdin=stdin) is completed
+    run.assert_called_once_with(
+        ["docker", "info"],
+        cwd=REPOSITORY_ROOT,
+        input=stdin,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=None,
+    )
+
+
+def test_compose_environment_overrides_and_preserves_os_variables(pool, monkeypatch):
+    run = Mock(return_value=subprocess.CompletedProcess([], 0, "output", ""))
+    monkeypatch.setattr(containers.subprocess, "run", run)
+    monkeypatch.setenv("QORL_POOL_TEST_SENTINEL", "inherited")
+    monkeypatch.setenv("QORL_POSTGRES_PORT", "wrong")
+    slot = pool.workers[0]
+
+    assert pool.compose_command(slot, ["config", "--quiet"]) == "output"
+
+    environment = run.call_args.kwargs["env"]
+    assert environment["QORL_POOL_TEST_SENTINEL"] == "inherited"
+    assert environment["QORL_POSTGRES_PORT"] == str(slot.resources.port)
+    assert environment["QORL_POSTGRES_CONFIG_FILE"] == str(
+        pool.postgres_config.pg_conf_path
+    )
+    assert all(isinstance(value, str) for value in environment.values())
+
+
+@pytest.mark.parametrize("stderr", ["error detail", ""])
+def test_execute_failure_is_checked_unless_explicitly_disabled(
+    pool, monkeypatch, stderr
+):
+    completed = subprocess.CompletedProcess([], 1, "stdout detail", stderr)
+    monkeypatch.setattr(containers.subprocess, "run", Mock(return_value=completed))
+
+    with pytest.raises(ContainerError, match=stderr or "stdout detail"):
+        pool.execute(["docker", "info"])
+    assert pool.execute(["docker", "info"], check=False) is completed
+    with pytest.raises(ContainerError, match=stderr or "stdout detail"):
+        pool.compose_command(pool.workers[0], ["down", "--volumes"])

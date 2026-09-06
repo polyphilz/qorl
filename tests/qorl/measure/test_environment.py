@@ -12,24 +12,21 @@ from qorl.worker_pool.schemas import PoolConfig
 
 
 @pytest.mark.parametrize("phase", ["pre", "post"])
-@pytest.mark.parametrize("alternate_repository", [False, True])
 def test_capture_uses_the_active_worker_and_selected_configs(
     repository_root: Path,
     tmp_path: Path,
     monkeypatch,
     phase: str,
-    alternate_repository: bool,
     postgres_config: PostgresConfig,
     pool_config: PoolConfig,
 ) -> None:
-    repository = tmp_path if alternate_repository else repository_root
     profile_path = repository_root / pool_config.path
-    pool_config = load_pool_config(repository, profile_path)
-    pool = ContainerPool(repository, "capture-test", pool_config, postgres_config)
+    pool_config = load_pool_config(profile_path)
+    pool = ContainerPool("capture-test", pool_config, postgres_config)
     slot = pool.workers[0]
     slot.container_id = "active-container"
     command = Mock()
-    monkeypatch.setattr(pool, "command", command)
+    monkeypatch.setattr(pool, "execute", command)
 
     capture_environment(pool, slot, tmp_path, phase)
 
@@ -39,7 +36,7 @@ def test_capture_uses_the_active_worker_and_selected_configs(
             "-m",
             "qorl.measure.environment",
             "--repository",
-            str(repository),
+            str(repository_root),
             "--container",
             "active-container",
             "--output-dir",

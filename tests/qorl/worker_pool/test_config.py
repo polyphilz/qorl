@@ -17,9 +17,9 @@ from qorl.worker_pool.config import (
 POOL_CONFIG = Path("docker/worker_pool/configs/002-poolconf-4x8")
 
 
-def test_config_path_has_no_default(repository_root: Path) -> None:
+def test_config_path_has_no_default() -> None:
     with pytest.raises(TypeError, match="configured"):
-        signature(load_pool_config).bind(repository_root)
+        signature(load_pool_config).bind()
 
 
 @pytest.fixture
@@ -50,8 +50,8 @@ def test_configs_preserve_total_resources_and_resolve_each_worker(
     ports: list[int],
 ) -> None:
     config_dir = Path("docker/worker_pool/configs") / config_id
-    profile = load_pool_config(repository_root, config_dir)
-    assert profile == load_pool_config(repository_root, config_dir / "poolconf.json")
+    profile = load_pool_config(config_dir)
+    assert profile == load_pool_config(config_dir / "poolconf.json")
     assert profile.profile_id == config_id
     assert profile.path == config_dir / "poolconf.json"
     assert profile.sha256 == sha256_file(repository_root / profile.path)
@@ -89,7 +89,7 @@ def test_rejects_invalid_pool_settings(
     raw[field] = value
     (tmp_path / "poolconf.json").write_text(json.dumps(raw))
     with pytest.raises(ValueError, match=message):
-        load_pool_config(repository_root, tmp_path)
+        load_pool_config(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -97,16 +97,30 @@ def test_rejects_invalid_pool_settings(
     [("000-poolconf-1x32", 1), ("001-poolconf-2x16", 2), ("002-poolconf-4x8", 4)],
 )
 def test_pool_loader_uses_only_the_explicit_path(
-    repository_root: Path,
+    tmp_path: Path,
     config_id: str,
     worker_count: int,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configured = Path("docker/worker_pool/configs") / config_id
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("QORL_RL_WORKER_POOL_CONFIG", "missing-config")
-    explicit = load_pool_config(repository_root, configured)
+    explicit = load_pool_config(configured)
     assert len(explicit.workers) == worker_count
     assert explicit.profile_id == config_id
+
+
+def test_absolute_config_path_outside_checkout(
+    repository_root: Path, tmp_path: Path
+) -> None:
+    source = repository_root / POOL_CONFIG / "poolconf.json"
+    target = tmp_path / "poolconf.json"
+    target.write_bytes(source.read_bytes())
+
+    loaded = load_pool_config(target)
+
+    assert loaded.path == target.resolve()
+    assert loaded.sha256 == sha256_file(source)
 
 
 @pytest.mark.parametrize(
@@ -126,13 +140,13 @@ def test_rejects_invalid_worker_settings(
     raw["workers"][1][field] = value
     (tmp_path / "poolconf.json").write_text(json.dumps(raw))
     with pytest.raises(ValueError, match=message):
-        load_pool_config(repository_root, tmp_path)
+        load_pool_config(tmp_path)
 
 
 def test_topology_rejects_incorrect_core_counts_and_shared_siblings(
     repository_root: Path, cpu_topology: Path
 ) -> None:
-    profile = load_pool_config(repository_root, POOL_CONFIG)
+    profile = load_pool_config(POOL_CONFIG)
     with pytest.raises(RuntimeError, match="physical cores"):
         validate_host_topology(
             (replace(profile.workers[0], cpuset="0-1"),), cpu_topology

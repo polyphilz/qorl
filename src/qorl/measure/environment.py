@@ -301,13 +301,13 @@ def capture_postgres(container: str, mode: str) -> str:
 def capture_environment(
     pool: ContainerPool, slot: WorkerSlot, output_dir: Path, phase: str
 ) -> None:
-    pool.command(
+    pool.execute(
         [
             sys.executable,
             "-m",
             "qorl.measure.environment",
             "--repository",
-            str(pool.repository),
+            str(REPOSITORY_ROOT),
             "--container",
             slot.container_id,
             "--output-dir",
@@ -315,7 +315,7 @@ def capture_environment(
             "--phase",
             phase,
             "--runtime-profile",
-            str(pool.repository / pool.pool_config.path),
+            str(REPOSITORY_ROOT / pool.pool_config.path),
             "--postgres-config",
             str(pool.postgres_config.path),
         ]
@@ -334,8 +334,8 @@ def main() -> None:
 
     repository = args.repository.resolve()
     container = args.container
-    profile = load_pool_config(repository, args.runtime_profile)
-    profile_path = (repository / profile.path).resolve()
+    profile = load_pool_config(args.runtime_profile)
+    profile_path = (REPOSITORY_ROOT / profile.path).resolve()
     postgres_config = PostgresConfig.load(args.postgres_config)
     try:
         displayed_profile_path = str(profile_path.relative_to(repository))

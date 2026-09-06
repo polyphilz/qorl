@@ -9,7 +9,7 @@ from qorl.postgres.config import PostgresConfig
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
-from qorl.worker_pool.schemas import PoolConfig
+from qorl.worker_pool.schemas import PoolConfig, PoolManifest
 
 TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"
 POSTGRES_CONFIG_ENV = "QORL_RL_POSTGRES_CONFIG"
@@ -19,18 +19,17 @@ POOL_CONFIG_ENV = "QORL_RL_WORKER_POOL_CONFIG"
 class QorlRuntime(ContainerPool):
     def __init__(
         self,
-        repository: Path,
         task_set: TaskSet,
         pool_config: PoolConfig,
-        project_name: str,
+        compose_project_name: str,
         postgres_config: PostgresConfig,
         calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
-        super().__init__(repository, project_name, pool_config, postgres_config)
+        super().__init__(compose_project_name, pool_config, postgres_config)
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
 
-    def pool_manifest(self) -> dict[str, object]:
+    def pool_manifest(self) -> PoolManifest:
         return self.manifest()
 
 
@@ -48,9 +47,8 @@ def start(
         if not environment.get(name, "").strip():
             raise RuntimeError(f"{name} must specify a configuration path")
     postgres_config = PostgresConfig.load(Path(environment[POSTGRES_CONFIG_ENV]))
-    pool_config = load_pool_config(repository, Path(environment[POOL_CONFIG_ENV]))
+    pool_config = load_pool_config(Path(environment[POOL_CONFIG_ENV]))
     runtime = QorlRuntime(
-        repository,
         TaskSet.load(repository, "ceb"),
         pool_config,
         f"qorl-rl-{os.getpid()}",
