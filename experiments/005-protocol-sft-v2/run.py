@@ -80,11 +80,11 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
             uv,
             "run",
             "--project",
-            str(repository / "training"),
+            str(repository),
             "--frozen",
             "python",
             "-m",
-            "qorl_training.adapters.merge",
+            "qorl.adapters.merge",
             "--repository",
             str(repository),
             "--base",
@@ -120,13 +120,13 @@ def prepare(repository: Path) -> tuple[Path, PreparationReport]:
         ],
         repository,
     )
-    prime = [uv, "run", "--project", str(repository / "training"), "--frozen"]
+    prime = [uv, "run", "--project", str(repository), "--frozen"]
     run(
         [
             *prime,
             "python",
             "-m",
-            "qorl_training.audit.dataset",
+            "qorl.training.audit.dataset",
             "--model",
             str(snapshot),
             "--dataset",
@@ -299,7 +299,7 @@ def train(repository: Path) -> Path:
     dataset = repository / DATASET
     output = repository / "outputs/sft"
     steps = preparation.optimizer_steps
-    prime = [uv, "run", "--project", str(repository / "training"), "--frozen"]
+    prime = [uv, "run", "--project", str(repository), "--frozen"]
     run(
         [
             *prime,
@@ -324,7 +324,7 @@ def train(repository: Path) -> Path:
             *prime,
             "python",
             "-m",
-            "qorl_training.adapters.export",
+            "qorl.adapters.export",
             "--checkpoint",
             str(checkpoint / "trainer"),
             "--model",

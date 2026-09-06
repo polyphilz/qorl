@@ -90,7 +90,6 @@ def sft(repository: Path) -> Path:
         raise RuntimeError("uv is not installed")
 
     snapshot, model = pinned_policy(repository)
-    training = repository / "training"
     dataset = repository / DATASET
     audit = dataset / "render-audit.json"
     config_path = repository / CONFIG
@@ -107,13 +106,13 @@ def sft(repository: Path) -> Path:
     if replay.get("dataset_manifest_sha256") != sha256(dataset / "manifest.json"):
         raise RuntimeError("protocol dataset changed after its replay audit")
 
-    prime = [uv, "run", "--project", str(training), "--frozen"]
+    prime = [uv, "run", "--project", str(repository), "--frozen"]
     run(
         [
             *prime,
             "python",
             "-m",
-            "qorl_training.audit.dataset",
+            "qorl.training.audit.dataset",
             "--model",
             str(snapshot),
             "--dataset",
@@ -167,7 +166,7 @@ def sft(repository: Path) -> Path:
             *prime,
             "python",
             "-m",
-            "qorl_training.adapters.export",
+            "qorl.adapters.export",
             "--checkpoint",
             str(checkpoint / "trainer"),
             "--model",

@@ -7,15 +7,15 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from qorl.postgres.config import PostgresConfig
+from qorl.training import runtime
+from qorl.training.runtime import QorlRuntime
 from qorl.worker_pool.config import (
     load_pool_config,
     validate_host_topology,
 )
 from qorl.workload.taskset import TaskSet
-from qorl_training import runtime
-from qorl_training.runtime import QorlRuntime
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 
 
 class WorkerPoolTest(unittest.TestCase):

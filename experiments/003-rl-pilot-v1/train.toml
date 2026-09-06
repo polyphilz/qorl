@@ -86,11 +86,11 @@ type = "static"
 num_workers = 1
 
 [orchestrator.train.source.env]
-id = "qorl-training"
+id = "qorl"
 timeout.episode = 14400
 
 [orchestrator.train.source.env.taskset]
-id = "qorl-training"
+id = "qorl"
 repository = "."
 selection = "experiments/003-rl-pilot-v1/selection.json"
 split = "train"
@@ -105,7 +105,7 @@ finalize = 600
 scoring = 600
 
 [orchestrator.train.source.env.agent.harness]
-id = "qorl-training"
+id = "qorl"
 run_config = "model/configs/000-modelconf/modelconf.json"
 
 [orchestrator.train.source.env.agent.runtime]

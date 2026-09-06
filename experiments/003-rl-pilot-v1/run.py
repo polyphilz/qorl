@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import shutil
 import subprocess
@@ -16,7 +15,7 @@ from qorl.util.hashing import sha256_file
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
 INVENTORY_CHECK = Path("experiments/003-rl-pilot-v1/build_inventory.py")
-MERGE_MODULE = "qorl_training.adapters.merge"
+MERGE_MODULE = "qorl.adapters.merge"
 SFT_RUN = Path("outputs/sft/protocol-sft-train-v1")
 MERGED_MODEL = Path("outputs/rl/protocol-sft-v1-merged")
 PRE_RL_REPORT = Path("outputs/rl/qorl-rl-pilot-validation-v1/pre/report.json")
@@ -82,20 +81,11 @@ def rl(repository: Path) -> Path:
         raise RuntimeError("uv is not installed")
 
     repository = repository.resolve()
-    training = repository / "training"
-    python_path = [repository / "src", training / "src"]
-    existing_python_path = os.environ.get("PYTHONPATH")
-    os.environ["PYTHONPATH"] = os.pathsep.join(
-        [
-            *(str(path) for path in python_path),
-            *([existing_python_path] if existing_python_path else []),
-        ]
-    )
     prime = [
         uv,
         "run",
         "--project",
-        str(training),
+        str(repository),
         "--frozen",
         "--no-sync",
     ]

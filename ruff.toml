@@ -1,6 +1,6 @@
 target-version = "py312"
 line-length = 88
-src = ["src", "training/src"]
+src = ["src"]
 
 [lint]
 select = [
@@ -23,7 +23,7 @@ ignore = ["E501"]
 "tests/**/*.py" = ["PLR2004"]
 
 [lint.isort]
-known-first-party = ["qorl", "qorl_training", "scripts"]
+known-first-party = ["qorl", "scripts"]
 
 [format]
 docstring-code-format = true

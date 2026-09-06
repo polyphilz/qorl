@@ -7,6 +7,9 @@ slice to verify that the initial reward and training path can learn at all.
 `build_inventory.py` produces the frozen selection, and `run.py` preserves the
 pilot's experiment-specific training and preflight logic.
 
+`run.py` uses the root QORL environment; its launch config resolves the training
+plugins through the `qorl` package.
+
 The launch config explicitly selects `000-pgconf-default` and `002-poolconf-4x8`.
 Rerunning uses those configurations; completed outputs retain their recorded settings.
 

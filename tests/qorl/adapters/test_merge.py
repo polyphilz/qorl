@@ -8,8 +8,8 @@ from tempfile import TemporaryDirectory
 import torch
 from safetensors.torch import save_file
 
+from qorl.adapters.merge import merge
 from qorl.adapters.verify import verify_merged_model
-from qorl_training.adapters.merge import merge
 
 
 class AdapterMergeTest(unittest.TestCase):

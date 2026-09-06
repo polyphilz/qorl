@@ -7,6 +7,8 @@ This experiment teaches the base model the QORL message and tool-call protocol.
 run. `dataset.json` pins the dataset selection seed and split sizes. `run.py`
 preserves the exact experiment-specific training orchestration.
 
+`run.py` launches its training commands through the root QORL environment.
+
 The historical dataset builder receives that configuration explicitly with
 `--config experiments/001-protocol-sft-v1/dataset.json`.
 

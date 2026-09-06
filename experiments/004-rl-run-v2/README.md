@@ -8,6 +8,9 @@ evaluation, and reward-protocol audit in one place.
 `build_inventory.py` constructs the selection, and `build_timeouts.py` derives
 its runtime limits from the matching calibration.
 
+Both launch configs resolve the environment, task set, and harness through the
+root package's `qorl` plugin ID.
+
 - Outputs: `outputs/rl/rl-run-v2/`,
   `outputs/rl/qorl-rl-run-v2-checkpoint-evaluation-v1/`, and
   `outputs/analysis/rl-run-v2-default-fingerprint-rescore-v1/`

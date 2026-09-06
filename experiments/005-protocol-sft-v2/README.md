@@ -30,6 +30,8 @@ API and its credential.
 On the benchmark host, assemble the dataset and render it with the exact
 training tokenizer:
 
+Preparation, training, and evaluation use the root QORL environment.
+
 ```bash
 uv run python -m qorl.sft.build_protocol_dataset
 uv run python experiments/005-protocol-sft-v2/run.py --prepare

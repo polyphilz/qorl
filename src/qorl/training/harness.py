@@ -13,11 +13,11 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.schemas import MeasurementProtocolId
-from qorl_training import runtime
+from qorl.training import runtime
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
-    id: str = "qorl-training"
+    id: str = "qorl"
     run_config: Path = Path("model/configs/000-modelconf/modelconf.json")
     context_length: int = 20_480
     candidate_attempts: int = Field(5, ge=1)

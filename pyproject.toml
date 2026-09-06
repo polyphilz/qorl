@@ -3,9 +3,12 @@ name = "qorl"
 version = "0.1.0"
 description = "PostgreSQL query optimization with reinforcement learning"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = "==3.12.*"
 dependencies = [
     "pydantic>=2.13.5,<3",
+    "prime-rl[gpu,flash-attn]",
+    "torch==2.13.0",
+    "vllm==0.28.0",
 ]
 
 [dependency-groups]
@@ -22,6 +25,44 @@ pythonpath = ["."]
 
 [project.scripts]
 qorl = "qorl.cli:main"
+
+[tool.uv]
+required-version = ">=0.11.1"
+environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
+
+[tool.uv.sources]
+prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "18f8bfa26b7f49862a94c78ad402bae64299e7f8" }
+
+# uv reads metadata corrections from the root project. These match Prime-RL's.
+# ModelExpress's generated protobuf code supports v6 despite its published <6 cap.
+[[tool.uv.dependency-metadata]]
+name = "modelexpress"
+version = "0.3.0"
+requires-dist = [
+    "grpcio>=1.66.2",
+    "huggingface_hub>=0.20.0",
+    "nixl",
+    "numpy>=1.24.0",
+    "protobuf>=5.27.0,<7.0.0",
+    "pydantic>=2.0.0",
+    "torch>=2.6.0",
+]
+
+# NIXL otherwise installs its CUDA 12 default alongside the CUDA 13 package.
+[[tool.uv.dependency-metadata]]
+name = "nixl"
+version = "0.10.1"
+requires-dist = ["nixl-cu13==0.10.1"]
+
+# CUTLASS also defaults to CUDA 12 even when vLLM requests the CUDA 13 extra.
+[[tool.uv.dependency-metadata]]
+name = "nvidia-cutlass-dsl"
+version = "4.6.2"
+provides-extras = ["cu13"]
+requires-dist = [
+    "nvidia-cutlass-dsl-libs-base==4.6.2",
+    "nvidia-cutlass-dsl-libs-cu13==4.6.2",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]

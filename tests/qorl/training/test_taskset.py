@@ -5,7 +5,7 @@ import inspect
 import unittest
 from types import SimpleNamespace
 
-from qorl_training.taskset import QorlTask, selected_items
+from qorl.training.taskset import QorlTask, selected_items
 
 
 class QorlTaskTest(unittest.TestCase):

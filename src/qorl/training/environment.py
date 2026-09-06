@@ -6,8 +6,8 @@ from typing import cast
 
 from verifiers.v1.envs.single_agent import SingleAgentEnv
 
-import qorl_training.runtime as runtime
-from qorl_training.taskset import QorlTaskset
+import qorl.training.runtime as runtime
+from qorl.training.taskset import QorlTaskset
 
 
 class QorlEnvironment(SingleAgentEnv):
