@@ -6,10 +6,11 @@ import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, TextIO
+from types import TracebackType
+from typing import TextIO
 
 
-def wait_for_server(url: str, process: subprocess.Popen[Any], timeout: int) -> None:
+def wait_for_server(url: str, process: subprocess.Popen[bytes], timeout: int) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
@@ -42,7 +43,7 @@ class ServedModel:
         self.startup_timeout = startup_timeout
         self.environment = environment
         self._log: TextIO | None = None
-        self.process: subprocess.Popen[Any] | None = None
+        self.process: subprocess.Popen[bytes] | None = None
 
     def __enter__(self) -> ServedModel:
         self._log = self.log_path.open("w")
@@ -60,7 +61,12 @@ class ServedModel:
             raise
         return self
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
     def close(self) -> None:

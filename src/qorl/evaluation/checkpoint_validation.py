@@ -24,9 +24,10 @@ from qorl.measure.run import TaskRun
 from qorl.measure.schemas import FinalStatus, RunStatus
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
+from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
-from qorl.util.io import utc_now, write_json
-from qorl.util.serving import ServedModel
+from qorl.util.io import write_json
+from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError

@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Any
+
+from pydantic import JsonValue
 
 
 def sha256_bytes(content: bytes) -> str:
@@ -18,6 +19,8 @@ def sha256_file(path: Path) -> str:
         return digest.hexdigest()
 
 
-def sha256_json(value: Any) -> str:
+def sha256_json[Value: JsonValue](
+    value: Value | list[Value] | dict[str, Value],
+) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()

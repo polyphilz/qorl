@@ -1,1 +1,1 @@
-"""Small dependency-free helpers shared across QORL."""
+"""Small helpers shared across QORL."""

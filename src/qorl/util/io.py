@@ -3,16 +3,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+
+from pydantic import JsonValue
 
 
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-def write_json(path: Path, value: Any) -> None:
+def write_json[Value: JsonValue](
+    path: Path, value: Value | list[Value] | dict[str, Value]
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = json.dumps(value, indent=2, sort_keys=True) + "\n"
     with tempfile.NamedTemporaryFile(

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
-from qorl.util import serving
-from qorl.util.serving import ServedModel
+from pytest import MonkeyPatch
+
+from qorl.serving import serving
+from qorl.serving.serving import ServedModel
 
 
 class FakeProcess:
@@ -26,7 +27,9 @@ class FakeProcess:
         raise AssertionError("graceful termination should succeed")
 
 
-def test_served_model_owns_process_and_log(tmp_path: Path, monkeypatch: Any) -> None:
+def test_served_model_owns_process_and_log(
+    tmp_path: Path, monkeypatch: MonkeyPatch
+) -> None:
     process = FakeProcess()
     monkeypatch.setattr(serving.subprocess, "Popen", lambda *_, **__: process)
     monkeypatch.setattr(serving, "wait_for_server", lambda *_: None)

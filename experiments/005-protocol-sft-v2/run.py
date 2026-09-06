@@ -18,6 +18,7 @@ from qorl.adapters.model import (
 from qorl.adapters.verify import verify_merged_model
 from qorl.agent import QoAgentConfig
 from qorl.measure.schemas import RunStatus
+from qorl.serving.serving import ServedModel
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     DatasetConfig,
@@ -31,7 +32,6 @@ from qorl.sft.schemas import (
     require_object,
 )
 from qorl.util.hashing import sha256_file
-from qorl.util.serving import ServedModel
 
 ROOT = Path(__file__).resolve().parents[2]
 DATASET = Path("outputs/sft/protocol-sft-v2")

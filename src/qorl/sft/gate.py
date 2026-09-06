@@ -33,7 +33,8 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
-from qorl.util.io import utc_now, write_json
+from qorl.util.io import write_json
+from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot

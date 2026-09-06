@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import adapter_rank, verify_adapter_base
+from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
-from qorl.util.serving import ServedModel
 
 BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
