@@ -9,15 +9,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from qorl.adapters.model import (
-    adapter_base_model,
-    adapter_rank,
-    model_snapshot,
-    verify_adapter_base,
-)
-from qorl.adapters.verify import verify_merged_model
+from qorl.adapters.config import adapter_config, adapter_rank
+from qorl.adapters.verify import verify_adapter_base, verify_merged_model
 from qorl.agent import QoAgentConfig
 from qorl.measure.schemas import RunStatus
+from qorl.model.model import model_snapshot
+from qorl.paths import REPOSITORY_ROOT
 from qorl.serving.serving import ServedModel
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -65,7 +62,12 @@ def policy(
     value = require_object(
         load_json_object(repository / config.policy_config).get("policy"), "policy"
     )
-    return model_snapshot(value), QoAgentConfig.from_dict(value), value
+    policy_config = QoAgentConfig.from_dict(value)
+    return (
+        model_snapshot(policy_config.model, policy_config.revision),
+        policy_config,
+        value,
+    )
 
 
 def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
@@ -73,7 +75,9 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
     if uv is None:
         raise RuntimeError("uv is not installed")
     adapter = (repository / adapter).resolve()
-    snapshot = adapter_base_model(adapter, repository)
+    recorded = Path(adapter_config(adapter).base_model_name_or_path).expanduser()
+    snapshot = (REPOSITORY_ROOT / recorded).resolve()
+    verify_adapter_base(adapter, snapshot)
     output = (repository / output).resolve()
     run(
         [
@@ -85,8 +89,6 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
             "python",
             "-m",
             "qorl.adapters.merge",
-            "--repository",
-            str(repository),
             "--base",
             str(snapshot),
             "--adapter",
@@ -96,7 +98,7 @@ def merge_sampler(repository: Path, adapter: Path, output: Path) -> Path:
         ],
         repository,
     )
-    verify_merged_model(snapshot, adapter, output, repository)
+    verify_merged_model(snapshot, adapter, output)
     return output / "qorl-merge.json"
 
 
@@ -219,7 +221,7 @@ def gate(
     )
     snapshot, policy_config, _ = policy(repository, dataset_config)
     adapter = trained_adapter(repository)
-    verify_adapter_base(adapter, snapshot, repository)
+    verify_adapter_base(adapter, snapshot)
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():
         raise RuntimeError(f"pinned evaluation vLLM is missing: {vllm}")

@@ -11,8 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from qorl.adapters.model import model_snapshot
 from qorl.measure.schemas import RunStatus
+from qorl.model.model import model_snapshot
 
 PRIME_RL_VERSION = "0.9.0"
 RUN_NAME = "protocol-sft-train-v1"
@@ -33,7 +33,7 @@ def pinned_policy(repository: Path) -> tuple[Path, dict[str, Any]]:
     config = json.loads(
         (repository / "model/configs/000-modelconf/modelconf.json").read_text()
     )["policy"]
-    return model_snapshot(config), config
+    return model_snapshot(config["model"], config["revision"]), config
 
 
 def sha256(path: Path) -> str:

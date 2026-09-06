@@ -8,9 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from qorl.adapters.model import model_snapshot
 from qorl.adapters.verify import verify_merged_model
 from qorl.measure.schemas import RunStatus
+from qorl.model.model import model_snapshot
 from qorl.util.hashing import sha256_file
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")
@@ -36,7 +36,7 @@ def pinned_policy(repository: Path) -> tuple[Path, dict]:
     policy = json.loads(
         (repository / "model/configs/000-modelconf/modelconf.json").read_text()
     )["policy"]
-    return model_snapshot(policy), policy
+    return model_snapshot(policy["model"], policy["revision"]), policy
 
 
 def verify_pre_rl_validation(repository: Path, merged_model_sha256: str) -> None:
@@ -120,8 +120,6 @@ def rl(repository: Path) -> Path:
                 "python",
                 "-m",
                 MERGE_MODULE,
-                "--repository",
-                str(repository),
                 "--base",
                 str(base),
                 "--adapter",
@@ -131,7 +129,7 @@ def rl(repository: Path) -> Path:
             ],
             repository,
         )
-    verify_merged_model(base, adapter, merged, repository)
+    verify_merged_model(base, adapter, merged)
     merged_manifest = json.loads(
         (merged / "qorl-merge.json").read_text(encoding="utf-8")
     )

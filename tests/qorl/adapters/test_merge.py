@@ -43,7 +43,7 @@ class AdapterMergeTest(unittest.TestCase):
                 )
             )
 
-            manifest_path = merge(base, adapter, output, root)
+            manifest_path = merge(base, adapter, output)
 
             manifest = json.loads(manifest_path.read_text())
             assert manifest.get("stale") is None
@@ -51,7 +51,7 @@ class AdapterMergeTest(unittest.TestCase):
                 artifact["path"] != "qorl-merge.json"
                 for artifact in manifest["artifacts"]
             )
-            verify_merged_model(base, adapter, output, root)
+            verify_merged_model(base, adapter, output)
 
 
 if __name__ == "__main__":

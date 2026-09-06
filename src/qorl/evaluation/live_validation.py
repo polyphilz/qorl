@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from qorl.adapters.model import adapter_rank, model_snapshot
+from qorl.adapters.config import adapter_rank
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.interface import AgentInterface
@@ -21,6 +21,7 @@ from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Decision, RunStatus
+from qorl.model.model import model_snapshot
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
@@ -468,7 +469,7 @@ def main() -> None:
     run_policy = json.loads(
         (repository / "model/configs/000-modelconf/modelconf.json").read_text()
     )["policy"]
-    snapshot = model_snapshot(run_policy)
+    snapshot = model_snapshot(run_policy["model"], run_policy["revision"])
     adapter = adapter_path(repository) if arguments.policies != "base" else None
     vllm = repository / ".venv-vllm/bin/vllm"
     if not vllm.is_file():

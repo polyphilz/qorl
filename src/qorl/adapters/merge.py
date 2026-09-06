@@ -12,8 +12,8 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-from qorl.adapters.model import adapter_config, verify_adapter_base
-from qorl.paths import REPOSITORY_ROOT
+from qorl.adapters.config import adapter_config
+from qorl.adapters.verify import verify_adapter_base
 
 MODEL_FILE = "model.safetensors"
 ADAPTER_FILE = "adapter_model.safetensors"
@@ -46,7 +46,7 @@ def adapter_pairs(path: Path) -> dict[str, tuple[str, str]]:
     return pairs
 
 
-def merge(base: Path, adapter: Path, output: Path, repository: Path) -> Path:
+def merge(base: Path, adapter: Path, output: Path) -> Path:
     base_model = base / MODEL_FILE
     adapter_model = adapter / ADAPTER_FILE
     adapter_config_path = adapter / "adapter_config.json"
@@ -59,7 +59,7 @@ def merge(base: Path, adapter: Path, output: Path, repository: Path) -> Path:
     config = adapter_config(adapter)
     if config.peft_type != "LORA" or config.bias != "none":
         raise RuntimeError("only an unbiased LoRA adapter can be merged")
-    base_model_sha256 = verify_adapter_base(adapter, base, repository)
+    base_model_sha256 = verify_adapter_base(adapter, base)
     rank = config.r
     scale = config.lora_alpha / rank
     pairs = adapter_pairs(adapter_model)
@@ -137,7 +137,6 @@ def merge(base: Path, adapter: Path, output: Path, repository: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -147,7 +146,6 @@ def main() -> None:
             arguments.base.resolve(),
             arguments.adapter.resolve(),
             arguments.output.resolve(),
-            arguments.repository.resolve(),
         )
     )
 

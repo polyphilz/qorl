@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
-from qorl.adapters.model import model_snapshot
 from qorl.adapters.verify import verify_merged_model
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
@@ -25,6 +24,7 @@ from qorl.evaluation.live_validation import (
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import FinalStatus, RunStatus
+from qorl.model.model import model_snapshot
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
@@ -285,8 +285,8 @@ def main() -> None:
 
     model_sha256: str
     if arguments.phase == "pre":
-        base = model_snapshot(policy)
-        verify_merged_model(base, adapter_path(repository), model, repository)
+        base = model_snapshot(policy["model"], policy["revision"])
+        verify_merged_model(base, adapter_path(repository), model)
         merge_manifest_path = model / "qorl-merge.json"
         merge_manifest = json.loads(merge_manifest_path.read_text(encoding="utf-8"))
         model_sha256 = merge_manifest["merged_model_sha256"]

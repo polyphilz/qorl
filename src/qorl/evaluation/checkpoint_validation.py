@@ -14,7 +14,7 @@ from threading import Lock
 from typing import Any
 
 from qorl import __version__
-from qorl.adapters.model import adapter_rank
+from qorl.adapters.config import adapter_rank
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.evaluation.live_validation import trace_metrics

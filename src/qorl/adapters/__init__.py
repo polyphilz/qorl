@@ -1,1 +1,1 @@
-"""Model and adapter utilities."""
+"""LoRA adapter configuration, export, merging, and verification."""

@@ -9,7 +9,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from qorl.adapters.model import adapter_rank, verify_adapter_base
+from qorl.adapters.config import adapter_config, adapter_rank
+from qorl.adapters.schemas import AdapterExportManifest
 from qorl.paths import REPOSITORY_ROOT
 from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
@@ -18,16 +19,48 @@ BASE_MODEL = "qorl-base"
 ADAPTER_MODEL = "qorl-protocol-adapter"
 MINIMUM_LOGPROBABILITY_DELTA = 1e-7
 TOP_LOGPROBS = 20
+ADAPTER_MANIFEST_FILE = "qorl-manifest.json"
+MODEL_FILE = "model.safetensors"
 
 
-def verify_merged_model(
-    base: Path, adapter: Path, merged: Path, repository: Path
-) -> None:
+def verify_adapter_base(adapter: Path, base: Path) -> str:
+    recorded = Path(adapter_config(adapter).base_model_name_or_path).expanduser()
+    recorded = (REPOSITORY_ROOT / recorded).resolve()
+    if not (recorded / MODEL_FILE).is_file():
+        raise RuntimeError(f"adapter's recorded base model is missing: {recorded}")
+    recorded_sha256 = sha256_file(recorded / MODEL_FILE)
+    manifest_path = adapter / ADAPTER_MANIFEST_FILE
+    if manifest_path.is_file():
+        manifest = AdapterExportManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+        if (
+            manifest.base_model_sha256 is not None
+            and manifest.base_model_sha256 != recorded_sha256
+        ):
+            raise RuntimeError(
+                "adapter manifest does not match its recorded base model"
+            )
+    supplied_base = base.resolve()
+    supplied = supplied_base / MODEL_FILE
+    if not supplied.is_file():
+        raise RuntimeError(f"base model weights are missing: {supplied}")
+    supplied_sha256 = (
+        recorded_sha256 if supplied_base == recorded else sha256_file(supplied)
+    )
+    if supplied_sha256 != recorded_sha256:
+        raise RuntimeError(
+            "supplied base model does not match the adapter's training base"
+        )
+    return recorded_sha256
+
+
+def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
     manifest_path = merged / "qorl-merge.json"
     model_path = merged / "model.safetensors"
     if not manifest_path.is_file() or not model_path.is_file():
         raise RuntimeError(f"merged SFT model is incomplete: {merged}")
-    base_model_sha256 = verify_adapter_base(adapter, base, repository)
+    base_model_sha256 = verify_adapter_base(adapter, base)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     expected = {
         "base_model_sha256": base_model_sha256,
