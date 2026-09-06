@@ -13,6 +13,7 @@ from safetensors import safe_open
 from safetensors.torch import save_file
 
 from qorl.adapters.model import adapter_config, verify_adapter_base
+from qorl.paths import REPOSITORY_ROOT
 
 MODEL_FILE = "model.safetensors"
 ADAPTER_FILE = "adapter_model.safetensors"
@@ -136,7 +137,7 @@ def merge(base: Path, adapter: Path, output: Path, repository: Path) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)

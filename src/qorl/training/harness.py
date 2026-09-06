@@ -59,7 +59,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
         config_path = self.config.run_config
         if not config_path.is_absolute():
-            config_path = active.task_set.repository / config_path
+            config_path = active.repository / config_path
         policy_data = json.loads(config_path.read_text(encoding="utf-8"))["policy"]
         policy_config = replace(
             QoAgentConfig.from_dict(policy_data),
@@ -106,7 +106,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         trace.info["qorl"] = {
             "task_id": task["task_id"],
             "template_id": task["template_id"],
-            "data_identity": active.data_identity,
+            "data_identity": {"fixture_id": active.task_set.fixture_id},
             "runtime_identity": active.runtime_identity,
             "database_pool": active.pool_manifest(),
             "database_worker": slot.resources.manifest(),

@@ -26,20 +26,26 @@ from qorl.measure.schemas import (
     OutcomeKind,
     score,
 )
+from qorl.measure.timeouts import TaskTimeout, task_timeout_ms
 from qorl.plans.fingerprint import plan_sha256
 from qorl.postgres.exceptions import QueryTimeout
 from qorl.postgres.schemas import ExplainResult
-from qorl.workload.timeouts import TaskTimeout, task_timeout_ms
+from qorl.taskset.schemas import Task
 
 TASK: dict[str, Any] = {
     "task_id": "job-test",
+    "template_id": "job-test-template",
     "sql_path": "queries/test.sql",
     "sql_sha256": "unused",
+    "tables": ["table_a", "table_b"],
     "relations": [
         {"alias": "a", "table": "table_a"},
         {"alias": "b", "table": "table_b"},
     ],
     "join_edges": ["a:table_a.id=b:table_b.a_id"],
+    "table_count": 2,
+    "relation_count": 2,
+    "join_predicate_count": 1,
 }
 
 DEFAULT_PLAN = {
@@ -61,7 +67,8 @@ DEFAULT_PLAN = {
 
 
 class Fixture:
-    def load_sql(self, task: dict[str, Any]) -> str:
+    def load_sql(self, task: Task) -> str:
+        assert isinstance(task, Task)
         return "SELECT 1;"
 
 

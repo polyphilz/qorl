@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+from qorl.postgres.schemas import ExplainResult
 
 MIN_SCORE = 0.1
 MAX_SCORE = 10.0
@@ -87,6 +90,17 @@ class Measurement(Record):
     plan_sha256: str
     shared_hit_blocks: int = 0
     shared_read_blocks: int = 0
+
+
+class QueryObservation(Measurement):
+    run: int
+
+
+@dataclass(frozen=True)
+class QueryRun:
+    is_warmup: bool
+    observation: QueryObservation
+    explain: ExplainResult
 
 
 class CandidateTimeout(Record):

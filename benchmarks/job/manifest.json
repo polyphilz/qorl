@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "workload_id": "job",
+  "schema_version": 3,
+  "benchmark_id": "job",
   "fixture_id": "imdb",
   "description": "Join Order Benchmark queries",
   "source": {

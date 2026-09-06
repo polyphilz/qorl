@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import platform
 import statistics
@@ -9,84 +8,79 @@ from pathlib import Path
 from typing import Any
 
 from qorl import __version__
+from qorl.measure.query import (
+    BUFFER_STABILITY_TOLERANCE,
+    MIN_WARMUP_RUNS,
+    measure_query,
+)
 from qorl.measure.run import TaskRun
-from qorl.measure.schemas import RunStatus
-from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
+from qorl.measure.schemas import QueryObservation, RunStatus
+from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
+from qorl.taskset.schemas import Task
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
-from qorl.util.io import display_path, write_json
+from qorl.util.io import write_json
 from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS
 
-MEASUREMENT_RUNS = 20
-MIN_WARMUP_RUNS = 2
-MAX_WARMUP_RUNS = 5
-BUFFER_STABILITY_TOLERANCE = 0.02
+DEFAULT_NUM_TRIALS = 20
+DEFAULT_MAX_WARMUP_RUNS = 5
+MIN_CALIBRATION_TRIALS = 2
 
 
-def observation(explain: dict[str, Any], run_number: int) -> dict[str, Any]:
-    plan = explain["Plan"]
-    return {
-        "run": run_number,
-        "execution_time_ms": explain["Execution Time"],
-        "planning_time_ms": explain["Planning Time"],
-        "shared_hit_blocks": plan.get("Shared Hit Blocks", 0),
-        "shared_read_blocks": plan.get("Shared Read Blocks", 0),
-        "plan_sha256": plan_sha256(plan),
-    }
-
-
-def buffers_stable(previous: dict[str, Any], current: dict[str, Any]) -> bool:
-    if previous["plan_sha256"] != current["plan_sha256"]:
-        return False
-    for key in ("shared_hit_blocks", "shared_read_blocks"):
-        left = previous[key]
-        right = current[key]
-        scale = max(1, left, right)
-        if abs(left - right) / scale > BUFFER_STABILITY_TOLERANCE:
-            return False
-    return True
+def validate_run_counts(max_warmup_runs: int, num_trials: int) -> None:
+    """Require enough runs to compare warmups and compute sample variation."""
+    if max_warmup_runs < MIN_WARMUP_RUNS:
+        raise ValueError(f"max_warmup_runs must be at least {MIN_WARMUP_RUNS}")
+    if num_trials < MIN_CALIBRATION_TRIALS:
+        raise ValueError(f"num_trials must be at least {MIN_CALIBRATION_TRIALS}")
 
 
 def calibrate_task(
-    worker: PostgresClient, task_set: TaskSet, task: dict[str, Any]
+    worker: PostgresClient,
+    task_set: TaskSet,
+    task: Task,
+    *,
+    max_warmup_runs: int,
+    num_trials: int,
 ) -> dict[str, Any]:
+    validate_run_counts(max_warmup_runs, num_trials)
     sql = task_set.load_sql(task)
-    warmups: list[dict[str, Any]] = []
-    for run_number in range(1, MAX_WARMUP_RUNS + 1):
-        result = observation(worker.explain_analyze(sql, GLOBAL_TIMEOUT_MS), run_number)
-        warmups.append(result)
-        if run_number >= MIN_WARMUP_RUNS and buffers_stable(warmups[-2], warmups[-1]):
-            break
-
-    measurements: list[dict[str, Any]] = []
+    warmups: list[QueryObservation] = []
+    measurements: list[QueryObservation] = []
     representative_explain: dict[str, Any] | None = None
-    for run_number in range(1, MEASUREMENT_RUNS + 1):
-        explain = worker.explain_analyze(sql, GLOBAL_TIMEOUT_MS)
-        if representative_explain is None:
-            representative_explain = explain
-        measurements.append(observation(explain, run_number))
+    for result in measure_query(
+        lambda: worker.explain(sql, GLOBAL_TIMEOUT_MS, analyze=True),
+        max_warmup_runs=max_warmup_runs,
+        num_trials=num_trials,
+    ):
+        if result.is_warmup:
+            warmups.append(result.observation)
+        else:
+            if representative_explain is None:
+                representative_explain = result.explain.document
+            measurements.append(result.observation)
 
-    execution_times = [item["execution_time_ms"] for item in measurements]
+    execution_times = [item.execution_time_ms for item in measurements]
     mean = statistics.mean(execution_times)
     standard_deviation = statistics.stdev(execution_times)
-    fingerprints = sorted({item["plan_sha256"] for item in measurements})
+    fingerprints = sorted({item.plan_sha256 for item in measurements})
     return {
         "schema_version": 1,
         "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
-        "task_id": task["task_id"],
-        "template_id": task["template_id"],
+        "task_id": task.task_id,
+        "template_id": task.template_id,
         "status": RunStatus.COMPLETED.value,
         "completed_at_utc": utc_now(),
-        "warmups": warmups,
-        "measurements": measurements,
+        "warmups": [item.model_dump() for item in warmups],
+        "measurements": [item.model_dump() for item in measurements],
         "summary": {
             "measurement_count": len(measurements),
             "median_execution_time_ms": statistics.median(execution_times),
@@ -102,51 +96,31 @@ def calibrate_task(
     }
 
 
-def selected_tasks(
-    task_set: TaskSet, selection_path: Path, split: str | None = None
-) -> tuple[dict[str, Any], str, list[dict[str, Any]]]:
-    selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    if selection.get("source", {}).get("inventory_id") != task_set.task_set_id:
-        raise RuntimeError("calibration selection references a different inventory")
-    splits = selection.get("splits")
-    if not isinstance(splits, dict) or not splits:
-        raise RuntimeError("calibration selection has no splits")
-    if split is None:
-        if len(splits) != 1:
-            raise RuntimeError(
-                "calibration selection has multiple splits; pass --split"
-            )
-        split = next(iter(splits))
-    try:
-        selected = splits[split]
-    except (KeyError, TypeError) as error:
-        raise RuntimeError(f"calibration selection has no {split!r} split") from error
-    by_id = {task.task_id: task.model_dump() for task in task_set.tasks}
-    task_ids = [item.get("task_id") for item in selected]
-    if any(not isinstance(task_id, str) for task_id in task_ids):
-        raise RuntimeError("calibration selection contains an invalid task ID")
-    if len(task_ids) != len(set(task_ids)):
-        raise RuntimeError("calibration selection contains duplicate task IDs")
-    missing = sorted(set(task_ids) - set(by_id))
-    if missing:
-        raise RuntimeError(f"calibration selection contains unknown task: {missing[0]}")
-    return selection, split, [by_id[task_id] for task_id in task_ids]
-
-
 def calibrate_on_worker(
-    pool: ContainerPool, task_set: TaskSet, task: dict[str, Any]
+    pool: ContainerPool,
+    task_set: TaskSet,
+    task: Task,
+    *,
+    max_warmup_runs: int,
+    num_trials: int,
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
-        result = calibrate_task(slot.client, task_set, task)
+        result = calibrate_task(
+            slot.client,
+            task_set,
+            task,
+            max_warmup_runs=max_warmup_runs,
+            num_trials=num_trials,
+        )
         result["worker"] = slot.resources.manifest()
         return slot, result
 
 
-def failed_task(task: dict[str, Any], error: Exception) -> dict[str, Any]:
+def failed_task(task: Task, error: Exception) -> dict[str, Any]:
     return {
         "schema_version": 1,
-        "task_id": task["task_id"],
-        "template_id": task["template_id"],
+        "task_id": task.task_id,
+        "template_id": task.template_id,
         "status": RunStatus.FAILED.value,
         "completed_at_utc": utc_now(),
         "error": str(error),
@@ -155,41 +129,23 @@ def failed_task(task: dict[str, Any], error: Exception) -> dict[str, Any]:
 
 def calibrate(
     repository: Path,
-    workload: str = "job",
-    selection_path: Path | None = None,
-    split: str | None = None,
     *,
     postgres_config_path: Path,
     pool_config_path: Path,
+    max_warmup_runs: int = DEFAULT_MAX_WARMUP_RUNS,
+    num_trials: int = DEFAULT_NUM_TRIALS,
 ) -> Path:
+    """Calibrate the complete JOB benchmark and write per-task and pool reports."""
+    validate_run_counts(max_warmup_runs, num_trials)
     postgres_config = PostgresConfig.load(repository, postgres_config_path)
     pool_config = load_pool_config(repository, pool_config_path)
-    if workload not in {"job", "ceb"}:
-        raise RuntimeError(f"unknown calibration workload: {workload}")
-    if selection_path is None and split is not None:
-        raise RuntimeError("--split requires --selection")
-
-    task_set = TaskSet.load(repository, workload)
-    selection: dict[str, Any] | None = None
-    selected_split: str | None = None
-    if selection_path is None:
-        tasks = [task.model_dump() for task in task_set.tasks]
-        calibration_name = task_set.task_set_id
-    else:
-        selection_path = (
-            selection_path
-            if selection_path.is_absolute()
-            else repository / selection_path
-        ).resolve()
-        selection, selected_split, tasks = selected_tasks(
-            task_set, selection_path, split
-        )
-        calibration_name = selection["inventory_id"]
+    task_set = TaskSet.load(repository, "job")
+    tasks = task_set.tasks
     worker_count = len(pool_config.workers)
 
     started_at = datetime.now(UTC)
     calibration_id = started_at.strftime(
-        f"{calibration_name}-{postgres_config.config_id}"
+        f"{task_set.task_set_id}-{postgres_config.config_id}"
         f"-{pool_config.profile_id}-%Y%m%dT%H%M%SZ"
     )
     output_dir = repository / "outputs/calibration" / calibration_id
@@ -199,18 +155,14 @@ def calibrate(
     manifest: dict[str, Any] = {
         "schema_version": 2,
         "calibration_id": calibration_id,
-        "purpose": (
-            "training timeout calibration"
-            if workload == "ceb"
-            else "evaluation baseline calibration"
-        ),
+        "purpose": "evaluation baseline calibration",
         "status": RunStatus.RUNNING.value,
         "started_at_utc": started_at.isoformat(),
         "completed_at_utc": None,
         "inventory_id": task_set.task_set_id,
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": postgres_config.runtime_identity().model_dump(
             exclude_none=True
         ),
@@ -223,25 +175,16 @@ def calibrate(
             "explain": "EXPLAIN (ANALYZE, TIMING OFF, BUFFERS, FORMAT JSON)",
             "statement_timeout_ms": GLOBAL_TIMEOUT_MS,
             "minimum_warmup_runs": MIN_WARMUP_RUNS,
-            "maximum_warmup_runs": MAX_WARMUP_RUNS,
+            "maximum_warmup_runs": max_warmup_runs,
             "buffer_stability_relative_tolerance": BUFFER_STABILITY_TOLERANCE,
-            "measurement_runs": MEASUREMENT_RUNS,
+            "measurement_runs": num_trials,
             "coefficient_of_variation": "sample standard deviation / arithmetic mean",
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
             "worker_count": worker_count,
             "concurrent_tasks": min(worker_count, len(tasks)),
             "one_query_per_worker": True,
         },
-        "selection": (
-            {
-                "inventory_id": selection["inventory_id"],
-                "path": display_path(repository, selection_path),
-                "sha256": sha256_file(selection_path),
-                "split": selected_split,
-            }
-            if selection is not None and selection_path is not None
-            else None
-        ),
+        "selection": None,
         "worker_pool": None,
         "task_count": len(tasks),
         "completed_task_count": 0,
@@ -264,9 +207,15 @@ def calibrate(
     )
 
     def execute_task(
-        pool: ContainerPool, task: dict[str, Any]
+        pool: ContainerPool, task: Task
     ) -> tuple[WorkerSlot, dict[str, Any]]:
-        return calibrate_on_worker(pool, task_set, task)
+        return calibrate_on_worker(
+            pool,
+            task_set,
+            task,
+            max_warmup_runs=max_warmup_runs,
+            num_trials=num_trials,
+        )
 
     try:
         with run:
@@ -276,7 +225,7 @@ def calibrate(
                 handled_errors=(PostgresError, ContainerError),
             ):
                 task = completion.item
-                task_id = task["task_id"]
+                task_id = task.task_id
                 print(
                     f"[{completion.ordinal}/{manifest['task_count']}] {task_id}",
                     flush=True,

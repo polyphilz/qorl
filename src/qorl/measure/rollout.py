@@ -21,6 +21,7 @@ from qorl.measure.schemas import (
     measured_reward,
     score,
 )
+from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import plan_sha256
@@ -28,8 +29,8 @@ from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
 from qorl.postgres.exceptions import PostgresError, QueryTimeout
 from qorl.postgres.schemas import ExplainResult
+from qorl.taskset.schemas import Task
 from qorl.worker_pool.exceptions import ContainerError
-from qorl.workload.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
 
 DEFAULT_MEASUREMENTS = 3
 FINAL_PAIRS = 5
@@ -150,7 +151,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             raise ValueError("max_candidates must be at least 1")
         self._worker = worker
         self.task = task
-        self.sql = task_set.load_sql(task)
+        self.sql = task_set.load_sql(Task.model_validate(task))
         self.global_timeout_ms = global_timeout_ms
         self.measurement_protocol = measurement_protocol
         self.catalog = TaskCatalog.from_task(task, worker.task_indexes(task))

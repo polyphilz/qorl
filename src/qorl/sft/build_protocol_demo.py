@@ -10,13 +10,14 @@ from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import ToolName
 from qorl.measure.rollout import RolloutEvaluator
+from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import plan_join_tree
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.validate import validate_protocol_demo
+from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import start_pool
 from qorl.worker_pool.schemas import PoolConfig
-from qorl.workload.taskset import TaskSet
 
 DEMONSTRATION_ID = "protocol-demo-v1"
 TASK_ID = "ceb-4a-4a434"
@@ -168,7 +169,7 @@ def build_demo(
                 "template_id": task["template_id"],
                 "partition": task["partition"],
                 "sql_sha256": task["sql_sha256"],
-                "data_identity": task_set.data_identity,
+                "data_identity": {"fixture_id": task_set.fixture_id},
                 "runtime_identity": postgres_config.runtime_identity().model_dump(
                     exclude_none=True
                 ),
@@ -192,7 +193,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Build one live, deterministic CEB demonstration."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path, required=True)
     parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(

@@ -12,8 +12,8 @@ from qorl.agent.types import ToolName
 from qorl.measure.schemas import MeasurementStatus
 from qorl.plans.schemas import AUTO, MemoizeMode
 from qorl.sft.validate import validate_protocol_demo
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
-from qorl.workload.taskset import TaskSet
 
 DATASET_ID = "protocol-sft-v1"
 DATASET_MANIFEST_SCHEMA_VERSION = 2

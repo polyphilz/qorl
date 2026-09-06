@@ -5,7 +5,13 @@ from pathlib import Path
 
 from qorl import __version__
 from qorl.evaluation.benchmark import run_benchmark
-from qorl.measure.calibration import calibrate
+from qorl.measure.calibration import (
+    DEFAULT_MAX_WARMUP_RUNS,
+    DEFAULT_NUM_TRIALS,
+    calibrate,
+    validate_run_counts,
+)
+from qorl.paths import REPOSITORY_ROOT
 
 
 def parser() -> argparse.ArgumentParser:
@@ -13,23 +19,19 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
     calibrate_parser = commands.add_parser(
-        "calibrate", help="measure PostgreSQL's default plans"
+        "calibrate", help="measure PostgreSQL's default plans on all JOB queries"
     )
     calibrate_parser.add_argument(
-        "workload",
-        nargs="?",
-        default="job",
-        choices=("job", "ceb"),
-        help="query workload to calibrate (default: job)",
+        "--max-warmup-runs",
+        type=int,
+        default=DEFAULT_MAX_WARMUP_RUNS,
+        help="maximum warmups per query (minimum: 2; default: %(default)s)",
     )
     calibrate_parser.add_argument(
-        "--selection",
-        type=Path,
-        help="versioned task-selection manifest (default: entire workload)",
-    )
-    calibrate_parser.add_argument(
-        "--split",
-        help="selection split; inferred when the manifest has only one",
+        "--num-trials",
+        type=int,
+        default=DEFAULT_NUM_TRIALS,
+        help="measured executions per query, excluding warmups (minimum: 2; default: %(default)s)",
     )
     run_parser = commands.add_parser("run", help="run the configured policy on JOB")
     for command in (calibrate_parser, run_parser):
@@ -49,23 +51,28 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    arguments = parser().parse_args()
+    root = parser()
+    arguments = root.parse_args()
     if arguments.command is None:
-        parser().print_help()
+        root.print_help()
         return 0
+    if arguments.command == "calibrate":
+        try:
+            validate_run_counts(arguments.max_warmup_runs, arguments.num_trials)
+        except ValueError as error:
+            root.error(str(error))
     try:
         if arguments.command == "calibrate":
             output_dir = calibrate(
-                Path.cwd(),
-                arguments.workload,
-                arguments.selection,
-                arguments.split,
+                REPOSITORY_ROOT,
                 postgres_config_path=arguments.postgres_config,
                 pool_config_path=arguments.pool_config,
+                max_warmup_runs=arguments.max_warmup_runs,
+                num_trials=arguments.num_trials,
             )
         else:
             output_dir = run_benchmark(
-                Path.cwd(),
+                REPOSITORY_ROOT,
                 postgres_config_path=arguments.postgres_config,
                 pool_config_path=arguments.pool_config,
             )

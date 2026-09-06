@@ -14,6 +14,8 @@ from qorl.agent.types import StopReason
 from qorl.measure.rollout import PlanTiming, RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Baseline, Candidate, MeasurementStatus, RunStatus
+from qorl.measure.timeouts import CalibratedTimeouts, TaskTimeout
+from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.exceptions import ActionError
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
 from qorl.plans.schemas import PlanAction
@@ -45,6 +47,7 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
@@ -52,8 +55,6 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import CalibratedTimeouts, TaskTimeout
 
 SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v1"
 
@@ -246,7 +247,7 @@ def evaluate_request(
             steered=False,
             guidance=None,
             worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
-            data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+            data_identity={"fixture_id": task_set.fixture_id},
             runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
             sampler=sampler_identity,
             default=baseline,
@@ -380,7 +381,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Sample one-candidate CEB trajectories for protocol SFT v2."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path, required=True)
     parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
@@ -531,7 +532,7 @@ def main() -> None:
         sampler_manifest_path=display_path(repository, sampler_manifest_path),
         sampler_manifest=sampler_manifest,
         guidance=None,
-        data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+        data_identity={"fixture_id": task_set.fixture_id},
         runtime_identity=JSON_OBJECT_ADAPTER.validate_python(
             postgres_config.runtime_identity().model_dump(exclude_none=True)
         ),

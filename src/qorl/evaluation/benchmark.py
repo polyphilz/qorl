@@ -28,6 +28,7 @@ from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
@@ -35,7 +36,6 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
 
 DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
 
@@ -212,7 +212,7 @@ def run_benchmark(
         "completed_at_utc": None,
         "inventory_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": postgres_config.runtime_identity().model_dump(
             exclude_none=True
         ),

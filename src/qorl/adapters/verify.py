@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.adapters.model import adapter_rank, verify_adapter_base
+from qorl.paths import REPOSITORY_ROOT
 from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
 
@@ -108,7 +109,7 @@ def main() -> None:
     command = [
         vllm,
         "serve",
-        str(arguments.model),
+        str(arguments.model.resolve()),
         "--served-model-name",
         BASE_MODEL,
         "--host",
@@ -120,7 +121,7 @@ def main() -> None:
         "--max-lora-rank",
         str(adapter_rank(arguments.adapter)),
         "--lora-modules",
-        f"{ADAPTER_MODEL}={arguments.adapter}",
+        f"{ADAPTER_MODEL}={arguments.adapter.resolve()}",
         "--max-model-len",
         str(audit["packed_sequence_length"]),
         "--max-num-seqs",
@@ -136,7 +137,7 @@ def main() -> None:
     base_url = f"http://127.0.0.1:{arguments.port}"
     with ServedModel(
         command,
-        repository=Path.cwd(),
+        repository=REPOSITORY_ROOT,
         log_path=log_path,
         health_url=f"{base_url}/health",
         startup_timeout=arguments.startup_timeout,

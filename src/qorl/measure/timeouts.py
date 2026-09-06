@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
-from qorl.workload.taskset import TaskSet
 
 TIMEOUT_FLOOR_MS = 5_000
 TIMEOUT_MULTIPLIER = 3

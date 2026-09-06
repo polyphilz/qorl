@@ -4,6 +4,13 @@ import argparse
 from pathlib import Path
 
 from qorl.measure.schemas import RunStatus
+from qorl.measure.timeouts import (
+    GLOBAL_TIMEOUT_MS,
+    TIMEOUT_FLOOR_MS,
+    TIMEOUT_MULTIPLIER,
+    CalibratedTimeouts,
+    task_timeout_ms,
+)
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     DatasetSelection,
@@ -18,16 +25,9 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import (
-    GLOBAL_TIMEOUT_MS,
-    TIMEOUT_FLOOR_MS,
-    TIMEOUT_MULTIPLIER,
-    CalibratedTimeouts,
-    task_timeout_ms,
-)
 
 ROOT = Path(__file__).resolve().parents[2]
 SELECTION = ROOT / "experiments/005-protocol-sft-v2/selection.json"
@@ -93,7 +93,7 @@ def build(calibration: Path) -> TimeoutManifest:
             sha256=sha256_file(SELECTION),
             split=SPLIT,
         ),
-        data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+        data_identity={"fixture_id": task_set.fixture_id},
         runtime_identity=require_object(
             runtime_identity, "calibration runtime identity"
         ),

@@ -25,9 +25,11 @@ from qorl.evaluation.live_validation import (
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import FinalStatus, RunStatus
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
 from qorl.serving.serving import ServedModel
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
@@ -35,7 +37,6 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
 
 CONFIG = Path("experiments/003-rl-pilot-v1/validation.json")
 SERVED_MODEL = "qorl-rl-pilot-policy"
@@ -255,7 +256,7 @@ def main() -> None:
         description="Run the frozen paired CEB measurement before or after RL."
     )
     parser.add_argument("phase", choices=("pre", "post"))
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path, required=True)
     parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument("--model", type=Path)
@@ -322,7 +323,7 @@ def main() -> None:
         "config_sha256": sha256_file(config_path),
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": postgres_config.runtime_identity().model_dump(
             exclude_none=True
         ),

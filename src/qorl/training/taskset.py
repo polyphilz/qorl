@@ -8,7 +8,8 @@ from typing import Literal
 import verifiers.v1 as vf
 
 from qorl.measure.schemas import Decision, FinalStatus
-from qorl.workload.taskset import TaskSet
+from qorl.paths import REPOSITORY_ROOT
+from qorl.taskset.taskset import TaskSet
 
 SELECTION_SPLITS = {
     "qorl-rl-pilot-v1": {"spike", "train", "validation"},
@@ -26,7 +27,7 @@ def selected_items(selection: dict, split: str) -> list[dict[str, str]]:
 
 
 class QorlTasksetConfig(vf.TasksetConfig):
-    repository: Path = Path()
+    repository: Path = REPOSITORY_ROOT
     selection: Path = Path("experiments/003-rl-pilot-v1/selection.json")
     split: Literal["spike", "train", "validation"] = "spike"
 

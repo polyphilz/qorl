@@ -19,7 +19,7 @@ from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import compact_plan, verify_action
 from qorl.sft.schemas import JSON_OBJECT_ADAPTER
-from qorl.workload.taskset import TaskSet
+from qorl.taskset.taskset import TaskSet
 
 
 class DemoValidationError(ValueError):
@@ -68,15 +68,13 @@ def validate_protocol_demo(
     require(isinstance(evidence, dict), "evidence must be an object")
 
     task_set = TaskSet.load(repository, metadata.get("task_set_id"))
-    task = next(
-        (
-            item.model_dump()
-            for item in task_set.tasks
-            if item.task_id == metadata.get("task_id")
-        ),
+    selected_task = next(
+        (item for item in task_set.tasks if item.task_id == metadata.get("task_id")),
         None,
     )
-    require(task is not None, "demo task is absent from its task inventory")
+    if selected_task is None:
+        raise DemoValidationError("demo task is absent from its task inventory")
+    task = selected_task.model_dump()
     partition = metadata.get("partition", task["partition"])
     require(
         partition in {"train", "validation"},
@@ -91,7 +89,7 @@ def validate_protocol_demo(
         isinstance(metadata.get("runtime_identity"), dict),
         "demo runtime identity must be an object",
     )
-    sql = task_set.load_sql(task)
+    sql = task_set.load_sql(selected_task)
 
     require(len(messages) >= MIN_DEMONSTRATION_MESSAGES, "demo has no tool interaction")
     require(messages[1].get("role") == "user", "second message must be user")

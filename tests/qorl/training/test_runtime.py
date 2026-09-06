@@ -7,13 +7,13 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from qorl.postgres.config import PostgresConfig
+from qorl.taskset.taskset import TaskSet
 from qorl.training import runtime
 from qorl.training.runtime import QorlRuntime
 from qorl.worker_pool.config import (
     load_pool_config,
     validate_host_topology,
 )
-from qorl.workload.taskset import TaskSet
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -57,6 +57,7 @@ class WorkerPoolTest(unittest.TestCase):
             ROOT, Path("docker/worker_pool/configs/002-poolconf-4x8")
         )
         runtime = QorlRuntime(
+            ROOT,
             TaskSet.load(ROOT, "ceb"),
             profile,
             "test-pool",
@@ -65,6 +66,7 @@ class WorkerPoolTest(unittest.TestCase):
             ),
         )
         self.addCleanup(runtime.close)
+        self.assertEqual(runtime.repository, ROOT.resolve())
 
         with runtime.claim_worker() as first, runtime.claim_worker() as second:
             self.assertNotEqual(first.resources.index, second.resources.index)

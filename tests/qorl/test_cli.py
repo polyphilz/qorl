@@ -23,9 +23,23 @@ def test_both_config_paths_are_required(command: str, omitted: str) -> None:
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize("command", ["calibrate", "run"])
+@pytest.mark.parametrize(
+    ("command", "run_flags", "max_warmup_runs", "num_trials"),
+    [
+        ("calibrate", [], 5, 20),
+        ("calibrate", ["--max-warmup-runs", "2", "--num-trials", "2"], 2, 2),
+        ("calibrate", ["--max-warmup-runs", "7", "--num-trials", "30"], 7, 30),
+        ("run", [], None, None),
+    ],
+)
 def test_cli_forwards_both_selections(
-    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    command: str,
+    run_flags: list[str],
+    max_warmup_runs: int | None,
+    num_trials: int | None,
+    repository_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     postgres = Path("docker/postgres/configs/001-pgconf")
     pool = Path("docker/worker_pool/configs/001-poolconf-2x16")
@@ -40,6 +54,7 @@ def test_cli_forwards_both_selections(
         [
             "qorl",
             command,
+            *run_flags,
             "--postgres-config",
             str(postgres),
             "--pool-config",
@@ -47,7 +62,46 @@ def test_cli_forwards_both_selections(
         ],
     )
     assert cli.main() == 0
-    args = (tmp_path, "job", None, None) if command == "calibrate" else (tmp_path,)
-    execute.assert_called_once_with(
-        *args, postgres_config_path=postgres, pool_config_path=pool
+    if command == "calibrate":
+        execute.assert_called_once_with(
+            repository_root,
+            postgres_config_path=postgres,
+            pool_config_path=pool,
+            max_warmup_runs=max_warmup_runs,
+            num_trials=num_trials,
+        )
+    else:
+        execute.assert_called_once_with(
+            repository_root, postgres_config_path=postgres, pool_config_path=pool
+        )
+
+
+@pytest.mark.parametrize("flag", ["--max-warmup-runs", "--num-trials"])
+@pytest.mark.parametrize("value", ["-1", "0", "1", "2.5", "invalid"])
+def test_calibrate_validates_counts_before_running(
+    flag: str,
+    value: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    execute = Mock()
+    monkeypatch.setattr(cli, "calibrate", execute)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "qorl",
+            "calibrate",
+            "--postgres-config",
+            "docker/postgres/configs/000-pgconf-default",
+            "--pool-config",
+            "docker/worker_pool/configs/002-poolconf-4x8",
+            flag,
+            value,
+        ],
     )
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2
+    execute.assert_not_called()
+    message = capsys.readouterr().err
+    assert "at least 2" in message or "invalid int value" in message

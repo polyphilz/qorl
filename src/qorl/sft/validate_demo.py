@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.validate import validate_protocol_demo
 
 
@@ -17,7 +18,7 @@ def main() -> None:
         nargs="?",
         default=Path("outputs/sft/protocol-demo-v1.json"),
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
     path = arguments.path

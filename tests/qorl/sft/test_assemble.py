@@ -6,7 +6,7 @@ from pathlib import Path
 
 from qorl.sft import assemble
 from qorl.sft.assemble import action_families, select_tasks
-from qorl.workload.taskset import TaskSet
+from qorl.taskset.taskset import TaskSet
 
 
 def test_finalize_without_cross_workload_report(

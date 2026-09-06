@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.assemble import validate_dataset as validate_v1
 from qorl.sft.build_protocol_dataset import validate_dataset as validate_v2
 
@@ -12,7 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Validate every transcript and artifact in a protocol SFT dataset."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument(
         "--dataset",
         type=Path,

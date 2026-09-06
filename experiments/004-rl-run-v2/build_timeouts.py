@@ -6,16 +6,16 @@ from pathlib import Path
 from typing import Any
 
 from qorl.measure.schemas import RunStatus
-from qorl.util.hashing import sha256_file
-from qorl.util.io import write_json
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import (
+from qorl.measure.timeouts import (
     GLOBAL_TIMEOUT_MS,
     TIMEOUT_FLOOR_MS,
     TIMEOUT_MULTIPLIER,
     CalibratedTimeouts,
     task_timeout_ms,
 )
+from qorl.taskset.taskset import TaskSet
+from qorl.util.hashing import sha256_file
+from qorl.util.io import write_json
 
 ROOT = Path(__file__).resolve().parents[2]
 SELECTION = ROOT / "experiments/004-rl-run-v2/selection.json"
@@ -66,7 +66,7 @@ def build(calibration: Path) -> dict[str, Any]:
             "sha256": sha256_file(SELECTION),
             "split": "train",
         },
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": source_manifest["runtime_identity"],
         "source_calibration": {
             "calibration_id": source_manifest["calibration_id"],

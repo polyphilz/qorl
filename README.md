@@ -10,25 +10,25 @@ inputs, and [`model/configs/`](model/README.md) holds model and sampling setting
 IMDb preparation is under [`scripts/imdb/`](scripts/imdb/README.md); raw inputs,
 the prepared archive, and verification reports live in ignored `data/`.
 JOB and CEB SQL and task inventories are checked in under `benchmarks/`.
-Workload identifiers are `job` and `ceb`; the database fixture identifier is `imdb`.
+Benchmark identifiers are `job` and `ceb`; the database fixture identifier is `imdb`.
 
 QORL runs on Linux x86-64 with Python 3.12. The root project installs the library,
 Prime-RL, PyTorch, and vLLM into one environment from one lockfile:
 
 ```bash
 uv sync --frozen
-uv run qorl calibrate job \
+uv run qorl calibrate \
   --postgres-config docker/postgres/configs/000-pgconf-default \
   --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
 
-`calibrate` measures all 113 JOB queries; `calibrate ceb` measures the complete
-CEB workload. Both require explicit PostgreSQL and pool configurations,
-record results and environment identity under `outputs/calibration/`, and remove
-their workers afterward. Select one, two, or four containers with `--pool-config`:
+`calibrate` always measures all 113 JOB queries. It requires explicit PostgreSQL
+and pool configurations, records results and environment identity under
+`outputs/calibration/`, and removes its workers afterward. Select one, two, or four
+containers with `--pool-config`:
 
 ```bash
-uv run qorl calibrate job \
+uv run qorl calibrate \
   --pool-config docker/worker_pool/configs/001-poolconf-2x16 \
   --postgres-config docker/postgres/configs/001-pgconf
 ```
@@ -36,19 +36,10 @@ uv run qorl calibrate job \
 The [worker pool guide](docker/worker_pool/README.md) lists resource allocations.
 Pool selection and PostgreSQL settings are independent.
 
-Pass a versioned selection manifest to calibrate only a workload slice. If the
-manifest contains multiple splits, select one explicitly:
-
-```bash
-uv run qorl calibrate ceb \
-  --postgres-config docker/postgres/configs/000-pgconf-default \
-  --pool-config docker/worker_pool/configs/002-poolconf-4x8 \
-  --selection experiments/004-rl-run-v2/selection.json
-uv run qorl calibrate ceb \
-  --postgres-config docker/postgres/configs/000-pgconf-default \
-  --pool-config docker/worker_pool/configs/002-poolconf-4x8 \
-  --selection path/to/selection.json --split validation
-```
+`--max-warmup-runs` defaults to 5 and `--num-trials` defaults to 20; both must be
+at least 2. Warmups stop early once consecutive plans and buffer counts stabilize.
+Trials are the measured executions after warmup, used for the median and CV.
+The selected counts are recorded in the calibration manifest.
 
 `run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
 shared policy in `model/configs/000-modelconf/modelconf.json`. It runs one JOB task per worker,

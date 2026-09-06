@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.validate import validate_protocol_demo
 
 
@@ -12,7 +13,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Convert the validated QORL demonstration to Prime-RL SFT data."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument(
         "--demo",
         type=Path,

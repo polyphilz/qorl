@@ -22,9 +22,9 @@ from qorl.sft.schemas import (
     SamplingMode,
     load_record,
 )
+from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
-from qorl.workload.taskset import TaskSet
 
 
 def config() -> DatasetConfig:

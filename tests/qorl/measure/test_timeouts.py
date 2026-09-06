@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import CalibratedTimeouts
+from qorl.measure.timeouts import CalibratedTimeouts
+from qorl.taskset.taskset import TaskSet
 
 MANIFEST = Path("experiments/004-rl-run-v2/timeouts.json")
 
@@ -48,7 +48,7 @@ class TestCalibratedTimeout:
     ) -> None:
         task_set = TaskSet.load(repository_root, "ceb")
         document = json.loads((repository_root / MANIFEST).read_text(encoding="utf-8"))
-        document["data_identity"] = task_set.data_identity
+        document["data_identity"] = {"fixture_id": task_set.fixture_id}
         document["runtime_identity"] = {
             "postgres_image_id": "sha256:current-runtime",
             "postgres_config_id": "000-pgconf-default",

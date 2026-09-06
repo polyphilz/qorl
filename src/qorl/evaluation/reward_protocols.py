@@ -16,15 +16,16 @@ from typing import Any
 from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator, training_protocol
 from qorl.measure.schemas import FinalStatus, MeasurementProtocolId, RunStatus
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import ExplainResult
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import start_pool
 from qorl.worker_pool.schemas import PoolConfig
-from qorl.workload.taskset import TaskSet
 
 DEFAULT_CONFIG = Path("experiments/004-rl-run-v2/reward-protocol-audit/config.json")
 MIN_CORRELATION_SAMPLES = 2
@@ -337,7 +338,7 @@ def run_audit(
         "completed_at_utc": None,
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": postgres_config.runtime_identity().model_dump(
             exclude_none=True
         ),
@@ -410,7 +411,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare cheap RL rewards with rigorous evaluation rewards."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path)
     parser.add_argument("--pool-config", type=Path)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)

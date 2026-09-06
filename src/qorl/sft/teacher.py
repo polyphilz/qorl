@@ -21,6 +21,8 @@ from qorl.agent.client import (
 from qorl.agent.types import ToolName
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Candidate, RunStatus
+from qorl.measure.timeouts import CalibratedTimeouts
+from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import contains_node
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import action_families, canonical_sha256
@@ -50,14 +52,13 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import CalibratedTimeouts
 
 GENERATION_ID = "qorl-protocol-sft-v2-teacher-v1"
 TEACHER_SAMPLE_NUMBER = 5
@@ -430,7 +431,7 @@ def replay_action(
         steered=False,
         guidance=None,
         worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
-        data_identity=JSON_OBJECT_ADAPTER.validate_python(task_set.data_identity),
+        data_identity={"fixture_id": task_set.fixture_id},
         runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
         sampler=prefix.sample.sampler,
         default=baseline,
@@ -693,7 +694,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate validated Fable continuations for protocol SFT v2."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path)
     parser.add_argument("--pool-config", type=Path)
     parser.add_argument(

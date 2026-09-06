@@ -13,6 +13,7 @@ from qorl.agent.client import ModelError
 from qorl.agent.types import StopReason
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
 from qorl.sft.assemble import action_families
@@ -33,12 +34,12 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.taskset import TaskSet
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot
-from qorl.workload.taskset import TaskSet
 
 
 @dataclass(frozen=True)
@@ -157,7 +158,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Evaluate SFT v2 plan validity and novelty on its live gate."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path, required=True)
     parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(

@@ -16,7 +16,7 @@ from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import compact_plan
 from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
-from qorl.workload.taskset import TaskSet
+from qorl.taskset.taskset import TaskSet
 
 
 def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
@@ -32,7 +32,8 @@ def synthetic_demo(
     repository: Path, candidate_attempts: int = MAX_CANDIDATES
 ) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
-    task = next(item.model_dump() for item in task_set.tasks if item.task_id == TASK_ID)
+    selected_task = next(item for item in task_set.tasks if item.task_id == TASK_ID)
+    task = selected_task.model_dump()
     aliases = sorted(item["alias"] for item in task["relations"])
     indexes = {alias: [] for alias in aliases}
     catalog = TaskCatalog.from_task(task, {alias: set() for alias in aliases})
@@ -53,7 +54,7 @@ def synthetic_demo(
     inspection_limit = min(len(aliases) * 3, maximum_turns - reserved_decision_turns)
     observation = {
         "task_id": task["task_id"],
-        "sql": task_set.load_sql(task),
+        "sql": task_set.load_sql(selected_task),
         "relations": task["relations"],
         "join_edges": task["join_edges"],
         "indexes": indexes,
@@ -131,7 +132,7 @@ def synthetic_demo(
         "metadata": {
             "task_set_id": "ceb",
             "task_id": task["task_id"],
-            "data_identity": task_set.data_identity,
+            "data_identity": {"fixture_id": task_set.fixture_id},
             "runtime_identity": {
                 "postgres_image_id": "sha256:test",
                 "postgres_config_id": "000-pgconf-default",

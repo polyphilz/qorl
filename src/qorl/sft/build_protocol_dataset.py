@@ -7,6 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.assemble import canonical_json
 from qorl.sft.filter import load_filtered_sample
 from qorl.sft.schemas import (
@@ -38,9 +39,9 @@ from qorl.sft.schemas import (
     require_string,
 )
 from qorl.sft.validate import validate_protocol_demo
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
-from qorl.workload.taskset import TaskSet
 
 DATASET_ID = "protocol-sft-v2"
 STUDENT_TEACHER_ID = "iterated_rejection_sampling_v1"
@@ -263,7 +264,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Assemble the language-only protocol SFT v2 dataset."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument(
         "--config",
         type=Path,

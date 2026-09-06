@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.util.hashing import sha256_file
 from qorl.worker_pool.config import load_pool_config
@@ -305,6 +306,8 @@ def capture_environment(
             sys.executable,
             "-m",
             "qorl.measure.environment",
+            "--repository",
+            str(pool.repository),
             "--container",
             slot.container_id,
             "--output-dir",
@@ -321,6 +324,7 @@ def capture_environment(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--container", required=True, help="container name or ID")
     parser.add_argument("--runtime-profile", required=True, type=Path)
     parser.add_argument("--postgres-config", required=True, type=Path)
@@ -328,12 +332,13 @@ def main() -> None:
     parser.add_argument("--phase", required=True, choices=("pre", "post"))
     args = parser.parse_args()
 
+    repository = args.repository.resolve()
     container = args.container
-    profile = load_pool_config(Path.cwd(), args.runtime_profile)
-    profile_path = (Path.cwd() / profile.path).resolve()
-    postgres_config = PostgresConfig.load(Path.cwd(), args.postgres_config)
+    profile = load_pool_config(repository, args.runtime_profile)
+    profile_path = (repository / profile.path).resolve()
+    postgres_config = PostgresConfig.load(repository, args.postgres_config)
     try:
-        displayed_profile_path = str(profile_path.relative_to(Path.cwd()))
+        displayed_profile_path = str(profile_path.relative_to(repository))
     except ValueError:
         displayed_profile_path = str(profile_path)
     assertion_output = run(

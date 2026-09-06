@@ -8,14 +8,15 @@ from typing import Any
 
 from qorl.agent.types import ToolName
 from qorl.measure.schemas import RunStatus
+from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.fingerprint import plan_sha256
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import load_documents
 from qorl.sft.sample import PlanValidationEvaluator
+from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import start_pool
-from qorl.workload.taskset import TaskSet
 
 
 def candidate_actions(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -33,7 +34,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Replay one tool-use SFT example per CEB template."
     )
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument("--postgres-config", type=Path, required=True)
     parser.add_argument("--pool-config", type=Path, required=True)
     parser.add_argument(
@@ -132,7 +133,7 @@ def main() -> None:
         "status": RunStatus.PASSED.value,
         "selection": "lowest dataset ordinal per template",
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
-        "data_identity": task_set.data_identity,
+        "data_identity": {"fixture_id": task_set.fixture_id},
         "runtime_identity": postgres_config.runtime_identity().model_dump(
             exclude_none=True
         ),

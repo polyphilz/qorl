@@ -1,1 +1,1 @@
-"""Query-plan measurement and calibration."""
+"""Query-plan measurement, calibration, and execution timeouts."""

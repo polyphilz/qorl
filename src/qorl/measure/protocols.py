@@ -1,6 +1,7 @@
 from typing import Any, Protocol
 
 from qorl.postgres.schemas import ExplainResult
+from qorl.taskset.schemas import Task
 
 
 class QueryExecutor(Protocol):
@@ -17,4 +18,4 @@ class QueryExecutor(Protocol):
 
 
 class SqlSource(Protocol):
-    def load_sql(self, task: dict[str, Any]) -> str: ...
+    def load_sql(self, task: Task) -> str: ...

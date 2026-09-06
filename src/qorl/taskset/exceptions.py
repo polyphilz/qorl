@@ -1,0 +1,2 @@
+class TaskSetError(RuntimeError):
+    pass

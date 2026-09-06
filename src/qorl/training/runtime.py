@@ -4,12 +4,12 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
+from qorl.measure.timeouts import CalibratedTimeouts
 from qorl.postgres.config import PostgresConfig
+from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import PoolConfig
-from qorl.workload.taskset import TaskSet
-from qorl.workload.timeouts import CalibratedTimeouts
 
 TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"
 POSTGRES_CONFIG_ENV = "QORL_RL_POSTGRES_CONFIG"
@@ -19,18 +19,16 @@ POOL_CONFIG_ENV = "QORL_RL_WORKER_POOL_CONFIG"
 class QorlRuntime(ContainerPool):
     def __init__(
         self,
+        repository: Path,
         task_set: TaskSet,
         pool_config: PoolConfig,
         project_name: str,
         postgres_config: PostgresConfig,
         calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
-        super().__init__(
-            task_set.repository, project_name, pool_config, postgres_config
-        )
+        super().__init__(repository, project_name, pool_config, postgres_config)
         self.task_set = task_set
         self.calibrated_timeouts = calibrated_timeouts
-        self.data_identity = task_set.data_identity
 
     def pool_manifest(self) -> dict[str, object]:
         return self.manifest()
@@ -54,6 +52,7 @@ def start(
     )
     pool_config = load_pool_config(repository, Path(environment[POOL_CONFIG_ENV]))
     runtime = QorlRuntime(
+        repository,
         TaskSet.load(repository, "ceb"),
         pool_config,
         f"qorl-rl-{os.getpid()}",

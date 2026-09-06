@@ -8,6 +8,7 @@ from pathlib import Path
 from qorl.agent import QoAgentConfig
 from qorl.agent.types import StopReason, ToolName
 from qorl.measure.schemas import RunStatus
+from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.assemble import action_families, canonical_json
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -257,7 +258,7 @@ def summarize(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Filter protocol SFT v2 samples.")
-    parser.add_argument("--repository", type=Path, default=Path.cwd())
+    parser.add_argument("--repository", type=Path, default=REPOSITORY_ROOT)
     parser.add_argument(
         "--config",
         type=Path,

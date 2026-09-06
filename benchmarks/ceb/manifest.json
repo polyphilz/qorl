@@ -1,6 +1,6 @@
 {
-  "schema_version": 2,
-  "workload_id": "ceb",
+  "schema_version": 3,
+  "benchmark_id": "ceb",
   "fixture_id": "imdb",
   "description": "CEB IMDb queries for training and validation",
   "source": {
