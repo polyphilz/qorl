@@ -1,6 +1,6 @@
-from typing import Any, Protocol
+from typing import Protocol
 
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import Task
 
 
@@ -14,7 +14,8 @@ class QueryExecutor(Protocol):
         hint: str = "",
     ) -> ExplainResult: ...
 
-    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]: ...
+    @property
+    def indexes(self) -> PostgresIndexes: ...
 
 
 class SqlSource(Protocol):

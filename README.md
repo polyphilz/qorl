@@ -30,7 +30,7 @@ containers with `--pool-config`:
 ```bash
 uv run qorl calibrate \
   --pool-config docker/worker_pool/configs/001-poolconf-2x16 \
-  --postgres-config docker/postgres/configs/001-pgconf
+  --postgres-config docker/postgres/configs/000-pgconf-default
 ```
 
 The [worker pool guide](docker/worker_pool/README.md) lists resource allocations.

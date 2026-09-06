@@ -2,6 +2,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from qorl.measure.protocols import QueryExecutor
+from qorl.postgres.schemas import PostgresSettings
 
 # This internal-looking key is already model-visible and therefore wire-stable.
 TURN_BUDGET_FIELD = "_turn_budget"
@@ -39,6 +40,7 @@ TERMINAL_STOP_REASON = {
 
 
 class InspectionExecutor(QueryExecutor, Protocol):
-    def settings(self, names: set[str]) -> dict[str, str]: ...
+    @property
+    def settings(self) -> PostgresSettings: ...
 
     def admin_sql(self, sql: str) -> str: ...

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from qorl.postgres.config import PostgresConfig
+from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.schemas import PoolConfig
 
@@ -20,10 +21,18 @@ def repository_root() -> Path:
 
 
 @pytest.fixture
-def postgres_config(repository_root: Path) -> PostgresConfig:
-    return PostgresConfig.load(
-        repository_root, Path("docker/postgres/configs/000-pgconf-default")
-    )
+def postgres_config() -> PostgresConfig:
+    return PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default"))
+
+
+@pytest.fixture
+def postgres_settings(postgres_config: PostgresConfig) -> PostgresSettings:
+    return postgres_config.agent_settings
+
+
+@pytest.fixture
+def postgres_indexes() -> PostgresIndexes:
+    return PostgresIndexes(by_table={"title": frozenset({"title_pkey"})})
 
 
 @pytest.fixture

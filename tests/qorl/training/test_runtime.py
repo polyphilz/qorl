@@ -19,6 +19,42 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class WorkerPoolTest(unittest.TestCase):
+    def test_start_loads_indexes_after_restoring_and_starting_postgres(self) -> None:
+        environment = {
+            runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
+            runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
+        }
+        with (
+            patch.object(runtime, "_runtime", None),
+            patch.object(runtime, "QorlRuntime") as factory,
+        ):
+            started = runtime.start(ROOT, environment)
+            self.assertIs(started, factory.return_value)
+            self.assertEqual(
+                [call[0] for call in factory.return_value.method_calls],
+                ["create", "restore", "start", "load_indexes"],
+            )
+
+    def test_start_validates_timeouts_against_selected_postgres_config(self) -> None:
+        environment = {
+            runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
+            runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
+            runtime.TIMEOUT_MANIFEST_ENV: "timeouts.json",
+        }
+        with (
+            patch.object(runtime, "_runtime", None),
+            patch.object(runtime, "QorlRuntime"),
+            patch.object(runtime.CalibratedTimeouts, "load") as load_timeouts,
+        ):
+            started = runtime.start(ROOT, environment)
+            load_timeouts.assert_called_once_with(
+                ROOT,
+                Path("timeouts.json"),
+                started.task_set,
+                "000-pgconf-default",
+            )
+            self.assertIs(started.calibrated_timeouts, load_timeouts.return_value)
+
     def test_start_requires_both_configuration_paths(self) -> None:
         for missing in (runtime.POSTGRES_CONFIG_ENV, runtime.POOL_CONFIG_ENV):
             for value in (None, "", " "):
@@ -61,9 +97,7 @@ class WorkerPoolTest(unittest.TestCase):
             TaskSet.load(ROOT, "ceb"),
             profile,
             "test-pool",
-            PostgresConfig.load(
-                ROOT, Path("docker/postgres/configs/000-pgconf-default")
-            ),
+            PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),
         )
         self.addCleanup(runtime.close)
         self.assertEqual(runtime.repository, ROOT.resolve())

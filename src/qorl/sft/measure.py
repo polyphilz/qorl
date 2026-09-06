@@ -256,7 +256,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
     dataset = (repository / arguments.dataset).resolve()
     config_path = (repository / arguments.config).resolve()
@@ -302,7 +302,7 @@ def main() -> None:
         repository,
         timeout_path,
         task_set,
-        postgres_config.runtime_identity().model_dump(exclude_none=True),
+        postgres_config.config_id,
     )
     manifest_path = dataset / "measurement.json"
     previous = (

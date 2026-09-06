@@ -47,7 +47,7 @@ def main() -> None:
     )
     arguments = parser.parse_args()
     repository = arguments.repository.resolve()
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
     dataset = arguments.dataset
     output = arguments.output
@@ -134,9 +134,7 @@ def main() -> None:
         "selection": "lowest dataset ordinal per template",
         "dataset_manifest_sha256": sha256_file(dataset / "manifest.json"),
         "data_identity": {"fixture_id": task_set.fixture_id},
-        "runtime_identity": postgres_config.runtime_identity().model_dump(
-            exclude_none=True
-        ),
+        "runtime_identity": {"postgres_config_id": postgres_config.config_id},
         "templates": len(records),
         "candidates": sum(len(record["candidate_ids"]) for record in records),
         "records": records,

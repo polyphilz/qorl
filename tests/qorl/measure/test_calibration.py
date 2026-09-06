@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from qorl.measure import calibration, run
 from qorl.postgres.client import PostgresClient
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool import containers as pool_module
 from qorl.worker_pool.containers import ContainerPool
@@ -27,6 +28,7 @@ def test_calibration_starts_and_records_the_selected_pool(
     worker_count: int,
     max_warmup_runs: int,
     num_trials: int,
+    postgres_indexes: PostgresIndexes,
 ) -> None:
     archive = tmp_path / "data/imdb.tar.gz"
     archive.parent.mkdir()
@@ -82,6 +84,8 @@ def test_calibration_starts_and_records_the_selected_pool(
     monkeypatch.setattr(ContainerPool, "create", lambda container: None)
     monkeypatch.setattr(ContainerPool, "restore", lambda *args: None)
     monkeypatch.setattr(PostgresClient, "explain", execute)
+    index_reads = Mock(return_value=postgres_indexes)
+    monkeypatch.setattr(PostgresClient, "read_indexes", index_reads)
 
     output = calibration.calibrate(
         tmp_path,
@@ -93,11 +97,13 @@ def test_calibration_starts_and_records_the_selected_pool(
     )
     manifest = json.loads((output / "calibration.json").read_text())
     assert len(started) == 1
+    index_reads.assert_called_once()
     assert len(started[0].workers) == worker_count
     assert benchmarks == ["job"]
     assert len(executions) == 5 * (2 + num_trials)
     assert manifest["status"] == "completed"
     assert manifest["completed_task_count"] == 5
+    assert manifest["runtime_identity"] == {"postgres_config_id": "000-pgconf-default"}
     assert manifest["protocol"]["worker_count"] == worker_count
     assert manifest["protocol"]["concurrent_tasks"] == worker_count
     assert manifest["protocol"]["minimum_warmup_runs"] == 2

@@ -31,7 +31,6 @@ class TestPostgresConfig:
 
         assert {path.name for path in root.iterdir()} == {
             "000-pgconf-default",
-            "001-pgconf",
         }
         for config_dir in root.iterdir():
             assert {path.name for path in config_dir.iterdir()} == expected
@@ -57,21 +56,16 @@ class TestPostgresConfig:
         self, repository_root: Path
     ) -> None:
         names = set(BOOLEAN_SETTINGS) | set(INTEGER_SETTINGS) | set(NUMERIC_SETTINGS)
-        for config_id in ("000-pgconf-default", "001-pgconf"):
+        for config_dir in (repository_root / "docker/postgres/configs").iterdir():
             config = json.loads(
-                (
-                    repository_root
-                    / "docker/postgres/configs"
-                    / config_id
-                    / "config.expected.json"
-                ).read_text(encoding="utf-8")
+                (config_dir / "config.expected.json").read_text(encoding="utf-8")
             )
             values = {name: config["settings"][name] for name in sorted(names)}
 
             assert set(values) == names
             assert all(isinstance(value, str) for value in values.values())
 
-    def test_configs_differ_only_in_identity_and_shared_buffers(
+    def test_default_config_pins_memory_and_planner_controls(
         self, repository_root: Path
     ) -> None:
         root = repository_root / "docker/postgres/configs"
@@ -80,17 +74,8 @@ class TestPostgresConfig:
                 encoding="utf-8"
             )
         )
-        one_gib = json.loads(
-            (root / "001-pgconf/config.expected.json").read_text(encoding="utf-8")
-        )
-
         assert stock["postgres_config_id"] == "000-pgconf-default"
-        assert one_gib["postgres_config_id"] == "001-pgconf"
         assert stock["settings"]["shared_buffers"] == "16384"
-        assert one_gib["settings"]["shared_buffers"] == "131072"
-        stock["postgres_config_id"] = one_gib["postgres_config_id"]
-        stock["settings"]["shared_buffers"] = one_gib["settings"]["shared_buffers"]
-        assert stock == one_gib
 
         assert stock["settings"]["geqo"] == "off"
         assert (
@@ -107,11 +92,7 @@ class TestPostgresConfig:
             }
 
         stock_pg = pg_settings(root / "000-pgconf-default/pg.conf")
-        one_gib_pg = pg_settings(root / "001-pgconf/pg.conf")
         assert stock_pg["qorl.postgres_config_id"] == "'000-pgconf-default'"
-        assert one_gib_pg["qorl.postgres_config_id"] == "'001-pgconf'"
         assert stock_pg["shared_buffers"] == "'128MB'"
-        assert one_gib_pg["shared_buffers"] == "'1024MB'"
-        stock_pg["qorl.postgres_config_id"] = one_gib_pg["qorl.postgres_config_id"]
-        stock_pg["shared_buffers"] = one_gib_pg["shared_buffers"]
-        assert stock_pg == one_gib_pg
+        assert stock_pg["geqo"] == "off"
+        assert int(stock_pg["max_parallel_workers_per_gather"]) == MAX_PARALLEL_WORKERS

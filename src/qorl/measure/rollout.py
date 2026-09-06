@@ -151,10 +151,11 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
             raise ValueError("max_candidates must be at least 1")
         self._worker = worker
         self.task = task
-        self.sql = task_set.load_sql(Task.model_validate(task))
+        typed_task = Task.model_validate(task)
+        self.sql = task_set.load_sql(typed_task)
         self.global_timeout_ms = global_timeout_ms
         self.measurement_protocol = measurement_protocol
-        self.catalog = TaskCatalog.from_task(task, worker.task_indexes(task))
+        self.catalog = TaskCatalog.from_postgres(typed_task, worker.indexes)
         self.default: Baseline | None = None
         self.candidates: list[Candidate] = []
         self.by_fingerprint: dict[str, PlanTiming] = {}

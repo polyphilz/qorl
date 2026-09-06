@@ -336,7 +336,7 @@ def main() -> None:
     container = args.container
     profile = load_pool_config(repository, args.runtime_profile)
     profile_path = (repository / profile.path).resolve()
-    postgres_config = PostgresConfig.load(repository, args.postgres_config)
+    postgres_config = PostgresConfig.load(args.postgres_config)
     try:
         displayed_profile_path = str(profile_path.relative_to(repository))
     except ValueError:
@@ -372,9 +372,10 @@ def main() -> None:
 
     environment = {
         "schema_version": 1,
-        "runtime_identity": postgres_config.runtime_identity(
-            container_info["image_id"]
-        ).model_dump(),
+        "runtime_identity": {
+            "postgres_image_id": container_info["image_id"],
+            "postgres_config_id": postgres_config.config_id,
+        },
         "postgres_config": postgres_config.manifest().model_dump(),
         "phase": args.phase,
         "captured_at_utc": datetime.now(UTC).isoformat(),

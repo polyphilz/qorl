@@ -183,8 +183,7 @@ def representative_query_outputs(
         sql = query_path.read_text(encoding="utf-8")
         output = client.runner_sql(
             sql,
-            csv=True,
-            application_name="qorl-imdb-query-verifier",
+            connection_label="qorl-imdb-query-verifier",
         )
         encoded = output.encode("utf-8")
         outputs[query_name] = RepresentativeQueryOutput(
@@ -220,7 +219,6 @@ def verify_load(
     """Verify the loaded database and query results, then write a checksummed report."""
     manifest_path = repository / "scripts/imdb/manifest.json"
     query_dir = repository / "benchmarks/job/queries"
-    client.execute(["/usr/local/bin/qorl-assert-config"])
 
     state = load_database_snapshot(client, manifest.load.table_order)
     validate_database_snapshot(state, manifest)
@@ -341,7 +339,7 @@ def main() -> None:
     )
     verify_input_csvs_against_manifest(repository, manifest)
     pool_config = load_pool_config(repository, POOL_CONFIG)
-    postgres_config = PostgresConfig.load(repository, POSTGRES_CONFIG)
+    postgres_config = PostgresConfig.load(POSTGRES_CONFIG)
     pool = ContainerPool(repository, "qorl-imdb-load", pool_config, postgres_config)
     if len(pool.workers) != 1:
         raise RuntimeError("IMDb preparation requires a single-worker pool")
@@ -353,6 +351,8 @@ def main() -> None:
         slot.client.admin_sql(
             (repository / "scripts/imdb/load.sql").read_text(encoding="utf-8")
         )
+        pool.command(["docker", "exec", slot.container_id, "qorl-assert-config"])
+        pool.load_indexes()
         verify_load(
             client=slot.client,
             output=verification_report_path,

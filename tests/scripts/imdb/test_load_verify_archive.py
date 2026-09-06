@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from qorl.postgres.client import PostgresClient
+from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
 from qorl.util.hashing import sha256_bytes
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
@@ -64,9 +65,9 @@ def test_module_import(repository_root: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize("verification_fails", [False, True])
+@pytest.mark.parametrize("failure", [None, "config", "verification"])
 def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
-    repository_root: Path, tmp_path: Path, monkeypatch, verification_fails: bool
+    repository_root: Path, tmp_path: Path, monkeypatch, failure: str | None
 ) -> None:
     (tmp_path / "docker").symlink_to(
         repository_root / "docker", target_is_directory=True
@@ -85,7 +86,7 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
         calls.append("check-inputs")
 
     monkeypatch.setattr(load, "verify_input_csvs_against_manifest", verify_inputs)
-    for operation in ("create", "start", "stop", "close"):
+    for operation in ("create", "start", "load_indexes", "stop", "close"):
         monkeypatch.setattr(
             ContainerPool,
             operation,
@@ -100,19 +101,39 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
         load.PostgresClient, "admin_sql", lambda _, sql: calls.append("load-sql")
     )
 
+    def command(pool: ContainerPool, arguments: list[str]) -> str:
+        assert arguments == [
+            "docker",
+            "exec",
+            pool.workers[0].container_id,
+            "qorl-assert-config",
+        ]
+        calls.append("assert-config")
+        if failure == "config":
+            raise RuntimeError("config check failed")
+        return ""
+
+    monkeypatch.setattr(ContainerPool, "command", command)
+
     def verify(*args, **kwargs):
         assert kwargs["manifest"] is input_manifests[0]
         calls.append("verify")
-        if verification_fails:
+        if failure == "verification":
             raise RuntimeError("verification failed")
 
     monkeypatch.setattr(load, "verify_load", verify)
     monkeypatch.setattr(load, "archive_database", lambda *_: calls.append("archive"))
 
-    if verification_fails:
-        with pytest.raises(RuntimeError, match="verification failed"):
+    if failure is not None:
+        message = (
+            "config check failed" if failure == "config" else "verification failed"
+        )
+        with pytest.raises(RuntimeError, match=message):
             load.main()
-        assert calls == ["check-inputs", "create", "start", "load-sql", "verify"]
+        expected = ["check-inputs", "create", "start", "load-sql", "assert-config"]
+        if failure == "verification":
+            expected.extend(["load_indexes", "verify"])
+        assert calls == expected
     else:
         load.main()
         assert calls == [
@@ -120,6 +141,8 @@ def test_load_verifies_then_stops_and_archives_without_fetching_or_restoring(
             "create",
             "start",
             "load-sql",
+            "assert-config",
+            "load_indexes",
             "verify",
             "stop",
             "archive",
@@ -154,7 +177,7 @@ def test_archive_requires_clean_shutdown_and_writes_no_manifest(
         repository_root,
         "test-archive",
         profile,
-        load.PostgresConfig.load(repository_root, load.POSTGRES_CONFIG),
+        load.PostgresConfig.load(load.POSTGRES_CONFIG),
     )
     slot = pool.workers[0]
     slot.container_id = "container"
@@ -247,9 +270,11 @@ def test_load_database_snapshot_renders_sql_file(
     tmp_path: Path,
     monkeypatch,
     database_snapshot: DatabaseSnapshot,
+    postgres_settings: PostgresSettings,
+    postgres_indexes: PostgresIndexes,
 ) -> None:
     query = Mock(return_value=database_snapshot.model_dump_json())
-    client = PostgresClient(Mock())
+    client = PostgresClient(Mock(), postgres_settings, postgres_indexes)
     monkeypatch.setattr(client, "admin_sql", query)
     monkeypatch.chdir(tmp_path)
 
@@ -303,13 +328,15 @@ def test_load_database_snapshot_validates_nested_json(
     section: str,
     field: str,
     value: str | int | bool,
+    postgres_settings: PostgresSettings,
+    postgres_indexes: PostgresIndexes,
 ) -> None:
     raw = database_snapshot.model_dump()
     row = raw[section]
     if isinstance(row, list):
         row = row[0]
     row[field] = value
-    client = PostgresClient(Mock())
+    client = PostgresClient(Mock(), postgres_settings, postgres_indexes)
     monkeypatch.setattr(client, "admin_sql", Mock(return_value=json.dumps(raw)))
     with pytest.raises(ValidationError) as error:
         load.load_database_snapshot(client, ["title"])
@@ -343,11 +370,13 @@ def test_snapshot_preserves_postgres_json_values(
 def test_representative_query_outputs_records_exact_csv_bytes(
     tmp_path: Path,
     monkeypatch,
+    postgres_settings: PostgresSettings,
+    postgres_indexes: PostgresIndexes,
 ) -> None:
     sql = "SELECT 'café' AS value;"
     (tmp_path / "1a.sql").write_text(sql, encoding="utf-8")
     csv = "value\ncafé\n"
-    client = PostgresClient(Mock())
+    client = PostgresClient(Mock(), postgres_settings, postgres_indexes)
     query = Mock(return_value=csv)
     monkeypatch.setattr(client, "runner_sql", query)
 
@@ -357,9 +386,7 @@ def test_representative_query_outputs_records_exact_csv_bytes(
     assert outputs["1a.sql"].csv == csv
     assert outputs["1a.sql"].bytes == len(csv.encode("utf-8"))
     assert outputs["1a.sql"].sha256 == sha256_bytes(csv.encode("utf-8"))
-    query.assert_called_once_with(
-        sql, csv=True, application_name="qorl-imdb-query-verifier"
-    )
+    query.assert_called_once_with(sql, connection_label="qorl-imdb-query-verifier")
 
 
 def test_section_checksum_is_canonical() -> None:
@@ -513,6 +540,8 @@ def test_verify_loaded_database(
     imdb_manifest: ImdbManifest,
     changed: str | None,
     error: str | None,
+    postgres_settings: PostgresSettings,
+    postgres_indexes: PostgresIndexes,
 ) -> None:
     raw = database_snapshot.model_dump()
     outputs = {
@@ -535,8 +564,7 @@ def test_verify_loaded_database(
     elif changed == "relations":
         raw["relations"][0]["frozen_xid_age"] = load.MAX_FRESHLY_FROZEN_XID_AGE + 1
     state = DatabaseSnapshot.model_validate(raw)
-    client = PostgresClient(Mock())
-    monkeypatch.setattr(client, "execute", Mock())
+    client = PostgresClient(Mock(), postgres_settings, postgres_indexes)
     monkeypatch.setattr(load, "load_database_snapshot", lambda *_: state)
     query_results = Mock(return_value=outputs)
     monkeypatch.setattr(load, "representative_query_outputs", query_results)

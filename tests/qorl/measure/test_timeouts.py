@@ -28,22 +28,19 @@ class TestCalibratedTimeout:
         assert replacement.timeout_ms == 5_000
         assert replacement.calibrated_default_ms == 1362.7295
 
-    def test_legacy_manifest_runtime_image_can_be_enforced(
+    def test_manifest_without_postgres_config_id_is_rejected(
         self, repository_root: Path
     ) -> None:
         task_set = TaskSet.load(repository_root, "ceb")
-        with pytest.raises(RuntimeError, match="different runtime"):
+        with pytest.raises(RuntimeError, match="different PostgreSQL config"):
             CalibratedTimeouts.load(
                 repository_root,
                 MANIFEST,
                 task_set,
-                {
-                    "postgres_image_id": "sha256:different-runtime",
-                    "postgres_config_id": "000-pgconf-default",
-                },
+                "000-pgconf-default",
             )
 
-    def test_current_manifest_enforces_runtime_separately_from_data(
+    def test_current_manifest_enforces_postgres_config_separately_from_data(
         self, repository_root: Path, tmp_path: Path
     ) -> None:
         task_set = TaskSet.load(repository_root, "ceb")
@@ -57,16 +54,13 @@ class TestCalibratedTimeout:
         path = tmp_path / "timeouts.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         loaded = CalibratedTimeouts.load(
-            repository_root, path, task_set, document["runtime_identity"]
+            repository_root, path, task_set, "000-pgconf-default"
         )
         assert len(loaded.by_task_id) == 400
-        with pytest.raises(RuntimeError, match="different runtime"):
+        with pytest.raises(RuntimeError, match="different PostgreSQL config"):
             CalibratedTimeouts.load(
                 repository_root,
                 path,
                 task_set,
-                {
-                    "postgres_image_id": "sha256:different-runtime",
-                    "postgres_config_id": "000-pgconf-default",
-                },
+                "different-config",
             )

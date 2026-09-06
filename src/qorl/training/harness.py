@@ -107,7 +107,9 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             "task_id": task["task_id"],
             "template_id": task["template_id"],
             "data_identity": {"fixture_id": active.task_set.fixture_id},
-            "runtime_identity": active.runtime_identity,
+            "runtime_identity": {
+                "postgres_config_id": active.postgres_config.config_id
+            },
             "database_pool": active.pool_manifest(),
             "database_worker": slot.resources.manifest(),
             "candidate_timeout_manifest": (

@@ -48,21 +48,22 @@ class CalibratedTimeouts:
         repository: Path,
         path: Path,
         task_set: TaskSet,
-        expected_runtime_identity: dict[str, str] | None = None,
+        expected_postgres_config_id: str | None = None,
     ) -> CalibratedTimeouts:
         path = path if path.is_absolute() else repository / path
         manifest = json.loads(path.read_text(encoding="utf-8"))
         if manifest.get("schema_version") != 1:
             raise RuntimeError("unsupported calibrated-timeout manifest")
-        recorded_runtime_identity = manifest.get("runtime_identity")
-        if expected_runtime_identity is not None and (
-            recorded_runtime_identity is None
-            or any(
-                recorded_runtime_identity.get(key) != value
-                for key, value in expected_runtime_identity.items()
-            )
-        ):
-            raise RuntimeError("calibrated timeouts use a different runtime")
+        if expected_postgres_config_id is not None:
+            match manifest.get("runtime_identity"):
+                case {"postgres_config_id": str(config_id)} if (
+                    config_id == expected_postgres_config_id
+                ):
+                    pass
+                case _:
+                    raise RuntimeError(
+                        "calibrated timeouts use a different PostgreSQL config"
+                    )
 
         selection = manifest.get("selection", {})
         selection_path = repository / selection.get("path", "")

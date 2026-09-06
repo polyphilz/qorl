@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
+from qorl.postgres.schemas import PostgresIndexes
 from qorl.worker_pool.config import validate_host_topology
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import PoolConfig, WorkerSlot
@@ -34,13 +35,17 @@ class ContainerPool:
         self.project_name = project_name
         self.pool_config = pool_config
         self.postgres_config = postgres_config
+        self.settings = postgres_config.agent_settings
+        self.indexes = PostgresIndexes(by_table={})
         self.workers = tuple(
             WorkerSlot(resources, f"{project_name}-{resources.index}")
             for resources in pool_config.workers
         )
         self._available: queue.Queue[WorkerSlot] = queue.Queue()
         for slot in self.workers:
-            slot.client = PostgresClient(partial(self.exec, slot))
+            slot.client = PostgresClient(
+                partial(self.exec, slot), self.settings, self.indexes
+            )
             self._available.put(slot)
 
     def execute(
@@ -77,11 +82,11 @@ class ContainerPool:
         return self.execute(command, input_text=input_text, check=check).stdout
 
     def exec(
-        self, slot: WorkerSlot, command: list[str], input_text: str | None
+        self, slot: WorkerSlot, command: list[str], query: str
     ) -> subprocess.CompletedProcess[str]:
         return self.execute(
             ["docker", "exec", "--interactive", slot.container_id, *command],
-            input_text=input_text,
+            input_text=query,
             check=False,
         )
 
@@ -236,6 +241,10 @@ test ! -e "/target/$2/postmaster.pid"
             )
             self.command(["docker", "exec", slot.container_id, "qorl-assert-config"])
 
+    def load_indexes(self) -> None:
+        """Populate the shared catalog from one worker after restoring or loading IMDb."""
+        self.indexes.by_table = self.workers[0].client.read_indexes().by_table
+
     def stop(self) -> None:
         for slot in self.workers:
             self.compose_command(
@@ -267,10 +276,6 @@ test ! -e "/target/$2/postmaster.pid"
             "postgres_config": self.postgres_config.manifest().model_dump(),
         }
 
-    @property
-    def runtime_identity(self) -> dict[str, str]:
-        return self.postgres_config.runtime_identity().model_dump(exclude_none=True)
-
 
 def start_pool(
     repository: Path,
@@ -292,6 +297,7 @@ def start_pool(
         pool.create()
         pool.restore(archive)
         pool.start()
+        pool.load_indexes()
     except BaseException:
         pool.close()
         raise

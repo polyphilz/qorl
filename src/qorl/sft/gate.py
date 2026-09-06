@@ -175,7 +175,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()

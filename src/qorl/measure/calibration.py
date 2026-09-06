@@ -137,7 +137,7 @@ def calibrate(
 ) -> Path:
     """Calibrate the complete JOB benchmark and write per-task and pool reports."""
     validate_run_counts(max_warmup_runs, num_trials)
-    postgres_config = PostgresConfig.load(repository, postgres_config_path)
+    postgres_config = PostgresConfig.load(postgres_config_path)
     pool_config = load_pool_config(repository, pool_config_path)
     task_set = TaskSet.load(repository, "job")
     tasks = task_set.tasks
@@ -163,9 +163,7 @@ def calibrate(
         "task_set_id": task_set.task_set_id,
         "inventory_sha256": sha256_file(task_set.inventory_path),
         "data_identity": {"fixture_id": task_set.fixture_id},
-        "runtime_identity": postgres_config.runtime_identity().model_dump(
-            exclude_none=True
-        ),
+        "runtime_identity": {"postgres_config_id": postgres_config.config_id},
         "postgres_config": postgres_config.manifest().model_dump(),
         "orchestrator": {
             "qorl_version": __version__,

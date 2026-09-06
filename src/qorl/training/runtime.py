@@ -47,9 +47,7 @@ def start(
     for name in (POSTGRES_CONFIG_ENV, POOL_CONFIG_ENV):
         if not environment.get(name, "").strip():
             raise RuntimeError(f"{name} must specify a configuration path")
-    postgres_config = PostgresConfig.load(
-        repository, Path(environment[POSTGRES_CONFIG_ENV])
-    )
+    postgres_config = PostgresConfig.load(Path(environment[POSTGRES_CONFIG_ENV]))
     pool_config = load_pool_config(repository, Path(environment[POOL_CONFIG_ENV]))
     runtime = QorlRuntime(
         repository,
@@ -62,13 +60,14 @@ def start(
         runtime.create()
         runtime.restore(repository / "data/imdb.tar.gz")
         runtime.start()
+        runtime.load_indexes()
         configured_timeouts = environment.get(TIMEOUT_MANIFEST_ENV)
         runtime.calibrated_timeouts = (
             CalibratedTimeouts.load(
                 repository,
                 Path(configured_timeouts),
                 runtime.task_set,
-                runtime.runtime_identity,
+                postgres_config.config_id,
             )
             if configured_timeouts
             else None

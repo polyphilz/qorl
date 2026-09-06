@@ -432,7 +432,7 @@ def replay_action(
         guidance=None,
         worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
         data_identity={"fixture_id": task_set.fixture_id},
-        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
+        runtime_identity={"postgres_config_id": pool.postgres_config.config_id},
         sampler=prefix.sample.sampler,
         default=baseline,
         candidates=evaluator.candidates,
@@ -744,7 +744,7 @@ def main() -> None:
 
     if arguments.postgres_config is None or arguments.pool_config is None:
         parser.error("--postgres-config and --pool-config are required for generation")
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -823,7 +823,7 @@ def main() -> None:
         repository,
         timeout_path,
         task_set,
-        postgres_config.runtime_identity().model_dump(exclude_none=True),
+        postgres_config.config_id,
     )
     client = OpenAIModelClient(
         teacher_config.base_url,

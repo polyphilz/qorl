@@ -7,7 +7,6 @@ from tests.qorl.sft.factories import baseline, sample
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.measure.schemas import Baseline, RunStatus
-from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.sample import (
     PlanValidationEvaluator,
@@ -66,7 +65,6 @@ def test_unexpected_rollout_error_is_recorded(
 
     monkeypatch.setattr(PlanValidationEvaluator, "start", start)
     monkeypatch.setattr(QoAgentPolicy, "search", fail)
-    monkeypatch.setattr(PostgresClient, "task_indexes", lambda *_: {})
     agent_config = QoAgentConfig(
         model="model",
         revision="revision",
@@ -99,9 +97,7 @@ def test_unexpected_rollout_error_is_recorded(
         repository_root,
         "test-sft-sample",
         profile,
-        PostgresConfig.load(
-            repository_root, Path("docker/postgres/configs/000-pgconf-default")
-        ),
+        PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),
     )
 
     _, record = evaluate_request(

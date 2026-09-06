@@ -19,7 +19,7 @@ from qorl.measure.schemas import FinalStatus, MeasurementProtocolId, RunStatus
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
@@ -132,8 +132,9 @@ class CountingWorker:
         self.explain_calls = 0
         self.explain_analyze_calls = 0
 
-    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
-        return self.worker.task_indexes(task)
+    @property
+    def indexes(self) -> PostgresIndexes:
+        return self.worker.indexes
 
     def explain(
         self,
@@ -339,9 +340,7 @@ def run_audit(
         "config_sha256": sha256_file(config_path),
         "case_manifest_sha256": sha256_file(case_path),
         "data_identity": {"fixture_id": task_set.fixture_id},
-        "runtime_identity": postgres_config.runtime_identity().model_dump(
-            exclude_none=True
-        ),
+        "runtime_identity": {"postgres_config_id": postgres_config.config_id},
         "results": [],
         "summary": None,
     }
@@ -443,7 +442,7 @@ def main() -> None:
             config,
             case_path,
             output_dir,
-            postgres_config=PostgresConfig.load(repository, arguments.postgres_config),
+            postgres_config=PostgresConfig.load(arguments.postgres_config),
             pool_config=load_pool_config(repository, arguments.pool_config),
         )
     )

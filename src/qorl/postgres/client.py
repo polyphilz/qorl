@@ -4,35 +4,36 @@ import json
 import shlex
 import subprocess
 from collections.abc import Callable
-from typing import Any
+
+from pydantic import ValidationError
 
 from qorl.postgres.exceptions import PostgresError, QueryTimeout
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresIndexes, PostgresSettings
 
 
 class PostgresClient:
-    """Execute inspected and measured SQL using a supplied command runner."""
+    """Run SQL and retrieve query plans, timings, and database metadata."""
 
     def __init__(
         self,
-        run_command: Callable[
-            [list[str], str | None], subprocess.CompletedProcess[str]
-        ],
+        run_command: Callable[[list[str], str], subprocess.CompletedProcess[str]],
+        settings: PostgresSettings,
+        indexes: PostgresIndexes,
     ) -> None:
         self._run_command = run_command
+        self.settings = settings
+        self.indexes = indexes
         self.explain_calls = 0
         self.explain_analyze_calls = 0
-        self._settings_cache: dict[str, str] = {}
 
     def execute(
         self,
         command: list[str],
         *,
-        input_text: str | None = None,
-        check: bool = True,
+        query: str,
     ) -> subprocess.CompletedProcess[str]:
-        completed = self._run_command(command, input_text)
-        if check and completed.returncode != 0:
+        completed = self._run_command(command, query)
+        if completed.returncode != 0:
             detail = completed.stderr.strip() or completed.stdout.strip()
             raise PostgresError(
                 f"command failed ({completed.returncode}): "
@@ -41,6 +42,7 @@ class PostgresClient:
         return completed
 
     def admin_sql(self, sql: str) -> str:
+        """Run setup and metadata SQL as the privileged PostgreSQL administrator."""
         shell = r"""
 exec psql \
     --username="$POSTGRES_USER" \
@@ -55,27 +57,31 @@ exec psql \
                 "-c",
                 shell,
             ],
-            input_text=sql,
+            query=sql,
         ).stdout
 
-    def runner_sql(
-        self, sql: str, *, csv: bool = False, application_name: str = "qorl-worker"
-    ) -> str:
-        shell = r"""
+    def _run_runner_sql(
+        self,
+        sql: str,
+        *,
+        output_flags: list[str],
+        connection_label: str = "qorl-worker",
+        postgres_options: str = "",
+    ) -> subprocess.CompletedProcess[str]:
+        """Execute SQL as qorl_runner and retain both output and diagnostics."""
+        environment = [f"PGAPPNAME={connection_label}"]
+        if postgres_options:
+            environment.append(f"PGOPTIONS={postgres_options}")
+        shell = rf"""
 exec env \
     PGPASSWORD="$QORL_RUNNER_PASSWORD" \
-    PGAPPNAME=qorl-worker \
+    {shlex.join(environment)} \
     psql \
         --host=127.0.0.1 \
         --username=qorl_runner \
-        --dbname="${POSTGRES_DB:-$POSTGRES_USER}" \
-        --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
+        --dbname="${{POSTGRES_DB:-$POSTGRES_USER}}" \
+        --no-psqlrc --set=ON_ERROR_STOP=1 --quiet {shlex.join(output_flags)}
 """
-        shell = shell.replace(
-            "PGAPPNAME=qorl-worker", f"PGAPPNAME={shlex.quote(application_name)}"
-        )
-        if csv:
-            shell = shell.replace("--tuples-only --no-align", "--csv")
         return self.execute(
             [
                 "bash",
@@ -84,25 +90,21 @@ exec env \
                 "-c",
                 shell,
             ],
-            input_text=sql,
-        ).stdout
+            query=sql,
+        )
 
-    def settings(self, names: set[str]) -> dict[str, str]:
-        missing = names - self._settings_cache.keys()
-        if not missing:
-            return {name: self._settings_cache[name] for name in sorted(names)}
-        ordered = sorted(missing)
-        literals = ", ".join("'" + name.replace("'", "''") + "'" for name in ordered)
-        output = self.runner_sql(
-            "SELECT json_object_agg(name, setting ORDER BY name) "
-            "FROM pg_settings "
-            f"WHERE name IN ({literals});"
-        ).strip()
-        values = json.loads(output)
-        if not isinstance(values, dict) or set(values) != missing:
-            raise PostgresError("PostgreSQL planner-setting response is incomplete")
-        self._settings_cache.update({name: str(values[name]) for name in ordered})
-        return {name: self._settings_cache[name] for name in sorted(names)}
+    def runner_sql(
+        self,
+        sql: str,
+        *,
+        connection_label: str = "qorl-worker",
+    ) -> str:
+        """Return CSV from qorl_runner, with SELECT permissions and read-only defaults."""
+        return self._run_runner_sql(
+            sql,
+            output_flags=["--csv"],
+            connection_label=connection_label,
+        ).stdout
 
     def explain(
         self,
@@ -122,32 +124,16 @@ exec env \
             if hint
             else ""
         )
-        shell = rf"""
-exec env \
-    PGPASSWORD="$QORL_RUNNER_PASSWORD" \
-    PGAPPNAME=qorl-worker \
-    PGOPTIONS="-c statement_timeout={timeout_ms}{debug_options}" \
-    psql \
-        --host=127.0.0.1 \
-        --username=qorl_runner \
-        --dbname="${{POSTGRES_DB:-$POSTGRES_USER}}" \
-        --no-psqlrc --set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align
-"""
         try:
-            completed = self.execute(
-                [
-                    "bash",
-                    "-Eeuo",
-                    "pipefail",
-                    "-c",
-                    shell,
-                ],
-                input_text=(
+            completed = self._run_runner_sql(
+                (
                     f"EXPLAIN ({explain_options})\n"
                     + (hint + "\n" if hint else "")
                     + sql.strip()
                     + "\n"
                 ),
+                output_flags=["--tuples-only", "--no-align"],
+                postgres_options=f"-c statement_timeout={timeout_ms}{debug_options}",
             )
         except PostgresError as error:
             if "canceling statement due to statement timeout" in str(error):
@@ -159,23 +145,19 @@ exec env \
         except (json.JSONDecodeError, IndexError, TypeError) as error:
             raise PostgresError("PostgreSQL returned invalid EXPLAIN JSON") from error
 
-    def explain_analyze(self, sql: str, timeout_ms: int) -> dict[str, Any]:
-        return self.explain(sql, timeout_ms, analyze=True).document
-
-    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
-        tables = sorted({relation["table"] for relation in task["relations"]})
-        literals = ", ".join("'" + table.replace("'", "''") + "'" for table in tables)
+    def read_indexes(self) -> PostgresIndexes:
+        """Read all public-schema index names for the pool's shared catalog."""
         output = self.admin_sql(
-            "SELECT json_object_agg(tablename, indexes ORDER BY tablename) "
+            "SELECT json_build_object('by_table', "
+            "COALESCE(json_object_agg(tablename, indexes ORDER BY tablename), '{}'::json)) "
             "FROM ("
             "SELECT tablename, json_agg(indexname ORDER BY indexname) AS indexes "
             "FROM pg_indexes "
-            f"WHERE schemaname = 'public' AND tablename IN ({literals}) "
+            "WHERE schemaname = 'public' "
             "GROUP BY tablename"
             ") AS listed;"
         ).strip()
-        by_table = json.loads(output)
-        return {
-            relation["alias"]: set(by_table.get(relation["table"], []))
-            for relation in task["relations"]
-        }
+        try:
+            return PostgresIndexes.model_validate_json(output)
+        except ValidationError as error:
+            raise PostgresError("PostgreSQL returned invalid index metadata") from error

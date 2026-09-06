@@ -248,7 +248,7 @@ def evaluate_request(
             guidance=None,
             worker=JSON_OBJECT_ADAPTER.validate_python(slot.resources.manifest()),
             data_identity={"fixture_id": task_set.fixture_id},
-            runtime_identity=JSON_OBJECT_ADAPTER.validate_python(pool.runtime_identity),
+            runtime_identity={"postgres_config_id": pool.postgres_config.config_id},
             sampler=sampler_identity,
             default=baseline,
             candidates=evaluator.candidates,
@@ -408,7 +408,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
@@ -456,7 +456,7 @@ def main() -> None:
             repository,
             timeout_path,
             task_set,
-            postgres_config.runtime_identity().model_dump(exclude_none=True),
+            postgres_config.config_id,
         )
         if arguments.split == "sampling"
         else None
@@ -533,9 +533,7 @@ def main() -> None:
         sampler_manifest=sampler_manifest,
         guidance=None,
         data_identity={"fixture_id": task_set.fixture_id},
-        runtime_identity=JSON_OBJECT_ADAPTER.validate_python(
-            postgres_config.runtime_identity().model_dump(exclude_none=True)
-        ),
+        runtime_identity={"postgres_config_id": postgres_config.config_id},
         plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
         database_pool=previous.database_pool if previous else None,
         summary=sampling_summary(records),

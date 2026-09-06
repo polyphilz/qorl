@@ -5,10 +5,11 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.schemas import (
     PostgresConfigExpected,
     PostgresConfigManifest,
-    RuntimeIdentity,
+    PostgresSettings,
 )
 from qorl.util.hashing import sha256_file
 
@@ -17,7 +18,6 @@ POSTGRES_CONFIG_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True)
 class PostgresConfig:
-    repository: Path
     path: Path
     pg_conf_path: Path
     expected_path: Path
@@ -26,14 +26,8 @@ class PostgresConfig:
     expected_sha256: str
 
     @classmethod
-    def load(
-        cls,
-        repository: Path,
-        configured: Path,
-    ) -> PostgresConfig:
-        repository = repository.resolve()
-        path = configured if configured.is_absolute() else repository / configured
-        path = path.resolve()
+    def load(cls, configured: Path) -> PostgresConfig:
+        path = (REPOSITORY_ROOT / configured).resolve()
         pg_conf_path = path / "pg.conf"
         expected_path = path / "config.expected.json"
         if not pg_conf_path.is_file() or not expected_path.is_file():
@@ -57,7 +51,6 @@ class PostgresConfig:
                 f"{expected.postgres_config_id} != {path.name}"
             )
         return cls(
-            repository=repository,
             path=path,
             pg_conf_path=pg_conf_path,
             expected_path=expected_path,
@@ -70,9 +63,20 @@ class PostgresConfig:
     def config_id(self) -> str:
         return self.expected.postgres_config_id
 
+    @property
+    def agent_settings(self) -> PostgresSettings:
+        """Select the baseline settings exposed to the agent from this config."""
+        return PostgresSettings.model_validate(
+            {
+                name: value
+                for name, value in self.expected.settings.items()
+                if name in PostgresSettings.model_fields
+            }
+        )
+
     def manifest(self) -> PostgresConfigManifest:
         try:
-            displayed_path = self.path.relative_to(self.repository)
+            displayed_path = self.path.relative_to(REPOSITORY_ROOT)
         except ValueError:
             displayed_path = self.path
         return PostgresConfigManifest(
@@ -80,10 +84,4 @@ class PostgresConfig:
             path=str(displayed_path),
             pg_conf_sha256=self.pg_conf_sha256,
             expected_sha256=self.expected_sha256,
-        )
-
-    def runtime_identity(self, postgres_image_id: str | None = None) -> RuntimeIdentity:
-        return RuntimeIdentity(
-            postgres_image_id=postgres_image_id,
-            postgres_config_id=self.config_id,
         )

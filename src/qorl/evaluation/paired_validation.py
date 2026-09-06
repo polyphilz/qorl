@@ -265,7 +265,7 @@ def main() -> None:
     arguments = parser.parse_args()
 
     repository = arguments.repository.resolve()
-    postgres_config = PostgresConfig.load(repository, arguments.postgres_config)
+    postgres_config = PostgresConfig.load(arguments.postgres_config)
     pool_config = load_pool_config(repository, arguments.pool_config)
     config_path = repository / CONFIG
     config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -324,9 +324,7 @@ def main() -> None:
         "selection_sha256": sha256_file(selection_path),
         "run_config_sha256": sha256_file(policy_path),
         "data_identity": {"fixture_id": task_set.fixture_id},
-        "runtime_identity": postgres_config.runtime_identity().model_dump(
-            exclude_none=True
-        ),
+        "runtime_identity": {"postgres_config_id": postgres_config.config_id},
         "model": {
             "path": str(model.relative_to(repository)),
             "model_safetensors_sha256": model_sha256,

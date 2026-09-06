@@ -25,6 +25,7 @@ from qorl.plans.schemas import (
     INTEGER_SETTINGS,
     NUMERIC_SETTINGS,
 )
+from qorl.postgres.schemas import PostgresSettings
 
 TASK = {
     "task_id": "job-test",
@@ -162,17 +163,6 @@ class MissingUsageClient(FakeClient):
 
 class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
     def __init__(self, repository: Path) -> None:
-        self.requested_settings: set[str] = set()
-
-        def settings(names: set[str]) -> dict[str, str]:
-            self.requested_settings = names
-            return {
-                **dict.fromkeys(BOOLEAN_SETTINGS, "on"),
-                **dict.fromkeys(NUMERIC_SETTINGS, "1"),
-                **dict.fromkeys(INTEGER_SETTINGS, "1"),
-                "server_version_num": "180006",
-            }
-
         def admin_sql(sql: str) -> str:
             del sql
             return ""
@@ -183,7 +173,13 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
             TASK, {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
         )
         self._worker = SimpleNamespace(
-            settings=settings,
+            settings=PostgresSettings.model_validate(
+                {
+                    **dict.fromkeys(BOOLEAN_SETTINGS, "on"),
+                    **dict.fromkeys(NUMERIC_SETTINGS, "1"),
+                    **dict.fromkeys(INTEGER_SETTINGS, "1"),
+                }
+            ),
             admin_sql=admin_sql,
             fixture=SimpleNamespace(
                 repository=repository,
@@ -291,8 +287,8 @@ class TestQoAgent:
             for request in client.requests
         ]
         assert digests == [
-            "ace720366597c57187b65fb79cb141b61b98c2e71743f6dd9cfb755ecc8e6221",
-            "d81683bfe25034d7279d70efcab6b66c32e6ef696d93776516b2dc3bf477e3c6",
+            "45209bb0b44e53034ca74789e649a4fc9efe7ebe7de1b73df5931775463a0f01",
+            "00f2559138d2edb52e61b2e2302dec801d600662c427ed10f18615aeaca13026",
         ]
 
     def test_protocol_exposes_a_one_candidate_training_budget(
@@ -413,9 +409,13 @@ class TestQoAgent:
         assert (
             trace["initial_observation"]["planner_settings"]["enable_hashjoin"] == "on"
         )
-        assert evaluator.requested_settings == set(BOOLEAN_SETTINGS) | set(
-            NUMERIC_SETTINGS
-        ) | set(INTEGER_SETTINGS) | {"server_version_num"}
+        assert set(trace["initial_observation"]["planner_settings"]) == (
+            set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
+        )
+        assert set(PostgresSettings.model_fields) == set(
+            trace["initial_observation"]["planner_settings"]
+        )
+        assert "postgresql_server_version_num" not in trace["initial_observation"]
         assert trace["initial_observation"]["turn_budget"] == {
             "total_model_turns": 64,
             "maximum_inspection_turns": 6,

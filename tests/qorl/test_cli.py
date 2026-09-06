@@ -11,7 +11,7 @@ from qorl.cli import parser
 @pytest.mark.parametrize("omitted", ["--postgres-config", "--pool-config"])
 def test_both_config_paths_are_required(command: str, omitted: str) -> None:
     options = {
-        "--postgres-config": "docker/postgres/configs/001-pgconf",
+        "--postgres-config": "docker/postgres/configs/000-pgconf-default",
         "--pool-config": "docker/worker_pool/configs/001-poolconf-2x16",
     }
     arguments = [command]
@@ -41,7 +41,7 @@ def test_cli_forwards_both_selections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    postgres = Path("docker/postgres/configs/001-pgconf")
+    postgres = tmp_path / "test-pgconf"
     pool = Path("docker/worker_pool/configs/001-poolconf-2x16")
     execute = Mock(return_value=tmp_path)
     monkeypatch.chdir(tmp_path)

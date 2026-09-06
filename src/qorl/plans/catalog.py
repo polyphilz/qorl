@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Set
 from dataclasses import dataclass
 from typing import Any, TypeGuard, cast
 
 from qorl.plans.exceptions import ActionError
+from qorl.postgres.schemas import PostgresIndexes
+from qorl.taskset.schemas import Task
 
 IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 MIN_JOIN_RELATIONS = 2
@@ -23,10 +26,21 @@ class TaskCatalog:
     indexes: dict[str, frozenset[str]]
 
     @classmethod
+    def from_postgres(cls, task: Task, indexes: PostgresIndexes) -> TaskCatalog:
+        """Build planning context using an already-loaded PostgreSQL index catalog."""
+        return cls.from_task(
+            task.model_dump(),
+            {
+                relation.alias: indexes.by_table.get(relation.table, frozenset())
+                for relation in task.relations
+            },
+        )
+
+    @classmethod
     def from_task(
         cls,
         task: dict[str, Any],
-        indexes: dict[str, set[str]] | None = None,
+        indexes: Mapping[str, Set[str]] | None = None,
     ) -> TaskCatalog:
         relations = frozenset(item["alias"] for item in task["relations"])
         adjacency: dict[str, set[str]] = {relation: set() for relation in relations}

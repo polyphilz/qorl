@@ -29,7 +29,7 @@ from qorl.measure.schemas import (
 from qorl.measure.timeouts import TaskTimeout, task_timeout_ms
 from qorl.plans.fingerprint import plan_sha256
 from qorl.postgres.exceptions import QueryTimeout
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import Task
 
 TASK: dict[str, Any] = {
@@ -74,11 +74,14 @@ class Fixture:
 
 class Worker:
     def __init__(self) -> None:
+        self.indexes = PostgresIndexes(
+            by_table={
+                "table_a": frozenset({"table_a_pkey"}),
+                "table_b": frozenset({"table_b_pkey"}),
+            }
+        )
         self.times = iter([11.0, 10.0, 12.0, 30.0, 29.0])
         self.analyze_calls = 0
-
-    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
-        return {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
 
     def explain(
         self,
@@ -107,12 +110,15 @@ class Worker:
 
 class CountingWorker:
     def __init__(self) -> None:
+        self.indexes = PostgresIndexes(
+            by_table={
+                "table_a": frozenset({"table_a_pkey"}),
+                "table_b": frozenset({"table_b_pkey"}),
+            }
+        )
         self.analyze_calls = 0
         self.plain_calls = 0
         self.plan_ids: dict[str, int] = {}
-
-    def task_indexes(self, task: dict[str, Any]) -> dict[str, set[str]]:
-        return {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
 
     def explain(
         self,
