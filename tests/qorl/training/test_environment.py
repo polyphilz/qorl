@@ -2,10 +2,11 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from verifiers.v1.configs.env import EnvConfig
+from verifiers.v1.envs.single_agent import SingleAgentEnvConfig
 from verifiers.v1.utils.loaders import (
     environment_class,
     harness_class,
+    resolve_env_config,
     taskset_class,
 )
 
@@ -28,8 +29,9 @@ def test_training_configs_resolve_qorl_plugins(
 ) -> None:
     config = tomllib.loads((repository_root / config_path).read_text())
     source = config["orchestrator"]["train"]["source"][0]
-    environment = EnvConfig.model_validate(source["env"])
+    environment = resolve_env_config(source["env"])
 
+    assert isinstance(environment, SingleAgentEnvConfig)
     assert environment.id == "qorl"
     assert environment.taskset.id == "qorl"
     assert environment.agent.harness.id == "qorl"
