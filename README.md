@@ -50,8 +50,8 @@ SFT/RL require `train=...` and `validation=...`, with optional `test=...`.
 Evaluation/calibration require only `test=...`. Splits must have disjoint query
 topologies. Model-based methods require a complete local model directory or a
 Hugging Face ID plus an immutable `--base-model-revision`. Hosted evaluation selects
-`--model-provider openai --base-model-name-or-path gpt-6-astra`; local evaluation also accepts a separate
-`--adapter-path` without merging it.
+`--model-provider openai --base-model-name-or-path gpt-6-astra`; local evaluation also
+accepts a separate `--adapter-path` without merging it.
 
 Local models and Astra use the same agent tools and budgets. Astra uses the
 Responses API and the `OPENAI_API_KEY` environment variable; credentials do not
@@ -61,9 +61,8 @@ from `configs/defaults/models/` into the experiment's `config.toml`.
 SFT `--dataset-from` imports a QORL conversation artifact's saved train/validation
 selections and original seeds. It accepts only an optional new `test=...` selection.
 Without reuse, generator identity and generation count remain explicit placeholders.
-Creation checks artifact metadata and file presence. Calibration is executable;
-model-based preparation, training, and evaluation stages report that execution
-is not implemented.
+Creation checks artifact metadata and file presence. Calibration and live evaluation
+are executable.
 
 ## Run a calibration experiment
 

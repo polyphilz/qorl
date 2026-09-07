@@ -10,11 +10,13 @@ from pathlib import Path
 
 import tomli_w
 
+from qorl.evaluation.evaluate import evaluate
 from qorl.experiment.schemas import (
     PLACEHOLDER,
     CalibrationExperimentConfig,
     ExperimentConfig,
     ExperimentMethod,
+    ModelExperimentConfig,
     RlExperimentConfig,
     RunInputs,
     RunRequest,
@@ -151,11 +153,18 @@ def validate_stage(config: ExperimentConfig, request: RunRequest) -> None:
         raise ValueError(f"stage {request.stage.value} is not valid for {method.value}")
     if request.number is not None and request.number < 0:
         raise ValueError("run number must be nonnegative")
+    if request.stage == RunStage.EVALUATE and request.resume:
+        raise ValueError("evaluation cannot resume; restart into fresh outputs")
     if request.resume and request.number is None:
         raise ValueError("--resume requires --run")
     if request.number is None and request.stage != METHOD_STAGES[method][0]:
         raise ValueError(f"stage {request.stage.value} requires --run")
     if request.stage == RunStage.EVALUATE:
+        if (
+            isinstance(config, ModelExperimentConfig)
+            and config.agent.candidate_attempts != 1
+        ):
+            raise ValueError("measured evaluation requires agent.candidate_attempts=1")
         if request.split is None:
             raise ValueError("evaluation requires --split")
         if request.split not in task_inputs(config):
@@ -171,9 +180,8 @@ def validate_stage(config: ExperimentConfig, request: RunRequest) -> None:
         raise ValueError("--split and --checkpoint apply only to evaluation")
 
 
-def create_run(directory: Path, inputs: RunInputs) -> Path:
-    """Allocate a new run and copy its inputs; never replace an existing run."""
-    parent = OUTPUTS_DIRECTORY / directory.name
+def numbered_output(parent: Path) -> Path:
+    """Claim the next numeric directory without replacing any existing entry."""
     parent.mkdir(parents=True, exist_ok=True)
     while True:
         numbers = [
@@ -185,9 +193,14 @@ def create_run(directory: Path, inputs: RunInputs) -> Path:
         output = parent / f"{number:0{RUN_NUMBER_WIDTH}d}"
         try:
             output.mkdir()
-            break
+            return output
         except FileExistsError:
             continue
+
+
+def create_run(directory: Path, inputs: RunInputs) -> Path:
+    """Allocate a new run and copy its inputs; never replace an existing run."""
+    output = numbered_output(OUTPUTS_DIRECTORY / directory.name)
     try:
         (output / "config.toml").write_text(
             tomli_w.dumps(inputs.config.model_dump(mode="json", exclude_none=True)),
@@ -203,11 +216,11 @@ def create_run(directory: Path, inputs: RunInputs) -> Path:
 
 
 def run_experiment(directory: Path, request: RunRequest) -> Path:
-    """Run calibration from recorded inputs; reject stages not yet implemented."""
+    """Dispatch calibration or evaluation using recorded inputs and fresh outputs."""
     directory = (REPOSITORY_ROOT / directory).resolve()
     config = load_config(directory / "config.toml")
     validate_stage(config, request)
-    if request.stage != RunStage.CALIBRATE:
+    if request.stage not in (RunStage.CALIBRATE, RunStage.EVALUATE):
         raise NotImplementedError(f"stage {request.stage.value} is not implemented")
     if request.resume:
         raise ValueError("calibration cannot resume partial runs; start a new run")
@@ -227,32 +240,80 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
         inputs = load_inputs(output)
         if inputs != current:
             raise ValueError("experiment inputs changed; start a new run without --run")
-        if (output / "calibration").exists():
+        if request.stage == RunStage.CALIBRATE and (output / "calibration").exists():
             raise ValueError(
                 f"calibration output already exists; refusing to overwrite: {output}"
             )
 
     config = inputs.config
-    if not isinstance(config, CalibrationExperimentConfig):
-        raise ValueError("calibration requires a calibration experiment")
     if PLACEHOLDER in (str(config.postgres.path), str(config.pool.path)):
         raise ValueError("fill in the PostgreSQL and pool configuration paths")
     postgres_config = PostgresConfig.load(config.postgres.path)
     pool_config = load_pool_config(config.pool.path)
-    selection = inputs.selections[TaskRole.TEST]
+    role = request.split if request.stage == RunStage.EVALUATE else TaskRole.TEST
+    if role is None:
+        raise ValueError("evaluation requires --split")
+    selection = inputs.selections[role]
     task_set = TaskSet.load(REPOSITORY_ROOT, selection.benchmark_id.value)
+
+    if (
+        isinstance(config, ModelExperimentConfig)
+        and config.model.name_or_path == PLACEHOLDER
+    ):
+        raise ValueError("fill in the model identity before evaluation")
 
     if output is None:
         output = create_run(directory, inputs)
     print(f"QORL run {output.name}: {output}", flush=True)
-    calibrate(
-        task_set,
-        selection,
-        output / "calibration",
-        settings=config.measurement,
-        postgres_config=postgres_config,
-        pool_config=pool_config,
-    )
+    if isinstance(config, CalibrationExperimentConfig):
+        calibrate(
+            task_set,
+            selection,
+            output / "calibration",
+            settings=config.measurement,
+            postgres_config=postgres_config,
+            pool_config=pool_config,
+        )
+    else:
+        model = config.model
+        if request.checkpoint is not None:
+            model = model.model_copy(
+                update={
+                    "adapter_path": (
+                        REPOSITORY_ROOT / request.checkpoint.expanduser()
+                    ).resolve(),
+                }
+            )
+        # Each invocation owns a fresh slot so a restart cannot reuse partial records.
+        invocation = numbered_output(output / "evaluation" / role.value)
+        print(f"QORL evaluation results: {invocation}", flush=True)
+        report = evaluate(
+            task_set,
+            selection,
+            invocation,
+            split=role,
+            model=model,
+            inference=config.inference,
+            serving_gpu_ids=config.resources.serving_gpu_ids
+            if config.resources
+            else None,
+            agent=config.agent,
+            measurement=config.measurement,
+            settings=config.evaluation,
+            seed=config.experiment.seed,
+            postgres_config=postgres_config,
+            pool_config=pool_config,
+        )
+        summary = report.summary
+        print(
+            f"Plans: {summary.valid_plan_rollout_count} valid, "
+            f"{summary.novel_plan_rollout_count} novel / "
+            f"{summary.recorded_rollout_count} rollouts; "
+            f"{summary.distinct_novel_plan_count} distinct novel task/plans. "
+            f"Speedup-bearing outcomes: {summary.performance.scored_rollout_count}; "
+            f"timeouts: {summary.performance.timeout_count}.",
+            flush=True,
+        )
     return output
 
 

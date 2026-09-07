@@ -203,7 +203,6 @@ def test_changed_defaults_are_not_read_during_execution(
     [
         (RunStage.PREPARE, ExperimentMethod.SFT),
         (RunStage.TRAIN, ExperimentMethod.RL),
-        (RunStage.EVALUATE, ExperimentMethod.EVAL),
     ],
 )
 def test_unimplemented_stages_do_not_allocate_outputs(
