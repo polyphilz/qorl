@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+from qorl.plans.catalog import TaskCatalog
+from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import parse_hint_diagnostics, verify_action
 
 DIAGNOSTICS = (
@@ -28,6 +32,58 @@ PLAN = {
 
 
 class TestPlan:
+    @pytest.mark.parametrize("node_type", ["Index Scan", "Index Only Scan"])
+    @pytest.mark.parametrize("forced", [False, True])
+    def test_index_only_fallback_is_valid_only_when_the_full_constraint_allows_it(
+        self, node_type: str, forced: bool
+    ) -> None:
+        catalog = TaskCatalog.from_task(
+            {"relations": [{"alias": "a", "table": "table_a"}], "join_edges": []},
+            indexes={"a": {"a_idx"}},
+        )
+        request = (
+            {
+                "relation": "a",
+                "force": "index_only",
+                "forbid": ["index"],
+                "indexes": ["a_idx"],
+            }
+            if forced
+            else {"relation": "a", "forbid": ["seq", "bitmap"]}
+        )
+        action = PlanAction.from_raw({"version": 1, "scans": [request]}, catalog)
+        plan = {"Node Type": node_type, "Alias": "a", "Index Name": "a_idx"}
+        result = verify_action(action.to_wire(), plan, DIAGNOSTICS)
+        assert result.valid == (not forced or node_type == "Index Only Scan")
+        if not result.valid:
+            assert result.errors == (
+                "scan a uses index, not index_only",
+                "scan a uses forbidden method index",
+            )
+
+    @pytest.mark.parametrize(
+        "node_type", ["Seq Scan", "Bitmap Heap Scan", "Index Scan", "Index Only Scan"]
+    )
+    def test_no_index_constraint_checks_both_physical_index_methods(
+        self, node_type: str
+    ) -> None:
+        result = verify_action(
+            {
+                "version": 1,
+                "scans": [
+                    {
+                        "relation": "a",
+                        "force": "auto",
+                        "forbid": ["index", "index_only"],
+                        "indexes": [],
+                    }
+                ],
+            },
+            {"Node Type": node_type, "Alias": "a"},
+            DIAGNOSTICS,
+        )
+        assert result.valid == (node_type in {"Seq Scan", "Bitmap Heap Scan"})
+
     def test_parses_real_diagnostic_shape(self) -> None:
         diagnostic = parse_hint_diagnostics(DIAGNOSTICS)
         assert diagnostic is not None

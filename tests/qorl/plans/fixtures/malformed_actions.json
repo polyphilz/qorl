@@ -194,6 +194,26 @@
     "error": "scans[0].forbid cannot disable every scan method"
   },
   {
+    "name": "ordinary index alone cannot be forbidden",
+    "action": {"version": 1, "scans": [{"relation": "a", "forbid": ["index"]}]},
+    "error": "scans[0].forbid [index] cannot be expressed by pg_hint_plan while preserving the other scan choices; NoIndexScan also disables index_only"
+  },
+  {
+    "name": "unsupported scan subset keeps its full meaning",
+    "action": {"version": 1, "scans": [{"relation": "a", "forbid": ["seq", "index_only"]}]},
+    "error": "scans[0].forbid cannot be expressed by one pg_hint_plan scan hint while preserving the remaining choices: ['bitmap', 'index']"
+  },
+  {
+    "name": "memoization requires an allowed nested loop",
+    "action": {"version": 1, "joins": [{"relations": ["a", "b"], "force": "hash", "memoize": "force"}]},
+    "error": "joins[0].memoize force requires nestloop to remain allowed"
+  },
+  {
+    "name": "join target must be a subtree of leading",
+    "action": {"version": 1, "leading": {"left": {"left": "a", "right": "b"}, "right": "c"}, "joins": [{"relations": ["b", "c"], "force": "hash"}]},
+    "error": "joins[0].relations must be an internal subtree of leading"
+  },
+  {
     "name": "duplicate scan target",
     "action": {
       "version": 1,

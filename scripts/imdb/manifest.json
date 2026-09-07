@@ -151,7 +151,7 @@
     }
   },
   "database": {
-    "image_reference": "qorl-postgres:18.6-pg_hint_plan-1.8.0",
+    "image_reference": "qorl-postgres:18.6-pg_hint_plan-1.8.1-5af0c526b26c",
     "server_version_num": "180006",
     "encoding": "UTF8",
     "collation": "C",

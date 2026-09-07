@@ -2,7 +2,7 @@ name: qorl
 
 services:
   postgres:
-    image: qorl-postgres:18.6-pg_hint_plan-1.8.0
+    image: qorl-postgres:18.6-pg_hint_plan-1.8.1-5af0c526b26c
     platform: linux/amd64
     build:
       context: ./docker/postgres

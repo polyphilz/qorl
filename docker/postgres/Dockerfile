@@ -3,11 +3,14 @@
 # Pin the multi-platform index. compose.yaml deliberately selects linux/amd64,
 # which resolves to the amd64 manifest recorded in versions.json.
 ARG POSTGRES_BASE_IMAGE=postgres:18.6-bookworm@sha256:1c59e2c3c818eaa0f0628f695b36e7c9e362d6b219b36a54a32df645cbd7e1af
+ARG PG_HINT_PLAN_COMMIT=5af0c526b26cbc8be471898ef18b2d403cf9503c
+ARG PG_HINT_PLAN_VERSION=1.8.1
+ARG PG_HINT_PLAN_SOURCE_SHA256=443ea3bdcd3245b128b37c3e5c9410f58004e6b5fc9aac33acbd3f2789fde894
 
 FROM ${POSTGRES_BASE_IMAGE} AS pg_hint_plan_builder
 
-ARG PG_HINT_PLAN_TAG=REL18_1_8_0
-ARG PG_HINT_PLAN_SOURCE_SHA256=c3d8aa1e468b6b8371fb09d971152b9ac1610118fbd0c76c7e308e88a1cc0ef7
+ARG PG_HINT_PLAN_COMMIT
+ARG PG_HINT_PLAN_SOURCE_SHA256
 ARG POSTGRES_DEV_PACKAGE_VERSION=18.6-1.pgdg12+2
 
 RUN set -eux; \
@@ -25,7 +28,7 @@ WORKDIR /tmp/pg_hint_plan
 RUN set -eux; \
     curl --fail --location --show-error \
         --output pg_hint_plan.tar.gz \
-        "https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/${PG_HINT_PLAN_TAG}.tar.gz"; \
+        "https://codeload.github.com/ossc-db/pg_hint_plan/tar.gz/${PG_HINT_PLAN_COMMIT}"; \
     echo "${PG_HINT_PLAN_SOURCE_SHA256}  pg_hint_plan.tar.gz" | sha256sum --check; \
     mkdir source; \
     tar --extract --gzip --file pg_hint_plan.tar.gz --directory source --strip-components=1; \
@@ -41,24 +44,22 @@ RUN set -eux; \
 
 FROM ${POSTGRES_BASE_IMAGE}
 
-ARG PG_HINT_PLAN_TAG=REL18_1_8_0
-ARG PG_HINT_PLAN_VERSION=1.8.0
-ARG PG_HINT_PLAN_COMMIT=88437bde5947e7bc40719e8b82eb8be2b39d71e8
-ARG PG_HINT_PLAN_SOURCE_SHA256=c3d8aa1e468b6b8371fb09d971152b9ac1610118fbd0c76c7e308e88a1cc0ef7
+ARG PG_HINT_PLAN_VERSION
+ARG PG_HINT_PLAN_COMMIT
+ARG PG_HINT_PLAN_SOURCE_SHA256
 
 LABEL org.opencontainers.image.title="qorl-postgres" \
       org.opencontainers.image.description="Pinned PostgreSQL and pg_hint_plan runtime for QORL plan-steering experiments" \
-      org.opencontainers.image.version="18.6-pg_hint_plan-1.8.0" \
+      org.opencontainers.image.version="18.6-pg_hint_plan-${PG_HINT_PLAN_VERSION}-${PG_HINT_PLAN_COMMIT}" \
       org.opencontainers.image.source="https://github.com/ossc-db/pg_hint_plan" \
       io.qorl.postgresql.version="18.6" \
       io.qorl.pg_hint_plan.version="${PG_HINT_PLAN_VERSION}" \
-      io.qorl.pg_hint_plan.tag="${PG_HINT_PLAN_TAG}" \
       io.qorl.pg_hint_plan.commit="${PG_HINT_PLAN_COMMIT}" \
       io.qorl.pg_hint_plan.source-sha256="${PG_HINT_PLAN_SOURCE_SHA256}"
 
 ENV PG_HINT_PLAN_VERSION=${PG_HINT_PLAN_VERSION} \
-    PG_HINT_PLAN_TAG=${PG_HINT_PLAN_TAG} \
-    PG_HINT_PLAN_COMMIT=${PG_HINT_PLAN_COMMIT}
+    PG_HINT_PLAN_COMMIT=${PG_HINT_PLAN_COMMIT} \
+    PG_HINT_PLAN_SOURCE_SHA256=${PG_HINT_PLAN_SOURCE_SHA256}
 
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/lib/postgresql/18/lib/ /usr/lib/postgresql/18/lib/
 COPY --from=pg_hint_plan_builder /opt/pg_hint_plan-install/usr/share/postgresql/18/extension/ /usr/share/postgresql/18/extension/

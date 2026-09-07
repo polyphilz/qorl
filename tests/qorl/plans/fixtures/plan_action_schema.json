@@ -35,10 +35,12 @@
           "uniqueItems": true
         },
         "force": {
+          "description": "Require this physical join method; compatible forbids are redundant.",
           "enum": ["hash", "merge", "nestloop"],
           "type": "string"
         },
         "memoize": {
+          "description": "force requires a nested loop with a Memoize inner child; forbid prohibits that child.",
           "enum": ["force", "forbid"],
           "type": "string"
         },
@@ -185,6 +187,7 @@
       ],
       "properties": {
         "forbid": {
+          "description": "Exclude exactly these physical methods after applying force. Compatible forbids are redundant. With force omitted, forbid=[index] alone is unsupported; forbid=[index,index_only] disables both, and forbid=[index_only] leaves ordinary indexes available. The remaining choices must be expressible by one native scan hint.",
           "items": {
             "enum": ["bitmap", "index", "index_only", "seq"],
             "type": "string"
@@ -194,6 +197,7 @@
           "uniqueItems": true
         },
         "force": {
+          "description": "Require this physical scan method. index and index_only are distinct; an ordinary-index fallback does not satisfy index_only.",
           "enum": ["bitmap", "index", "index_only", "seq"],
           "type": "string"
         },

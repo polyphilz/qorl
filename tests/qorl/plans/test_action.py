@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
+from itertools import combinations
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +10,7 @@ import pytest
 
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.exceptions import ActionError
-from qorl.plans.schemas import PlanAction
+from qorl.plans.schemas import AUTO, JoinMethod, PlanAction, ScanMethod
 
 TASK = {
     "relations": [
@@ -22,6 +24,33 @@ TASK = {
     ],
 }
 FIXTURES = Path(__file__).with_name("fixtures")
+LEADING = {"left": {"left": "a", "right": "b"}, "right": "c"}
+JOIN_NAMES = {"hash": "HashJoin", "merge": "MergeJoin", "nestloop": "NestLoop"}
+SCAN_NAMES = {
+    "seq": "SeqScan",
+    "index": "IndexScan",
+    "index_only": "IndexOnlyScan",
+    "bitmap": "BitmapScan",
+}
+AUTO_SCAN_HINTS = {
+    frozenset({"seq"}): "NoSeqScan",
+    frozenset({"index_only"}): "NoIndexOnlyScan",
+    frozenset({"bitmap"}): "NoBitmapScan",
+    frozenset({"index", "index_only"}): "NoIndexScan",
+    frozenset({"seq", "bitmap"}): "IndexOnlyScan",
+    frozenset({"seq", "index", "index_only"}): "BitmapScan",
+    frozenset({"seq", "index", "bitmap"}): "IndexOnlyScan",
+    frozenset({"seq", "index_only", "bitmap"}): "IndexScan",
+    frozenset({"index", "index_only", "bitmap"}): "SeqScan",
+}
+
+
+def subsets[MethodT: StrEnum](methods: type[MethodT]) -> list[tuple[MethodT, ...]]:
+    return [
+        subset
+        for size in range(len(methods) + 1)
+        for subset in combinations(methods, size)
+    ]
 
 
 def compile_raw(value: Any, catalog: TaskCatalog) -> tuple[dict[str, Any], str]:
@@ -39,6 +68,166 @@ class TestAction:
                 "c": {"table_c_pkey"},
             },
         )
+
+    @pytest.mark.parametrize("force", [AUTO, *JoinMethod])
+    @pytest.mark.parametrize("forbid", subsets(JoinMethod))
+    def test_normalizes_all_join_method_combinations(
+        self, force: str, forbid: tuple[JoinMethod, ...]
+    ) -> None:
+        raw = {
+            "version": 1,
+            "joins": [
+                {
+                    "relations": ["a", "b"],
+                    "force": force,
+                    "forbid": [method.value for method in forbid],
+                }
+            ],
+        }
+        if (
+            force in forbid
+            or len(forbid) == len(JoinMethod)
+            or (force == AUTO and not forbid)
+        ):
+            with pytest.raises(ActionError):
+                PlanAction.from_raw(raw, self.catalog)
+            return
+        action = PlanAction.from_raw(raw, self.catalog)
+        allowed = ({force} if force != AUTO else set(JOIN_NAMES)) - set(forbid)
+        assert action.joins[0].allowed_methods == allowed
+        expected = (
+            JOIN_NAMES[next(iter(allowed))]
+            if len(allowed) == 1
+            else "No" + JOIN_NAMES[forbid[0]]
+        )
+        assert action.compile() == f"/*+ {expected}(a b) */"
+
+    @pytest.mark.parametrize("force", [AUTO, *ScanMethod])
+    @pytest.mark.parametrize("forbid", subsets(ScanMethod))
+    def test_normalizes_all_scan_method_combinations(
+        self, force: str, forbid: tuple[ScanMethod, ...]
+    ) -> None:
+        indexes = (
+            ["table_a_value_idx"] if force in {"index", "index_only", "bitmap"} else []
+        )
+        raw = {
+            "version": 1,
+            "scans": [
+                {
+                    "relation": "a",
+                    "force": force,
+                    "forbid": [method.value for method in forbid],
+                    "indexes": indexes,
+                }
+            ],
+        }
+        expected = (
+            SCAN_NAMES[force]
+            if force != AUTO
+            else AUTO_SCAN_HINTS.get(frozenset(forbid))
+        )
+        if force in forbid or len(forbid) == len(ScanMethod) or expected is None:
+            with pytest.raises(ActionError):
+                PlanAction.from_raw(raw, self.catalog)
+            return
+        action = PlanAction.from_raw(raw, self.catalog)
+        allowed = ({force} if force != AUTO else set(SCAN_NAMES)) - set(forbid)
+        assert action.scans[0].allowed_methods == allowed
+        assert action.scans[0].indexes == indexes
+        arguments = " ".join(["a", *indexes])
+        assert action.compile() == f"/*+ {expected}({arguments}) */"
+
+    def test_forbid_index_alone_explains_the_backend_limitation(self) -> None:
+        with pytest.raises(ActionError) as caught:
+            PlanAction.from_raw(
+                {"version": 1, "scans": [{"relation": "a", "forbid": ["index"]}]},
+                self.catalog,
+            )
+        assert str(caught.value) == (
+            "scans[0].forbid [index] cannot be expressed by pg_hint_plan while preserving "
+            "the other scan choices; NoIndexScan also disables index_only"
+        )
+
+    @pytest.mark.parametrize(
+        "constraint", [{"force": "hash"}, {"memoize": "forbid"}, {"memoize": "force"}]
+    )
+    def test_join_and_memoize_targets_must_exist_in_leading(
+        self, constraint: dict[str, str]
+    ) -> None:
+        with pytest.raises(
+            ActionError,
+            match=r"joins\[0\].relations must be an internal subtree of leading",
+        ):
+            PlanAction.from_raw(
+                {
+                    "version": 1,
+                    "leading": LEADING,
+                    "joins": [{"relations": ["b", "c"], **constraint}],
+                },
+                self.catalog,
+            )
+
+    def test_rows_target_does_not_need_to_exist_in_leading(self) -> None:
+        action = PlanAction.from_raw(
+            {
+                "version": 1,
+                "leading": LEADING,
+                "row_corrections": [
+                    {"relations": ["b", "c"], "mode": "absolute", "value": 1}
+                ],
+            },
+            self.catalog,
+        )
+        assert action.compile() == "/*+ Leading(((a b) c)) Rows(b c #1) */"
+
+    @pytest.mark.parametrize("force", [AUTO, *JoinMethod])
+    @pytest.mark.parametrize("forbid", subsets(JoinMethod))
+    def test_memoize_force_requires_an_allowed_nested_loop(
+        self, force: str, forbid: tuple[JoinMethod, ...]
+    ) -> None:
+        raw = {
+            "version": 1,
+            "joins": [
+                {
+                    "relations": ["a", "b"],
+                    "force": force,
+                    "forbid": [method.value for method in forbid],
+                    "memoize": "force",
+                }
+            ],
+        }
+        if force in forbid or "nestloop" in forbid or force not in {AUTO, "nestloop"}:
+            with pytest.raises(ActionError):
+                PlanAction.from_raw(raw, self.catalog)
+            return
+        action = PlanAction.from_raw(raw, self.catalog)
+        assert action.compile().endswith("Memoize(a b) */")
+
+    def test_memoize_force_conflicts_with_disabled_memoization(self) -> None:
+        with pytest.raises(
+            ActionError, match="forces memoization and disables enable_memoize"
+        ):
+            PlanAction.from_raw(
+                {
+                    "version": 1,
+                    "joins": [{"relations": ["a", "b"], "memoize": "force"}],
+                    "settings": {"enable_memoize": False},
+                },
+                self.catalog,
+            )
+
+    def test_inferred_force_conflicts_with_disabled_method(self) -> None:
+        with pytest.raises(
+            ActionError, match="forces nestloop and disables enable_nestloop"
+        ):
+            PlanAction.from_raw(
+                {
+                    "version": 1,
+                    "joins": [{"relations": ["a", "b"], "forbid": ["hash", "merge"]}],
+                    "settings": {"enable_nestloop": False},
+                },
+                self.catalog,
+            )
 
     def test_rejects_non_string_forbidden_methods_as_an_action_error(self) -> None:
         with pytest.raises(
@@ -103,8 +292,8 @@ class TestAction:
         )
         assert normalized["joins"][0]["relations"] == ["b", "c"]
         assert (
-            hint == "/*+ MergeJoin(b c) NoHashJoin(b c) NoMemoize(b c) "
-            "IndexScan(a table_a_value_idx) NoSeqScan(a) "
+            hint == "/*+ MergeJoin(b c) NoMemoize(b c) "
+            "IndexScan(a table_a_value_idx) "
             "DisableIndex(b table_b_pkey) "
             "Rows(b c *10) Parallel(c 2 hard) "
             "Set(enable_hashagg off) Set(random_page_cost 1.1) */"

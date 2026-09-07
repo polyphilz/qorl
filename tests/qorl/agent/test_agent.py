@@ -303,8 +303,8 @@ class TestQoAgent:
             for request in client.requests
         ]
         assert digests == [
-            "5f54f61f7d391c117a84d74633e749faa7b46335a71b504f53f210528ed99e69",
-            "76915dab0094f6bd137a9afca95f6302151e992c148fe4a919af77671fd607e2",
+            "1b7c03814b5e4c8786d7161bca5bdd13cee71a681726cc8b4c3c38ad0142be76",
+            "02313a52018d3e46f371b367c1cb5d0768c85c8bdd47bb1745c1ae128a62c860",
         ]
 
     def test_protocol_exposes_a_one_candidate_training_budget(
@@ -527,7 +527,7 @@ class TestQoAgent:
         )
         trace = QoAgentPolicy(config(), client).search(evaluator, settings=settings)
 
-        assert trace["agent_interface_version"] == 3
+        assert trace["agent_interface_version"] == 4
         observation = trace["initial_observation"]
         assert observation["candidate_attempts"] == 1
         assert observation["turn_budget"]["total_model_turns"] == 6

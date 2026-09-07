@@ -169,6 +169,7 @@ def compact_plan(plan: dict[str, Any]) -> dict[str, Any]:
 def verify_action(
     action: dict[str, Any], plan: dict[str, Any], stderr: str
 ) -> Verification:
+    """Check requested physical methods, including strict index-only requirements, and hint use."""
     errors: list[str] = []
     diagnostics = parse_hint_diagnostics(stderr)
     if diagnostics is None and len(action) > 1:

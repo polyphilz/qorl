@@ -19,7 +19,7 @@ from qorl.plans.schemas import (
     ScanMethod,
 )
 
-SAMPLER_VERSION = 3
+SAMPLER_VERSION = 4
 
 
 class SamplerFamily(StrEnum):

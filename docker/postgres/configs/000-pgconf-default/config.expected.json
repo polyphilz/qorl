@@ -4,7 +4,7 @@
   "postgresql": {
     "server_version_num": "180006",
     "extension_name": "pg_hint_plan",
-    "extension_version": "1.8.0",
+    "extension_version": "1.8.1",
     "data_checksums": "on",
     "database_encoding": "UTF8",
     "database_collation": "C",

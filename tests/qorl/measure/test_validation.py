@@ -122,6 +122,31 @@ def test_leading_action_to_compiled_hint_to_novel_plan_without_execution() -> No
     ]
 
 
+def test_normalized_join_hint_reaches_validation_and_candidate_feedback() -> None:
+    worker = Worker(
+        plain(), plain(diagnostics=USED_HINT.replace("Leading((b a))", "HashJoin(a b)"))
+    )
+    run = evaluator(worker)
+    run.start()
+    candidate = run.evaluate(
+        {
+            "version": 1,
+            "joins": [{"relations": ["b", "a"], "force": "hash", "forbid": ["merge"]}],
+        }
+    )
+    assert candidate.compiled_hint == "/*+ HashJoin(a b) */"
+    assert candidate.action_valid and candidate.constraints_satisfied
+    assert candidate.feedback()["constraints_satisfied"] is True
+    assert (
+        candidate.pg_hint_plan is not None
+        and candidate.pg_hint_plan["duplicate"] == "(none)"
+    )
+    assert worker.calls == [
+        ExplainCall(SQL, TIMEOUT_MS, False, ""),
+        ExplainCall(SQL, TIMEOUT_MS, False, candidate.compiled_hint),
+    ]
+
+
 def test_malformed_attempt_consumes_id_but_not_sql_or_fake_plan_evidence() -> None:
     worker = Worker(plain(), plain())
     run = evaluator(worker)
@@ -139,6 +164,31 @@ def test_malformed_attempt_consumes_id_but_not_sql_or_fake_plan_evidence() -> No
     assert duplicate.duplicate_of == "default"
     assert duplicate.structural_duplicate_of == "default"
     assert not duplicate.structurally_novel
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {"version": 1, "scans": [{"relation": "a", "forbid": ["index"]}]},
+        {
+            "version": 1,
+            "joins": [{"relations": ["a", "b"], "force": "hash", "memoize": "force"}],
+        },
+    ],
+)
+def test_impossible_constraints_are_rejected_before_sql(
+    action: dict[str, JsonValue],
+) -> None:
+    worker = Worker(plain())
+    run = evaluator(worker)
+    run.start()
+    candidate = run.evaluate(action)
+    assert not candidate.action_valid and not candidate.constraints_satisfied
+    assert candidate.compiled_hint == ""
+    assert candidate.plain_explain is None
+    assert candidate.errors_or_diagnostics
+    assert candidate.attempts_remaining == ATTEMPT_LIMIT - 1
+    assert worker.calls == [ExplainCall(SQL, TIMEOUT_MS, False, "")]
 
 
 def test_unused_hint_preserves_postgres_evidence_but_is_not_accepted() -> None:

@@ -10,7 +10,7 @@ from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.plans.schemas import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
 INSPECTION_TURNS_PER_ALIAS = 3
-AGENT_INTERFACE_VERSION = 3
+AGENT_INTERFACE_VERSION = 4
 
 
 @dataclass(frozen=True)

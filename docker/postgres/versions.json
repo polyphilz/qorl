@@ -1,5 +1,5 @@
 {
-  "recorded_at": "2026-09-04",
+  "recorded_at": "2026-09-07",
   "target_platform": "linux/amd64",
   "postgresql": {
     "version": "18.6",
@@ -11,9 +11,10 @@
     "server_dev_package": "postgresql-server-dev-18=18.6-1.pgdg12+2"
   },
   "pg_hint_plan": {
-    "version": "1.8.0",
-    "tag": "REL18_1_8_0",
-    "tag_commit": "88437bde5947e7bc40719e8b82eb8be2b39d71e8",
-    "source_archive_sha256": "c3d8aa1e468b6b8371fb09d971152b9ac1610118fbd0c76c7e308e88a1cc0ef7"
+    "version": "1.8.1",
+    "branch": "PG18",
+    "commit": "5af0c526b26cbc8be471898ef18b2d403cf9503c",
+    "source_archive_url": "https://codeload.github.com/ossc-db/pg_hint_plan/tar.gz/5af0c526b26cbc8be471898ef18b2d403cf9503c",
+    "source_archive_sha256": "443ea3bdcd3245b128b37c3e5c9410f58004e6b5fc9aac33acbd3f2789fde894"
   }
 }

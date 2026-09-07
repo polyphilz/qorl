@@ -32,6 +32,34 @@ class ScanMethod(StrEnum):
     BITMAP = "bitmap"
 
 
+# Each key is the complete set of permitted physical methods for one target.
+JOIN_METHOD_HINTS: dict[frozenset[JoinMethod], str] = {
+    frozenset({JoinMethod.HASH}): "HashJoin",
+    frozenset({JoinMethod.MERGE}): "MergeJoin",
+    frozenset({JoinMethod.NESTLOOP}): "NestLoop",
+    frozenset({JoinMethod.MERGE, JoinMethod.NESTLOOP}): "NoHashJoin",
+    frozenset({JoinMethod.HASH, JoinMethod.NESTLOOP}): "NoMergeJoin",
+    frozenset({JoinMethod.HASH, JoinMethod.MERGE}): "NoNestLoop",
+}
+SCAN_METHOD_HINTS: dict[frozenset[ScanMethod], str] = {
+    frozenset({ScanMethod.SEQ}): "SeqScan",
+    frozenset({ScanMethod.INDEX}): "IndexScan",
+    frozenset({ScanMethod.INDEX_ONLY}): "IndexOnlyScan",
+    frozenset({ScanMethod.BITMAP}): "BitmapScan",
+    frozenset({ScanMethod.INDEX, ScanMethod.INDEX_ONLY}): "IndexOnlyScan",
+    frozenset({ScanMethod.SEQ, ScanMethod.BITMAP}): "NoIndexScan",
+    frozenset(
+        {ScanMethod.INDEX, ScanMethod.INDEX_ONLY, ScanMethod.BITMAP}
+    ): "NoSeqScan",
+    frozenset({ScanMethod.SEQ, ScanMethod.INDEX, ScanMethod.BITMAP}): "NoIndexOnlyScan",
+    frozenset(
+        {ScanMethod.SEQ, ScanMethod.INDEX, ScanMethod.INDEX_ONLY}
+    ): "NoBitmapScan",
+}
+# IndexOnlyScan permits an ordinary-index fallback. Physical verification rejects
+# that fallback when the complete constraint allows only index_only.
+
+
 class MemoizeMode(StrEnum):
     AUTO = "auto"
     FORCE = "force"
@@ -248,12 +276,25 @@ class JoinConstraint(ActionModel):
         min_length=MIN_JOIN_RELATIONS,
         json_schema_extra={"uniqueItems": True},
     )
-    force: JoinForce = AUTO
+    force: JoinForce = Field(
+        default=AUTO,
+        description="Require this physical join method; compatible forbids are redundant.",
+    )
     forbid: JoinForbid = Field(
         default_factory=list[JoinMethod],
         json_schema_extra={"minItems": 1, "uniqueItems": True},
     )
-    memoize: MemoizeRequest = MemoizeMode.AUTO
+    memoize: MemoizeRequest = Field(
+        default=MemoizeMode.AUTO,
+        description="force requires a nested loop with a Memoize inner child; forbid prohibits that child.",
+    )
+
+    @property
+    def allowed_methods(self) -> frozenset[JoinMethod]:
+        """Normalize the full force/forbid constraint without changing its wire form."""
+        if isinstance(self.force, JoinMethod):
+            return frozenset({self.force}) - set(self.forbid)
+        return frozenset(JoinMethod) - set(self.forbid)
 
     @field_validator("force", mode="before")
     @classmethod
@@ -281,6 +322,11 @@ class JoinConstraint(ActionModel):
             raise ValueError("forbid cannot disable every join method")
         if self.force in forbidden:
             raise ValueError(f"both forces and forbids {self.force}")
+        if (
+            self.memoize == MemoizeMode.FORCE
+            and JoinMethod.NESTLOOP not in self.allowed_methods
+        ):
+            raise ValueError("memoize force requires nestloop to remain allowed")
         if self.force == AUTO and not forbidden and self.memoize == MemoizeMode.AUTO:
             raise ValueError("does not request any steering")
         object.__setattr__(self, "relations", relations)
@@ -302,9 +348,18 @@ class ScanConstraint(ActionModel):
     )
 
     relation: str
-    force: ScanForce = AUTO
+    force: ScanForce = Field(
+        default=AUTO,
+        description="Require this physical scan method. index and index_only are distinct; an ordinary-index fallback does not satisfy index_only.",
+    )
     forbid: ScanForbid = Field(
         default_factory=list[ScanMethod],
+        description=(
+            "Exclude exactly these physical methods after applying force. Compatible forbids are redundant. "
+            "With force omitted, forbid=[index] alone is unsupported; forbid=[index,index_only] "
+            "disables both, and forbid=[index_only] leaves ordinary indexes available. "
+            "The remaining choices must be expressible by one native scan hint."
+        ),
         json_schema_extra={"minItems": 1, "uniqueItems": True},
     )
     indexes: list[str] = Field(
@@ -312,6 +367,13 @@ class ScanConstraint(ActionModel):
         description="Use only with force=index, index_only, or bitmap.",
         json_schema_extra={"uniqueItems": True},
     )
+
+    @property
+    def allowed_methods(self) -> frozenset[ScanMethod]:
+        """Intersect force and forbids before testing native-hint representability."""
+        if isinstance(self.force, ScanMethod):
+            return frozenset({self.force}) - set(self.forbid)
+        return frozenset(ScanMethod) - set(self.forbid)
 
     @field_validator("force", mode="before")
     @classmethod
@@ -348,6 +410,16 @@ class ScanConstraint(ActionModel):
             raise ValueError("indexes requires an index-based forced scan")
         if self.force == AUTO and not forbidden:
             raise ValueError("does not request any steering")
+        if self.allowed_methods not in SCAN_METHOD_HINTS:
+            if forbidden == {ScanMethod.INDEX}:
+                raise ValueError(
+                    "forbid [index] cannot be expressed by pg_hint_plan while preserving "
+                    "the other scan choices; NoIndexScan also disables index_only"
+                )
+            raise ValueError(
+                "forbid cannot be expressed by one pg_hint_plan scan hint while preserving "
+                f"the remaining choices: {sorted(method.value for method in self.allowed_methods)}"
+            )
         object.__setattr__(self, "relation", relation)
         object.__setattr__(self, "indexes", indexes)
         object.__setattr__(self, "forbid", sorted(self.forbid, key=str))
@@ -586,6 +658,13 @@ class PlanAction(ActionModel):
         self._reject_duplicate_relations(self.scans, "scans")
         self._reject_duplicate_relations(self.disabled_indexes, "disabled_indexes")
         self._reject_duplicate_relations(self.parallel, "parallel")
+        if self.leading is not None:
+            subtrees = _leading_subtrees(self.leading)
+            for index, join in enumerate(self.joins):
+                if frozenset(join.relations) not in subtrees:
+                    raise ValueError(
+                        f"joins[{index}].relations must be an internal subtree of leading"
+                    )
         self._validate_cross_family_conflicts(catalog)
 
         object.__setattr__(self, "joins", sorted(self.joins, key=lambda x: x.relations))
@@ -638,25 +717,34 @@ class PlanAction(ActionModel):
             ScanMethod.BITMAP: "enable_bitmapscan",
         }
         for item in self.joins:
+            forced = (
+                next(iter(item.allowed_methods))
+                if len(item.allowed_methods) == 1
+                else AUTO
+            )
             setting = (
-                join_setting.get(item.force)
-                if isinstance(item.force, JoinMethod)
-                else None
+                join_setting.get(forced) if isinstance(forced, JoinMethod) else None
             )
             if setting and settings.get(setting) is False:
+                raise ValueError(f"action both forces {forced} and disables {setting}")
+            if (
+                item.memoize == MemoizeMode.FORCE
+                and self.settings.enable_memoize is False
+            ):
                 raise ValueError(
-                    f"action both forces {item.force} and disables {setting}"
+                    "action both forces memoization and disables enable_memoize"
                 )
         for item in self.scans:
+            forced = (
+                next(iter(item.allowed_methods))
+                if len(item.allowed_methods) == 1
+                else AUTO
+            )
             setting = (
-                scan_setting.get(item.force)
-                if isinstance(item.force, ScanMethod)
-                else None
+                scan_setting.get(forced) if isinstance(forced, ScanMethod) else None
             )
             if setting and settings.get(setting) is False:
-                raise ValueError(
-                    f"action both forces {item.force} and disables {setting}"
-                )
+                raise ValueError(f"action both forces {forced} and disables {setting}")
             disabled = next(
                 (
                     set(target.indexes)
@@ -670,8 +758,7 @@ class PlanAction(ActionModel):
                     f"action both forces and disables an index on {item.relation}"
                 )
             if (
-                item.force
-                in {ScanMethod.INDEX, ScanMethod.INDEX_ONLY, ScanMethod.BITMAP}
+                forced in {ScanMethod.INDEX, ScanMethod.INDEX_ONLY, ScanMethod.BITMAP}
                 and disabled
                 and disabled == set(catalog.indexes.get(item.relation, ()))
             ):
@@ -702,33 +789,18 @@ class PlanAction(ActionModel):
         if self.leading is not None:
             hints.append(f"Leading({_render_leading(self.leading)})")
 
-        join_names = {
-            JoinMethod.HASH: "HashJoin",
-            JoinMethod.MERGE: "MergeJoin",
-            JoinMethod.NESTLOOP: "NestLoop",
-        }
         for join in self.joins:
             relations = " ".join(join.relations)
-            if join.force != AUTO:
-                hints.append(f"{join_names[join.force]}({relations})")
-            for method in join.forbid:
-                hints.append(f"No{join_names[method]}({relations})")
+            method_hint = JOIN_METHOD_HINTS.get(join.allowed_methods)
+            if method_hint is not None:
+                hints.append(f"{method_hint}({relations})")
             if join.memoize != MemoizeMode.AUTO:
                 prefix = "" if join.memoize == MemoizeMode.FORCE else "No"
                 hints.append(f"{prefix}Memoize({relations})")
 
-        scan_names = {
-            ScanMethod.SEQ: "SeqScan",
-            ScanMethod.INDEX: "IndexScan",
-            ScanMethod.INDEX_ONLY: "IndexOnlyScan",
-            ScanMethod.BITMAP: "BitmapScan",
-        }
         for scan in self.scans:
             arguments = " ".join([scan.relation, *scan.indexes])
-            if scan.force != AUTO:
-                hints.append(f"{scan_names[scan.force]}({arguments})")
-            for method in scan.forbid:
-                hints.append(f"No{scan_names[method]}({scan.relation})")
+            hints.append(f"{SCAN_METHOD_HINTS[scan.allowed_methods]}({arguments})")
 
         for item in self.disabled_indexes:
             arguments = " ".join([item.relation, *item.indexes])
@@ -862,6 +934,21 @@ def _render_leading(tree: JoinNode) -> str:
         return f"({render(node.left)} {render(node.right)})"
 
     return render(tree)
+
+
+def _leading_subtrees(tree: JoinNode) -> set[frozenset[str]]:
+    """Collect internal join targets, excluding individual alias leaves."""
+    subtrees: set[frozenset[str]] = set()
+
+    def visit(node: str | JoinNode) -> frozenset[str]:
+        if isinstance(node, str):
+            return frozenset({node})
+        relations = visit(node.left) | visit(node.right)
+        subtrees.add(relations)
+        return relations
+
+    visit(tree)
+    return subtrees
 
 
 def _strip_schema_presentation(value: Any) -> Any:

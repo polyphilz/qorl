@@ -6,6 +6,7 @@ import os
 import queue
 import re
 import subprocess
+import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
@@ -25,6 +26,8 @@ from qorl.worker_pool.schemas import (
 )
 
 STOP_TIMEOUT_SECONDS = 60
+STARTUP_TIMEOUT_SECONDS = 60
+STARTUP_POLL_SECONDS = 1
 logger = logging.getLogger(__name__)
 
 
@@ -253,8 +256,38 @@ test ! -e "/target/$2/postmaster.pid"
         self._parallel(self._start)
 
     def _start(self, slot: WorkerSlot) -> None:
+        """Wait for PostgreSQL, update the restored extension, then check its config."""
+        self.compose_command(slot, ["up", "--detach", "--no-build", "postgres"])
+        deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+        while self.execute(
+            [
+                "docker",
+                "exec",
+                slot.container_id,
+                "pg_isready",
+                "--host=127.0.0.1",
+                "--quiet",
+            ],
+            check=False,
+        ).returncode:
+            if time.monotonic() >= deadline:
+                raise ContainerError(
+                    f"PostgreSQL startup timed out: {slot.container_id}"
+                )
+            time.sleep(STARTUP_POLL_SECONDS)
+        # Physical archives retain pg_extension's catalog version, not the image's.
+        slot.client.admin_sql("ALTER EXTENSION pg_hint_plan UPDATE;")
         self.compose_command(
-            slot, ["up", "--detach", "--wait", "--no-build", "postgres"]
+            slot,
+            [
+                "up",
+                "--detach",
+                "--wait",
+                "--wait-timeout",
+                str(STARTUP_TIMEOUT_SECONDS),
+                "--no-build",
+                "postgres",
+            ],
         )
         self.execute(["docker", "exec", slot.container_id, "qorl-assert-config"])
 

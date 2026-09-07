@@ -9,6 +9,7 @@ import pytest
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.catalog import TaskCatalog
 from qorl.postgres.config import PostgresConfig
+from qorl.postgres.exceptions import PostgresError
 from qorl.postgres.schemas import PostgresIndexes
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool import containers
@@ -122,6 +123,108 @@ def test_compose_receives_only_the_selected_configs(pool, docker_commands):
         assert environment.config_file == pool.postgres_config.pg_conf_path
         assert environment.expected_file == pool.postgres_config.expected_path
         assert command[5] == str(REPOSITORY_ROOT / "compose.yaml")
+
+
+def test_start_updates_extension_before_waiting_for_config_health(
+    pool, docker_commands
+):
+    pool.create()
+    pool.start()
+
+    for slot in pool.workers:
+        startup = [
+            (command, options)
+            for command, options in docker_commands
+            if slot.container_id in command or slot.compose_project_name in command
+        ]
+        ready = next(
+            i for i, (command, _) in enumerate(startup) if "pg_isready" in command
+        )
+        update = next(
+            i
+            for i, (_, options) in enumerate(startup)
+            if options.get("stdin") == "ALTER EXTENSION pg_hint_plan UPDATE;"
+        )
+        health = next(
+            i for i, (command, _) in enumerate(startup) if "--wait" in command
+        )
+        check = next(
+            i
+            for i, (command, _) in enumerate(startup)
+            if command[-1] == "qorl-assert-config"
+        )
+        assert ready < update < health < check
+        assert "--host=127.0.0.1" in startup[ready][0]
+
+
+def test_start_polls_until_postgres_accepts_tcp_connections(pool, monkeypatch):
+    compose = Mock()
+    not_ready = subprocess.CompletedProcess([], 1, "", "")
+    ready = subprocess.CompletedProcess([], 0, "", "")
+    execute = Mock(side_effect=[not_ready, ready, ready])
+    update = Mock()
+    sleep = Mock()
+    slot = pool.workers[0]
+    monkeypatch.setattr(pool, "compose_command", compose)
+    monkeypatch.setattr(pool, "execute", execute)
+    monkeypatch.setattr(slot.client, "admin_sql", update)
+    monkeypatch.setattr(containers.time, "sleep", sleep)
+
+    pool._start(slot)
+
+    sleep.assert_called_once_with(containers.STARTUP_POLL_SECONDS)
+    update.assert_called_once_with("ALTER EXTENSION pg_hint_plan UPDATE;")
+    assert execute.call_args_list[0].args == execute.call_args_list[1].args
+    assert execute.call_args.args[0][-1] == "qorl-assert-config"
+
+
+def test_startup_timeout_does_not_attempt_extension_update(pool, monkeypatch):
+    compose = Mock()
+    execute = Mock(return_value=subprocess.CompletedProcess([], 1, "", ""))
+    update = Mock()
+    slot = pool.workers[0]
+    monkeypatch.setattr(pool, "compose_command", compose)
+    monkeypatch.setattr(pool, "execute", execute)
+    monkeypatch.setattr(slot.client, "admin_sql", update)
+    monkeypatch.setattr(
+        containers.time,
+        "monotonic",
+        Mock(side_effect=[0, containers.STARTUP_TIMEOUT_SECONDS]),
+    )
+
+    with pytest.raises(ContainerError, match="PostgreSQL startup timed out"):
+        pool._start(slot)
+
+    update.assert_not_called()
+    compose.assert_called_once_with(slot, ["up", "--detach", "--no-build", "postgres"])
+
+
+def test_extension_update_failure_cleans_owned_workers(
+    pool, docker_commands, tmp_path, monkeypatch
+):
+    archive = tmp_path / "imdb.tar.gz"
+    archive.write_bytes(b"archive")
+    execute = pool.execute
+
+    def fail_update(command, **kwargs):
+        if kwargs.get("stdin") == "ALTER EXTENSION pg_hint_plan UPDATE;":
+            return subprocess.CompletedProcess(
+                command, 1, "", "extension update failed"
+            )
+        return execute(command, **kwargs)
+
+    monkeypatch.setattr(pool, "execute", fail_update)
+    monkeypatch.setattr(containers, "ContainerPool", Mock(return_value=pool))
+    with pytest.raises(PostgresError, match="extension update failed"):
+        start_pool(
+            "failed-update",
+            archive,
+            postgres_config=pool.postgres_config,
+            pool_config=pool.pool_config,
+        )
+
+    assert not any(slot.created for slot in pool.workers)
+    assert not any("--wait" in command for command, _ in docker_commands)
 
 
 def test_sql_client_executes_inside_its_assigned_container(pool, monkeypatch):

@@ -62,5 +62,5 @@ class TestRandomPolicy:
         assert observed == set(FAMILY_WEIGHTS)
 
     def test_sampler_uses_the_current_action_space(self) -> None:
-        assert SAMPLER_VERSION == 3
+        assert SAMPLER_VERSION == 4
         assert "join_collapse_limit" not in SETTING_VALUES

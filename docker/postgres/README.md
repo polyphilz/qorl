@@ -1,26 +1,17 @@
 # PostgreSQL image
 
-This directory builds the database runtime shared by every QORL worker. It
-contains PostgreSQL 18.6, `pg_hint_plan` 1.8.0, and the first-start role
-bootstrap. It contains no workload data, Python code, model weights, or
-host-specific resource shape.
+Builds the PostgreSQL image used by QORL workers, including database-role setup.
+Workload data is loaded separately.
 
-`configs/NNN-pgconf*/` holds the selectable PostgreSQL configurations. Each
-directory contains `pg.conf`, its machine-readable expectations, and a short
-description of its differences from stock PostgreSQL. Reusable validation and
-state-capture commands live in `scripts/`.
+PostgreSQL is pinned to 18.6; `pg_hint_plan` to PG18 commit `5af0c526b26c`
+(version 1.8.1). Full source pins and checksums are in [versions.json](versions.json).
 
-Create the next numbered config as a copy of the default with:
+`configs/` contains selectable PostgreSQL settings and their expected values.
+`scripts/` contains config creation, validation, and state-capture helpers.
+Create a config by copying the default with:
 
 ```bash
 docker/postgres/scripts/create-new-config.sh
 ```
 
-The script assigns the next three-digit prefix, updates the copied config ID,
-and leaves the new config ready for its deliberate settings edits.
-
-Exact upstream versions, commits, and checksums live in `versions.json`. The
-Dockerfile also records them as image labels and verifies the compiled
-extension before the image is accepted.
-
-Container resources are defined in [`docker/worker_pool/configs/`](../worker_pool/README.md).
+Container counts and resources are configured separately in [worker_pool/](../worker_pool/README.md).
