@@ -14,16 +14,17 @@ import pytest
 from qorl.adapters.schemas import AdapterConfig
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import ToolName
-from qorl.exceptions import ModelError
 from qorl.experiment.create import latest_template
 from qorl.experiment.schemas import (
     EvaluationExperimentConfig,
     ExperimentMethod,
     load_config,
 )
+from qorl.model.exceptions import ModelError
 from qorl.model.schemas import (
     AdvertisedModel,
     GenerationRequest,
+    LocalDecodingSettings,
     LocalServerIdentity,
     Message,
     MessageRole,
@@ -40,6 +41,7 @@ from qorl.serving.local import (
 )
 
 ADAPTER_RANK = 16
+LIVE_REASONING_OUTPUT_TOKENS = 16_384
 
 
 @pytest.fixture
@@ -80,7 +82,10 @@ def adapter(config: EvaluationExperimentConfig, tmp_path: Path) -> Path:
 def test_command_uses_selected_weights_context_gpu_count_and_parsers(
     config: EvaluationExperimentConfig, thinking: bool
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     decoding = config.decoding.model_copy(update={"thinking": thinking})
     command = server_command(config.model, decoding, config.serving, [0, 1])
     assert command[:3] == [sys.executable, "-m", "vllm.entrypoints.openai.api_server"]
@@ -102,7 +107,10 @@ def test_adapter_is_applied_to_its_verified_training_base(
     filename: str,
     sharded: bool,
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     model = config.model.model_copy(update={"adapter_path": adapter})
     base = Path(model.name_or_path)
     (base / "model.safetensors").unlink()
@@ -131,7 +139,10 @@ def test_adapter_is_applied_to_its_verified_training_base(
 def test_unconfigured_parser_is_omitted_when_thinking_is_off(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     command = server_command(
         config.model,
         config.decoding.model_copy(update={"thinking": False}),
@@ -144,7 +155,10 @@ def test_unconfigured_parser_is_omitted_when_thinking_is_off(
 def test_wrong_base_is_rejected_before_any_server_starts(
     config: EvaluationExperimentConfig, adapter: Path, tmp_path: Path
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     other = tmp_path / "wrong-base"
     other.mkdir()
     (other / "config.json").write_text("{}")
@@ -161,7 +175,10 @@ def test_wrong_base_is_rejected_before_any_server_starts(
 def test_command_resolves_only_the_pinned_hf_cache_revision(
     config: EvaluationExperimentConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     cache = tmp_path / "cache"
     snapshot = cache / "models--organization--model/snapshots/pinned-revision"
     snapshot.mkdir(parents=True)
@@ -186,7 +203,10 @@ def test_command_resolves_only_the_pinned_hf_cache_revision(
 def test_invalid_gpu_allocation_is_rejected(
     config: EvaluationExperimentConfig, gpu_ids: list[int]
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     with pytest.raises(ValueError, match="GPU IDs"):
         server_command(config.model, config.decoding, config.serving, gpu_ids)
 
@@ -194,7 +214,10 @@ def test_invalid_gpu_allocation_is_rejected(
 def test_thinking_requires_an_explicit_parser(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     with pytest.raises(ValueError, match="reasoning_parser"):
         server_command(
             config.model,
@@ -207,7 +230,10 @@ def test_thinking_requires_an_explicit_parser(
 def test_hosted_model_cannot_launch_a_local_server(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     with pytest.raises(ValueError, match="hosted models"):
         server_command(
             config.model.model_copy(update={"provider": ModelProvider.OPENAI}),
@@ -232,7 +258,7 @@ def test_server_scope_cleans_up_and_checks_real_advertised_paths(
             update={"model": config.model.model_copy(update={"adapter_path": adapter})}
         )
     assert (
-        config.decoding is not None
+        isinstance(config.decoding, LocalDecodingSettings)
         and config.serving is not None
         and config.model.base_url is not None
     )
@@ -295,7 +321,7 @@ def test_connection_cannot_point_to_another_server(
     config: EvaluationExperimentConfig, tmp_path: Path, endpoint: str
 ) -> None:
     assert (
-        config.decoding is not None
+        isinstance(config.decoding, LocalDecodingSettings)
         and config.serving is not None
         and config.model.base_url is not None
     )
@@ -313,9 +339,11 @@ def test_connection_cannot_point_to_another_server(
 
 
 @pytest.mark.parametrize("with_adapter", [False, True], ids=["base", "adapter"])
-def test_live_thinking_off_completes_zero_argument_terminal_tools(
+@pytest.mark.parametrize("thinking", [False, True], ids=["thinking-off", "thinking-on"])
+def test_live_thinking_modes_complete_and_preserve_terminal_tools(
     tmp_path: Path,
     with_adapter: bool,
+    thinking: bool,
     record_property: Callable[[str, str], None],
 ) -> None:
     """Opt in with QORL_TEST_MODEL_PATH and, for the adapter case, QORL_TEST_ADAPTER_PATH."""
@@ -327,7 +355,10 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
         )
     config = load_config(latest_template(ExperimentMethod.EVAL))
     assert isinstance(config, EvaluationExperimentConfig)
-    assert config.decoding is not None and config.serving is not None
+    assert (
+        isinstance(config.decoding, LocalDecodingSettings)
+        and config.serving is not None
+    )
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
@@ -339,7 +370,15 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
             "base_url": f"http://127.0.0.1:{port}/v1",
         }
     )
-    decoding = config.decoding.model_copy(update={"thinking": False, "temperature": 0})
+    decoding = config.decoding.model_copy(
+        update={
+            "thinking": thinking,
+            "temperature": 0,
+            "max_tokens": LIVE_REASONING_OUTPUT_TOKENS
+            if thinking
+            else config.decoding.max_tokens,
+        }
+    )
     serving = config.serving.model_copy(update={"host": "127.0.0.1", "port": port})
     gpu_ids = [int(os.environ.get("QORL_TEST_GPU_ID", "0"))]
     with serve_local_model(
@@ -347,6 +386,7 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
     ) as client:
         assert client.identity is not None
         record_property("server_identity", client.identity.model_dump_json())
+        history: list[Message] = []
         for name in (ToolName.KEEP_DEFAULT, ToolName.FINISH):
             tool = next(
                 ToolDefinition.model_validate(item)
@@ -356,10 +396,11 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
             response = client.generate(
                 GenerationRequest(
                     messages=[
+                        *history,
                         Message(
                             role=MessageRole.USER,
                             content=f"Call {name.value} now with no arguments.",
-                        )
+                        ),
                     ],
                     tools=[tool],
                     seed=0,
@@ -369,12 +410,13 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
             (tmp_path / f"{name.value}.json").write_text(evidence)
             record_property(name.value, evidence)
             assert response.request["chat_template_kwargs"] == {
-                "enable_thinking": False
+                "enable_thinking": thinking
             }
             assert not response.truncated
             assert response.finish_reason == "tool_calls"
-            assert response.usage.reasoning_tokens == 0
-            assert not (response.message.reasoning_content or "").strip()
+            if not thinking:
+                assert response.usage.reasoning_tokens == 0
+                assert not (response.message.reasoning_content or "").strip()
             assert response.usage.completion_tokens is not None
             assert response.usage.completion_tokens < response.requested_max_tokens
             assert response.message.tool_calls is not None
@@ -382,3 +424,24 @@ def test_live_thinking_off_completes_zero_argument_terminal_tools(
             call = response.message.tool_calls[0]
             assert call.function.name == name.value
             assert json.loads(call.function.arguments) == {}
+            if history and history[1].reasoning_content is not None:
+                messages = response.request["messages"]
+                assert isinstance(messages, list)
+                previous = messages[1]
+                assert isinstance(previous, dict)
+                assert previous["reasoning"] == history[1].reasoning_content
+            history.extend(
+                [
+                    Message(
+                        role=MessageRole.USER,
+                        content=f"Call {name.value} now with no arguments.",
+                    ),
+                    response.message,
+                    Message(
+                        role=MessageRole.TOOL,
+                        tool_call_id=call.id,
+                        name=name.value,
+                        content='{"status":"completed"}',
+                    ),
+                ]
+            )

@@ -10,11 +10,6 @@ from qorl.postgres.schemas import PostgresSettings
 TURN_BUDGET_FIELD = "_turn_budget"
 
 
-class PolicyType(StrEnum):
-    RANDOM_STRUCTURED_ACTION = "random_structured_action"
-    QO_AGENT = "qo_agent"
-
-
 class ToolName(StrEnum):
     DESCRIBE_TABLE = "describe_table"
     LIST_INDEXES = "list_indexes"
@@ -32,7 +27,7 @@ class StopReason(StrEnum):
     MODEL_FINISH = "model_finish"
     MODEL_KEEP_DEFAULT = "model_keep_default"
     CONTEXT_BUDGET = "context_budget"
-    MISSING_TOKEN_USAGE = "missing_token_usage"
+    MODEL_OUTPUT_LIMIT = "model_output_limit"
 
 
 TERMINAL_STOP_REASON = {

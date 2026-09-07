@@ -9,6 +9,14 @@ class ModelRequestError(ModelError):
     """A non-rate-limit client error; retrying the same request cannot fix it."""
 
 
+class TransientModelError(ModelError):
+    """A transport failure or retryable HTTP response, with an optional retry delay."""
+
+    def __init__(self, message: str, retry_after_seconds: float | None = None) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(message)
+
+
 class ContextBudgetError(ModelError):
     """The rendered history and requested completion do not fit the context."""
 

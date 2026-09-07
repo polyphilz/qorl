@@ -1,5 +1,8 @@
 # 000 — Vanilla baselines
 
+Execution entrypoint retired on 2026-09-07 during the shared-agent migration.
+The inputs and recorded results below are historical evidence, not rerun instructions.
+
 **Status:** completed
 
 This experiment evaluates the untrained Qwen distill policy and the frozen

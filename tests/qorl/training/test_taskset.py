@@ -75,7 +75,7 @@ def test_failure_cannot_receive_scalar_reward(
             "final": None,
             "failure": RolloutFailure(
                 operation="default",
-                error_type="QueryTimeout",
+                error_type="QueryTimeoutError",
                 error="timeout",
                 paired=PairedMeasurements(),
             ),

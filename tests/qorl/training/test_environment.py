@@ -24,10 +24,15 @@ def test_training_configs_construct_qorl_environment(
         (repository_root / "configs/defaults/000-rl.toml").read_text()
     )
     supplied = QorlHarnessConfig.model_validate(
-        {key: defaults[key] for key in ("agent", "measurement", "rl")}
+        {
+            key: defaults[key]
+            for key in ("agent", "measurement", "rl", "model", "decoding")
+        }
     )
     if override_defaults:
         supplied = QorlHarnessConfig(
+            model=supplied.model,
+            decoding=supplied.decoding,
             agent=supplied.agent.model_copy(
                 update={"candidate_attempts": supplied.agent.candidate_attempts + 1}
             ),

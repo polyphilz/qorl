@@ -4,6 +4,7 @@ import runpy
 import shutil
 import socket
 import subprocess
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
@@ -23,10 +24,12 @@ from qorl.experiment.schemas import (
     SftExperimentConfig,
     load_config,
 )
-from qorl.model.schemas import ModelProvider
+from qorl.model.schemas import ModelPreset, ModelProvider
 from qorl.sft.schemas import PreparedDatasetManifest
 from qorl.taskset.schemas import TaskSelection
 from qorl.taskset.taskset import TaskSet
+
+CUSTOM_MODEL_CONCURRENCY = 2
 
 
 @pytest.mark.parametrize("method", list(ExperimentMethod))
@@ -364,7 +367,6 @@ def test_adapter_only_directory_is_not_a_model(
     "provider,model",
     [
         (ModelProvider.OPENAI, "gpt-6-astra"),
-        (ModelProvider.ANTHROPIC, "claude-fable-5-1"),
     ],
 )
 def test_hosted_evaluation_does_not_copy_local_knobs(
@@ -385,12 +387,14 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     config = load_config(directory / "config.toml")
     assert isinstance(config, EvaluationExperimentConfig)
     assert config.model.provider == provider
-    assert config.model.base_url is None
-    assert config.model.request_timeout_seconds is None
-    assert config.model.api_key_env is None
-    assert (
-        config.serving is None and config.resources is None and config.decoding is None
-    )
+    assert config.model.base_url == "https://api.openai.com/v1"
+    assert config.model.request_timeout_seconds == 600
+    assert config.model.api_key_env == "OPENAI_API_KEY"
+    assert config.serving is None and config.resources is None
+    assert config.decoding.model_dump() == {
+        "max_tokens": 32768,
+        "reasoning_effort": "medium",
+    }
     assert "model stages is not implemented" in (directory / "README.md").read_text()
 
 
@@ -402,12 +406,53 @@ def test_creation_preserves_model_api_settings(creation_request: CreateRequest) 
             "base_url": "http://127.0.0.1:9000/v1",
             "request_timeout_seconds": 600,
             "api_key_env": "QORL_TEST_MODEL_KEY",
+            "max_concurrent_requests": CUSTOM_MODEL_CONCURRENCY,
         }
     )
     model = create.model_settings(creation_request, template)
     assert model.base_url == template.base_url
     assert model.request_timeout_seconds == template.request_timeout_seconds
     assert model.api_key_env == template.api_key_env
+    assert model.max_concurrent_requests == template.max_concurrent_requests
+
+
+@pytest.mark.parametrize("provider", list(ModelProvider))
+def test_creation_preserves_custom_model_concurrency(
+    provider: ModelProvider,
+    creation_request: CreateRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = tmp_path / "defaults"
+    shutil.copytree(create.DEFAULTS_DIRECTORY, defaults)
+    monkeypatch.setattr(create, "DEFAULTS_DIRECTORY", defaults)
+    if provider == ModelProvider.OPENAI:
+        creation_request = replace(
+            creation_request,
+            method=ExperimentMethod.EVAL,
+            tasksets=("test=job[01:1]",),
+            model_provider=provider,
+            base_model_name_or_path="gpt-6-astra",
+            base_model_revision=None,
+        )
+        source = create.latest_config(defaults / "models", "gpt-6-astra")
+        template = ModelPreset.model_validate(tomllib.loads(source.read_text()))
+    else:
+        source = create.latest_template(creation_request.method)
+        template = load_config(source)
+        assert isinstance(template, ModelExperimentConfig)
+    changed = template.model_copy(
+        update={
+            "model": template.model.model_copy(
+                update={"max_concurrent_requests": CUSTOM_MODEL_CONCURRENCY}
+            )
+        }
+    )
+    source.write_text(tomli_w.dumps(changed.model_dump(mode="json", exclude_none=True)))
+    directory = create.create_experiment(creation_request)
+    config = load_config(directory / "config.toml")
+    assert isinstance(config, ModelExperimentConfig)
+    assert config.model.max_concurrent_requests == changed.model.max_concurrent_requests
 
 
 def test_failed_file_write_removes_only_its_new_directory(

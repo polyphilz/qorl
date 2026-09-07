@@ -9,7 +9,7 @@ from prime_rl.orchestrator.algo.qorl_anchored_grpo import (
     share_reusable_speedups,
 )
 
-from qorl.evaluation.benchmark import summarize
+from qorl.evaluation.evaluate import summarize_performance
 from qorl.measure.schemas import (
     MeasuredOutcome,
     NoValidCandidateOutcome,
@@ -51,9 +51,9 @@ def test_training_clips_without_changing_observations_or_reports(
     assert training_speedup(record) == 10.0
     assert scalar_reward(record, SETTINGS) == pytest.approx(math.log(10.0))
     assert record.final is not None and record.final.speedup == 20.0
-    summary = summarize([{"rollout": record.to_wire()}])
-    assert summary["geometric_mean_speedup"] == pytest.approx(20.0)
-    assert summary["total_workload_speedup"] == 20.0
+    summary = summarize_performance([record])
+    assert summary.geometric_mean_speedup == pytest.approx(20.0)
+    assert summary.total_workload_speedup == 20.0
 
 
 def test_timeout_proxy_is_training_only(rollout_record: RolloutRecord) -> None:
@@ -76,10 +76,10 @@ def test_timeout_proxy_is_training_only(rollout_record: RolloutRecord) -> None:
         math.log(0.1) - SETTINGS.timeout_attempt_penalty
     )
     assert record.final is not None and record.final.speedup is None
-    summary = summarize([{"rollout": record.to_wire()}])
-    assert summary["geometric_mean_speedup"] is None
-    assert summary["timeout_count"] == 1
-    assert summary["failure_count"] == 0
+    summary = summarize_performance([record])
+    assert summary.geometric_mean_speedup is None
+    assert summary.timeout_count == 1
+    assert summary.failure_count == 0
 
 
 def test_no_valid_decision_and_unscored_failure_are_different(
@@ -100,7 +100,7 @@ def test_no_valid_decision_and_unscored_failure_are_different(
             "final": None,
             "failure": RolloutFailure(
                 operation="initial_default",
-                error_type="QueryTimeout",
+                error_type="QueryTimeoutError",
                 error="timeout",
                 paired=PairedMeasurements(),
             ),

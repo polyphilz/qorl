@@ -30,7 +30,7 @@ from qorl.measure.validation import PlanValidationEvaluator
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import verify_action
-from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
 from qorl.postgres.schemas import ExplainResult
 from qorl.taskset.schemas import Task
 
@@ -214,7 +214,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
                         analyze=True,
                         hint=candidate.compiled_hint,
                     )
-                except QueryTimeout as error:
+                except QueryTimeoutError as error:
                     self.check_cancelled()
                     self.mark_timeout(candidate, error)
                     return False
@@ -282,7 +282,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             speedup=default_median / candidate_median,
         )
 
-    def mark_timeout(self, candidate: Candidate, error: QueryTimeout) -> None:
+    def mark_timeout(self, candidate: Candidate, error: QueryTimeoutError) -> None:
         """Update the selected attempt without treating the cutoff as a completion time."""
         self.candidates[self.candidates.index(candidate)] = candidate.model_copy(
             update={

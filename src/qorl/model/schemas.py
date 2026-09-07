@@ -14,7 +14,22 @@ type JsonObject = dict[str, JsonValue]
 class ModelProvider(StrEnum):
     LOCAL = "local"
     OPENAI = "openai"
-    ANTHROPIC = "anthropic"
+
+
+class RetrySettings(BaseModel):
+    """Bound transport retries, not content generations."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    max_attempts: int = Field(default=3, ge=1)
+    initial_delay_seconds: float = Field(default=2.0, gt=0)
+    maximum_delay_seconds: float = Field(default=30.0, gt=0)
+
+    @model_validator(mode="after")
+    def bounded_delay(self) -> Self:
+        if self.initial_delay_seconds > self.maximum_delay_seconds:
+            raise ValueError("initial retry delay exceeds maximum retry delay")
+        return self
 
 
 class ModelSettings(BaseModel):
@@ -30,6 +45,8 @@ class ModelSettings(BaseModel):
     base_url: str | None = None
     request_timeout_seconds: int | None = Field(default=None, gt=0)
     api_key_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    max_concurrent_requests: int = Field(default=8, ge=1)
+    retry: RetrySettings = RetrySettings()
 
     @model_validator(mode="after")
     def plain_http_address(self) -> Self:
@@ -67,6 +84,35 @@ class LocalDecodingSettings(BaseModel):
     thinking: bool
 
 
+class ReasoningEffort(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    XHIGH = "xhigh"
+    MAX = "max"
+
+
+class AstraDecodingSettings(BaseModel):
+    """Astra supports reasoning effort, not custom sampling or thinking-off knobs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_tokens: int = Field(gt=0)
+    reasoning_effort: ReasoningEffort
+
+
+type DecodingSettings = LocalDecodingSettings | AstraDecodingSettings
+
+
+class ModelPreset(BaseModel):
+    """Connection and decoding values copied into an experiment at creation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: ModelSettings
+    decoding: DecodingSettings
+
+
 class FunctionCall(BaseModel):
     """A model's function name and original, unmodified JSON arguments string."""
 
@@ -91,6 +137,15 @@ class MessageRole(StrEnum):
     TOOL = "tool"
 
 
+class ResponsesContinuation(BaseModel):
+    """Provider-owned output items, including encrypted reasoning and message phase."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str
+    output: list[JsonObject]
+
+
 class Message(BaseModel):
     """Text/tool conversation shared with the agent and local chat template."""
 
@@ -102,6 +157,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     name: str | None = None
     reasoning_content: str | None = None
+    continuation: ResponsesContinuation | None = None
 
 
 class ToolFunction(BaseModel):

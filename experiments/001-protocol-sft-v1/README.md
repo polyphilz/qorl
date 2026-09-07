@@ -1,5 +1,8 @@
 # 001 — Tool-use SFT v1
 
+Execution entrypoint retired on 2026-09-07 during the shared-agent migration.
+The inputs and recorded results below are historical evidence, not rerun instructions.
+
 **Status:** completed
 
 This experiment teaches the base model the QORL message and tool-call protocol.

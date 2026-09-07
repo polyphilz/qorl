@@ -5,15 +5,18 @@ import io
 import urllib.error
 import urllib.request
 from collections import deque
+from collections.abc import Callable
 from http.client import HTTPMessage
 from unittest.mock import Mock
 
 import pytest
 from pydantic import ValidationError
+from verifiers.v1.clients import train as proxy_train
+from verifiers.v1.types import AssistantMessage, Response, Usage
+from verifiers.v1.types import ToolCall as ProxyToolCall
 
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
-from qorl.exceptions import ContextBudgetError, ModelError, ModelRequestError
 from qorl.experiment.create import latest_template
 from qorl.experiment.schemas import (
     EvaluationExperimentConfig,
@@ -22,13 +25,16 @@ from qorl.experiment.schemas import (
 )
 from qorl.model import client
 from qorl.model.client import HttpTransport, LocalModelClient
+from qorl.model.exceptions import ContextBudgetError, ModelError, ModelRequestError
 from qorl.model.schemas import (
     GenerationRequest,
     JsonObject,
+    LocalDecodingSettings,
     Message,
     MessageRole,
     ModelProvider,
     ModelSettings,
+    RetrySettings,
     ToolDefinition,
     ToolFunction,
 )
@@ -36,6 +42,9 @@ from qorl.model.schemas import (
 CONTEXT_LENGTH = 20_480
 OUTPUT_TOKENS = 2_048
 PROMPT_TOKENS = 100
+CACHED_TOKENS = 40
+COMPLETION_TOKENS = 12
+REASONING_TOKENS = 8
 RAW_ARGUMENTS = '{ "setting": "enable_hashjoin" }'
 
 
@@ -120,8 +129,62 @@ def completion(*, truncated: bool = False) -> JsonObject:
 def local_client(
     config: EvaluationExperimentConfig, transport: ScriptedTransport
 ) -> LocalModelClient:
-    assert config.decoding is not None
+    assert isinstance(config.decoding, LocalDecodingSettings)
     return LocalModelClient(config.model, config.decoding, transport=transport)
+
+
+def proxy_completion() -> JsonObject:
+    """Use the installed training proxy's serializer, not a hand-built response."""
+    response = Response(
+        id="proxy-reply",
+        created=0,
+        model="test-model",
+        message=AssistantMessage(
+            content="",
+            reasoning_content="Inspect first.",
+            tool_calls=[
+                ProxyToolCall(
+                    id="call-1", name="inspect_setting", arguments=RAW_ARGUMENTS
+                )
+            ],
+        ),
+        finish_reason="tool_calls",
+        usage=Usage(
+            prompt_tokens=PROMPT_TOKENS - CACHED_TOKENS,
+            completion_tokens=COMPLETION_TOKENS,
+            reasoning_tokens=REASONING_TOKENS,
+            cached_input_tokens=CACHED_TOKENS,
+        ),
+    )
+    return client.JSON_OBJECT.validate_python(
+        proxy_train.serialize_completion(response, response.model)
+    )
+
+
+def test_proxy_completions_use_the_real_server_for_token_counts(
+    config: EvaluationExperimentConfig,
+    request_turn: GenerationRequest,
+) -> None:
+    assert isinstance(config.decoding, LocalDecodingSettings)
+    proxy = ScriptedTransport([completion()])
+    tokenizer = ScriptedTransport(
+        [{"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}]
+    )
+    model = LocalModelClient(
+        config.model,
+        config.decoding,
+        transport=proxy,
+        token_transport=tokenizer,
+        served_model_name="intercepted-model",
+    )
+    result = model.generate(request_turn.model_copy(update={"seed": None}))
+    assert [path for path, _ in proxy.calls] == ["chat/completions"]
+    assert [path for path, _ in tokenizer.calls] == ["../tokenize"]
+    counted = tokenizer.calls[0][1]
+    assert counted is not None
+    assert counted["messages"] == result.request["messages"]
+    assert counted["model"] == result.request["model"] == "intercepted-model"
+    assert "seed" not in result.request
 
 
 def test_real_agent_tools_and_prompt_are_not_rewritten(
@@ -139,17 +202,19 @@ def test_real_agent_tools_and_prompt_are_not_rewritten(
 
 
 @pytest.mark.parametrize("thinking", [False, True])
+@pytest.mark.parametrize("reply", [completion, proxy_completion], ids=["vllm", "proxy"])
 def test_reasoning_and_raw_arguments_survive_tool_continuation(
     config: EvaluationExperimentConfig,
     request_turn: GenerationRequest,
     thinking: bool,
+    reply: Callable[[], JsonObject],
 ) -> None:
-    assert config.decoding is not None
+    assert isinstance(config.decoding, LocalDecodingSettings)
     config = config.model_copy(
         update={"decoding": config.decoding.model_copy(update={"thinking": thinking})}
     )
     count: JsonObject = {"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}
-    transport = ScriptedTransport([count, completion(), count, completion()])
+    transport = ScriptedTransport([count, reply(), count, reply()])
     model = local_client(config, transport)
     first = model.generate(request_turn)
     assert first.message.reasoning_content == "Inspect first."
@@ -189,7 +254,7 @@ def test_reasoning_and_raw_arguments_survive_tool_continuation(
     assert messages[-1] == tool_result.model_dump(mode="json", exclude_none=True)
     assert second.request["max_tokens"] == OUTPUT_TOKENS
     assert second.request["seed"] == request_turn.seed
-    assert second.raw_response == completion()
+    assert second.raw_response == reply()
     assert not second.truncated
 
 
@@ -338,7 +403,7 @@ def test_model_rejects_unsafe_or_malformed_addresses(
 def test_clients_require_model_api_settings(
     config: EvaluationExperimentConfig, field: str
 ) -> None:
-    assert config.decoding is not None
+    assert isinstance(config.decoding, LocalDecodingSettings)
     model = config.model.model_copy(update={field: None})
     with pytest.raises(ValueError, match=field):
         HttpTransport(model)
@@ -394,7 +459,11 @@ def test_http_errors_are_classified_and_credentials_redacted(
     monkeypatch.setattr(client.urllib.request, "urlopen", opened)
     transport = HttpTransport(
         config.model.model_copy(
-            update={"base_url": "http://localhost", "request_timeout_seconds": 1}
+            update={
+                "base_url": "http://localhost",
+                "request_timeout_seconds": 1,
+                "retry": RetrySettings(max_attempts=1),
+            }
         ),
         api_key="test-secret",
     )

@@ -1,0 +1,17 @@
+[model]
+provider = "openai"
+name_or_path = "gpt-6-astra"
+context_length = 262144
+base_url = "https://api.openai.com/v1"
+request_timeout_seconds = 600
+api_key_env = "OPENAI_API_KEY"
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[decoding]
+max_tokens = 32768
+reasoning_effort = "medium"

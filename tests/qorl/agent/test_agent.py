@@ -1,255 +1,65 @@
-from __future__ import annotations
+"""Exercise the shared conversation loop with real clients and plan validation."""
 
 import hashlib
-import io
 import json
-import urllib.error
-import urllib.request
-from copy import deepcopy
-from dataclasses import dataclass, replace
+import tomllib
+from concurrent.futures import CancelledError
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from threading import Event
 
 import pytest
 
-from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import ModelError, ModelRequestError, OpenAIModelClient
-from qorl.agent.interface import AgentInterface
-from qorl.agent.schemas import AgentSettings
+from qorl.agent.agent import QoAgentPolicy, turn_seed
+from qorl.agent.interface import AGENT_INTERFACE_VERSION, AgentInterface
+from qorl.agent.schemas import AgentSettings, AgentTrace
 from qorl.agent.tool_runtime import AgentEnvironment
-from qorl.agent.tools import agent_tools
-from qorl.measure.schemas import Baseline, Candidate, MeasurementStatus
+from qorl.agent.types import InspectionExecutor, StopReason
+from qorl.measure.schemas import MeasurementStatus
 from qorl.measure.validation import PlanValidationEvaluator
-from qorl.plans.catalog import TaskCatalog
-from qorl.plans.schemas import (
-    BOOLEAN_SETTINGS,
-    INTEGER_SETTINGS,
-    NUMERIC_SETTINGS,
+from qorl.model.client import JSON_OBJECT, AstraModelClient, LocalModelClient
+from qorl.model.exceptions import ModelError
+from qorl.model.schemas import (
+    JsonObject,
+    LocalDecodingSettings,
+    MessageRole,
+    ModelPreset,
+    ModelProvider,
+    ModelSettings,
 )
 from qorl.postgres.exceptions import PostgresError
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes, PostgresSettings
 from qorl.taskset.schemas import Task
 from qorl.worker_pool.exceptions import ContainerError
 
-TASK = {
-    "task_id": "job-test",
-    "template_id": "job-test-template",
-    "sql_path": "queries/test.sql",
-    "sql_sha256": "unused",
-    "tables": ["table_a", "table_b"],
-    "table_count": 2,
-    "relation_count": 2,
-    "join_predicate_count": 1,
-    "relations": [
-        {"alias": "a", "table": "table_a"},
-        {"alias": "b", "table": "table_b"},
-    ],
-    "join_edges": ["a:table_a.id=b:table_b.a_id"],
-}
+CONTEXT_LENGTH = 20_480
+OUTPUT_TOKENS = 2_048
+PROMPT_TOKENS = 100
+MODEL_TURNS = 64
+SEED = 7
+TIMEOUT_MS = 5_000
 
-
-class FakeClient:
-    def __init__(self) -> None:
-        self.requests = []
-        self.responses = [
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "evaluate_candidate",
-                                        "arguments": '{"action":{"version":1}}',
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 10},
-            },
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-2",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "finish",
-                                        "arguments": "{}",
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-                "usage": {"prompt_tokens": 120, "completion_tokens": 5},
-            },
-        ]
-
-    def models(self) -> dict:
-        return {
-            "data": [
-                {
-                    "id": "empero-ai/Qwen3.8-4B-Distill",
-                    "max_model_len": 262144,
-                }
-            ]
-        }
-
-    def version(self) -> dict:
-        return {"version": "test"}
-
-    def chat(self, body: dict) -> dict:
-        self.requests.append(deepcopy(body))
-        return self.responses.pop(0)
-
-
-class KeepDefaultClient(FakeClient):
-    def __init__(self) -> None:
-        super().__init__()
-        self.responses = [
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "keep_default",
-                                        "arguments": "{}",
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ],
-                "usage": {"prompt_tokens": 100, "completion_tokens": 5},
-            }
-        ]
-
-
-class FakeLoraClient(FakeClient):
-    def models(self) -> dict:
-        return {
-            "data": [
-                {"id": "qorl-base", "max_model_len": 262144},
-                {
-                    "id": "qorl-protocol-adapter",
-                    "parent": "qorl-base",
-                    "max_model_len": None,
-                },
-            ]
-        }
-
-
-class ContextLimitClient(FakeClient):
-    def __init__(self) -> None:
-        super().__init__()
-        self.responses[0]["usage"] = {
-            "prompt_tokens": 18_500,
-            "completion_tokens": 500,
-            "total_tokens": 19_000,
-        }
-
-
-class MissingUsageClient(FakeClient):
-    def __init__(self) -> None:
-        super().__init__()
-        self.responses[0].pop("usage")
-
-
-class FakeEvaluator:
-    def __init__(self, repository: Path) -> None:
-        def admin_sql(sql: str) -> str:
-            del sql
-            return ""
-
-        self.task = Task.model_validate(TASK)
-        self.max_candidates = 5
-        self.sql = "SELECT 1;"
-        self.catalog = TaskCatalog.from_task(
-            TASK, {"a": {"table_a_pkey"}, "b": {"table_b_pkey"}}
-        )
-        self._worker = SimpleNamespace(
-            settings=PostgresSettings.model_validate(
-                {
-                    **dict.fromkeys(BOOLEAN_SETTINGS, "on"),
-                    **dict.fromkeys(NUMERIC_SETTINGS, "1"),
-                    **dict.fromkeys(INTEGER_SETTINGS, "1"),
-                }
-            ),
-            admin_sql=admin_sql,
-            fixture=SimpleNamespace(
-                repository=repository,
-            ),
-        )
-        self.default = Baseline(
-            plan_sha256="default",
-            compact_plan={"Node Type": "Result"},
-            plain_explain={
-                "Plan": {
-                    "Node Type": "Result",
-                    "Plan Rows": 1,
-                    "Total Cost": 99.0,
-                }
-            },
-            median_execution_time_ms=1.0,
-        )
-        self.timeout_ms = 5_000
-        self.candidates = []
-        self.actions = []
-        self.kept_default = False
-
-    @property
-    def worker(self):
-        return self._worker
-
-    def check_cancelled(self) -> None:
-        pass
-
-    def evaluate(self, action: object) -> Candidate:
-        self.actions.append(action)
-        candidate = Candidate(
-            candidate_id="candidate-01",
-            action=action,
-            action_valid=True,
-            constraints_satisfied=True,
-            compiled_hint="",
-            duplicate_of="default",
-            plan_sha256="abc",
-            compact_plan={"Node Type": "Result"},
-            errors_or_diagnostics=[],
-            pg_hint_plan=None,
-            attempts_remaining=4,
-        )
-        self.candidates.append(candidate)
-        return candidate
-
-    def keep_default(self) -> dict[str, str]:
-        if self.candidates:
-            raise RuntimeError(
-                "keep_default must be selected before submitting a candidate"
-            )
-        self.kept_default = True
-        return {"status": "kept_default"}
+TASK = Task.model_validate(
+    {
+        "task_id": "job-test",
+        "template_id": "job-test-template",
+        "sql_path": "queries/test.sql",
+        "sql_sha256": "unused",
+        "tables": ["table_a", "table_b"],
+        "table_count": 2,
+        "relation_count": 2,
+        "join_predicate_count": 1,
+        "relations": [
+            {"alias": "a", "table": "table_a"},
+            {"alias": "b", "table": "table_b"},
+        ],
+        "join_edges": ["a:table_a.id=b:table_b.a_id"],
+    }
+)
 
 
 @dataclass
-class PlanOnlyWorker:
+class Database:
     settings: PostgresSettings
     indexes: PostgresIndexes
     explain_calls: int = 0
@@ -259,10 +69,14 @@ class PlanOnlyWorker:
     ) -> ExplainResult:
         assert not analyze
         self.explain_calls += 1
-        return ExplainResult({"Plan": {"Node Type": "Result"}}, "")
+        return ExplainResult(
+            {"Plan": {"Node Type": "Result", "Plan Rows": 1, "Total Cost": 99.0}}, ""
+        )
 
     def admin_sql(self, sql: str) -> str:
-        raise AssertionError("no inspection SQL was expected")
+        raise AssertionError(
+            "this test inspects the stored plan, not database metadata"
+        )
 
 
 class SqlFixture:
@@ -270,420 +84,522 @@ class SqlFixture:
         return "SELECT 1;"
 
 
-def config() -> QoAgentConfig:
-    return QoAgentConfig.from_dict(
-        {
-            "type": "qo_agent",
-            "model": "empero-ai/Qwen3.8-4B-Distill",
-            "revision": "revision",
-            "vllm_version": "test",
-            "use_flashinfer_sampler": False,
-            "enable_prefix_caching": True,
-            "base_url": "http://127.0.0.1:8000/v1",
-            "context_length": 262144,
-            "maximum_model_turns": 64,
-            "request_timeout_seconds": 300,
-            "seed": 7,
-            "sampling": {"max_tokens": 2048, "temperature": 1.0},
-            "thinking": False,
-            "tool_call_parser": "qwen3_coder",
-        }
+@pytest.fixture
+def database(repository_root: Path) -> Database:
+    from qorl.postgres.config import PostgresConfig
+
+    pgconf = PostgresConfig.load(
+        repository_root / "docker/postgres/configs/000-pgconf-default"
     )
+    return Database(pgconf.agent_settings, PostgresIndexes(by_table={}))
 
 
-class TestQoAgent:
-    def test_model_visible_request_bytes_are_stable(self, tmp_path: Path) -> None:
-        client = FakeClient()
-        evaluator = FakeEvaluator(tmp_path)
+@pytest.fixture
+def evaluator(database: Database) -> PlanValidationEvaluator[InspectionExecutor]:
+    evaluator = PlanValidationEvaluator[InspectionExecutor](
+        database,
+        SqlFixture(),
+        TASK,
+        default_timeout_ms=TIMEOUT_MS,
+        max_candidates=1,
+    )
+    evaluator.start()
+    return evaluator
 
-        QoAgentPolicy(config(), client).search(evaluator)
 
-        digests = [
-            hashlib.sha256(json.dumps(request).encode("utf-8")).hexdigest()
-            for request in client.requests
-        ]
-        assert digests == [
-            "1b7c03814b5e4c8786d7161bca5bdd13cee71a681726cc8b4c3c38ad0142be76",
-            "02313a52018d3e46f371b367c1cb5d0768c85c8bdd47bb1745c1ae128a62c860",
-        ]
-
-    def test_protocol_exposes_a_one_candidate_training_budget(
-        self, tmp_path: Path
-    ) -> None:
-        evaluator = FakeEvaluator(tmp_path)
-        evaluator.max_candidates = 1
-
-        interface = AgentInterface.from_evaluator(evaluator, 64)
-
-        assert interface.observation["candidate_attempts"] == 1
-        assert interface.observation["turn_budget"]["reserved_final_turns"] == 2
-        assert interface.available_tool_names(1, 1) == {"finish"}
-        prompt = interface.initial_messages()[0]["content"]
-        assert "up to 1 candidate evaluation plus one terminal decision" in prompt
-
-    def test_get_default_plan_returns_only_compact_fields(self, tmp_path: Path) -> None:
-        evaluator = FakeEvaluator(tmp_path)
-
-        result, finished = AgentEnvironment(evaluator).execute(
-            "get_plan", {"candidate_id": "default"}
-        )
-
-        assert result == {"Plan": {"Node Type": "Result", "Plan Rows": 1}}
-        assert not finished
-
-    def test_exhausted_candidate_budget_is_tool_feedback(self, tmp_path: Path) -> None:
-        evaluator = FakeEvaluator(tmp_path)
-
-        def exhausted(_: object) -> dict:
-            raise RuntimeError("rollout candidate budget is exhausted")
-
-        evaluator.evaluate = exhausted
-        result, finished = AgentEnvironment(evaluator).execute(
-            "evaluate_candidate", {"action": {"version": 1}}
-        )
-
-        assert result == {"error": "rollout candidate budget is exhausted"}
-        assert not finished
-
-    def test_model_client_accepts_a_rollout_scoped_api_key(self) -> None:
-        client = OpenAIModelClient("http://example.test/v1", 10, "secret")
-
-        assert client.api_key == "secret"
-
-    @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
-    def test_model_client_treats_non_rate_limit_4xx_as_fatal(
-        self, monkeypatch: pytest.MonkeyPatch, status: int
-    ) -> None:
-        error = urllib.error.HTTPError(
-            "http://example.test/v1/chat/completions",
-            status,
-            "rejected",
-            None,
-            io.BytesIO(b'{"error":"bad request"}'),
-        )
-
-        def reject(_request: urllib.request.Request, timeout: int) -> None:
-            del timeout
-            raise error
-
-        monkeypatch.setattr(urllib.request, "urlopen", reject)
-
-        with pytest.raises(ModelRequestError, match=f"HTTP {status}"):
-            OpenAIModelClient("http://example.test/v1", 10).chat({})
-
-    @pytest.mark.parametrize("status", [429, 500])
-    def test_model_client_leaves_retryable_http_failures_as_model_errors(
-        self, monkeypatch: pytest.MonkeyPatch, status: int
-    ) -> None:
-        error = urllib.error.HTTPError(
-            "http://example.test/v1/chat/completions",
-            status,
-            "temporary",
-            None,
-            io.BytesIO(b'{"error":"retry"}'),
-        )
-
-        def reject(_request: urllib.request.Request, timeout: int) -> None:
-            del timeout
-            raise error
-
-        monkeypatch.setattr(urllib.request, "urlopen", reject)
-
-        with pytest.raises(ModelError) as caught:
-            OpenAIModelClient("http://example.test/v1", 10).chat({})
-        assert not isinstance(caught.value, ModelRequestError)
-
-    def test_request_seed_can_be_left_to_the_rollout_server(self) -> None:
-        policy = QoAgentPolicy(replace(config(), seed=None), FakeClient())
-        body = policy.request_body([], [], "job-test", 1)
-
-        assert "seed" not in body
-
-    def test_preflight_inherits_lora_context_length_from_parent(self) -> None:
-        policy = QoAgentPolicy(
-            replace(config(), model="qorl-protocol-adapter"), FakeLoraClient()
-        )
-
-        identity = policy.preflight()
-
-        assert identity["model"]["id"] == "qorl-protocol-adapter"
-        assert identity["effective_context_model"]["id"] == "qorl-base"
-
-    def test_runs_evaluate_then_finish_tool_loop(self, tmp_path: Path) -> None:
-        client = FakeClient()
-        policy = QoAgentPolicy(config(), client)
-        assert policy.preflight()["advertised_models"] == [
-            "empero-ai/Qwen3.8-4B-Distill"
-        ]
-
-        evaluator = FakeEvaluator(tmp_path)
-        trace = policy.search(evaluator)
-
-        assert evaluator.actions == [{"version": 1}]
-        assert trace["stop_reason"] == "model_finish"
-        assert trace["usage"]["prompt_tokens"] == 220
-        assert (
-            trace["initial_observation"]["planner_settings"]["enable_hashjoin"] == "on"
-        )
-        assert set(trace["initial_observation"]["planner_settings"]) == (
-            set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
-        )
-        assert set(PostgresSettings.model_fields) == set(
-            trace["initial_observation"]["planner_settings"]
-        )
-        assert "postgresql_server_version_num" not in trace["initial_observation"]
-        assert trace["initial_observation"]["turn_budget"] == {
-            "total_model_turns": 64,
-            "maximum_inspection_turns": 6,
-            "reserved_final_turns": 6,
-            "reserved_for": {
-                "candidate_evaluations": 5,
-                "finish_or_keep_default": 1,
-            },
-        }
-        first_tool_result = json.loads(trace["transcript"][3]["content"])
-        assert first_tool_result["_turn_budget"]["turns_remaining"] == 63
-        assert len(trace["tools_sha256"]) == 64
-        assert [message["role"] for message in trace["transcript"]] == [
-            "system",
-            "user",
-            "assistant",
-            "tool",
-            "assistant",
-            "tool",
-        ]
-        assert client.requests[0]["tool_choice"] == "required"
-        first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
-        second_tools = {
-            tool["function"]["name"] for tool in client.requests[1]["tools"]
-        }
-        assert "finish" not in first_tools
-        assert "keep_default" in first_tools
-        assert "finish" in second_tools
-        assert "keep_default" not in second_tools
-        assert not client.requests[0]["chat_template_kwargs"]["enable_thinking"]
-
-    @pytest.mark.parametrize("attempts", [1, 2])
-    def test_validation_only_candidate_prints_without_a_speedup(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], attempts: int
-    ) -> None:
-        worker = PlanOnlyWorker(
-            settings=FakeEvaluator(tmp_path).worker.settings,
-            indexes=PostgresIndexes(by_table={}),
-        )
-        evaluator = PlanValidationEvaluator(
-            worker,
-            SqlFixture(),
-            Task.model_validate(TASK),
-            default_timeout_ms=5_000,
-            max_candidates=attempts,
-        )
-        evaluator.start()
-
-        client = FakeClient()
-        trace = QoAgentPolicy(config(), client).search(evaluator)
-
-        assert trace["stop_reason"] == "model_finish"
-        assert "candidate-01: validated" in capsys.readouterr().out
-        assert worker.explain_calls == 2
-        assert (
-            evaluator.candidates[0].measurement_status == MeasurementStatus.NOT_MEASURED
-        )
-        assert "provisional_speedup" not in evaluator.candidates[0].feedback()
-        feedback = json.loads(client.requests[1]["messages"][-1]["content"])
-        assert feedback["action_valid"] and feedback["constraints_satisfied"]
-        assert feedback["structurally_novel"] is False
-        assert feedback["structural_duplicate_of"] == "default"
-        assert feedback["attempts_remaining"] == attempts - 1
-        assert "errors_or_diagnostics" in feedback
-        for field in ("plan_sha256", "structural_plan_sha256", "timing_reuse_key"):
-            assert field not in feedback
-            assert getattr(evaluator.candidates[0], field) is not None
-
-    def test_configured_budgets_control_tools_and_enforcement(
-        self, tmp_path: Path
-    ) -> None:
-        client = FakeClient()
-        prototype = client.responses[0]
-        client.responses = []
-        for name, arguments in [
-            ("get_plan", '{"candidate_id":"default"}'),
-            ("get_plan", '{"candidate_id":"default"}'),
-            ("get_plan", '{"candidate_id":"default"}'),
-            ("evaluate_candidate", '{"action":{"version":1}}'),
-            ("evaluate_candidate", '{"action":{"version":1}}'),
-            ("finish", "{}"),
-        ]:
-            response = deepcopy(prototype)
-            response["choices"][0]["message"]["tool_calls"][0]["function"] = {
-                "name": name,
-                "arguments": arguments,
+def reply(name: str, arguments: str = "{}") -> JsonObject:
+    return {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning": "choose a tool",
+                    "tool_calls": [
+                        {
+                            "id": name,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": arguments,
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
             }
-            client.responses.append(response)
-        evaluator = FakeEvaluator(tmp_path)
-        evaluator.max_candidates = 1
-        settings = AgentSettings(
-            candidate_attempts=1, maximum_model_turns=6, inspection_turns_per_alias=1
-        )
-        trace = QoAgentPolicy(config(), client).search(evaluator, settings=settings)
+        ],
+        "usage": {"prompt_tokens": PROMPT_TOKENS, "completion_tokens": 1},
+    }
 
-        assert trace["agent_interface_version"] == 4
-        observation = trace["initial_observation"]
-        assert observation["candidate_attempts"] == 1
-        assert observation["turn_budget"]["total_model_turns"] == 6
-        assert observation["turn_budget"]["maximum_inspection_turns"] == 2
-        assert trace["stop_reason"] == "model_finish"
-        assert len(evaluator.actions) == 1
-        events = trace["tool_events"]
-        assert "Plan" in events[0]["result"] and "Plan" in events[1]["result"]
-        for index in (2, 4):
-            assert (
-                events[index]["result"]["error"]
-                == "tool is not available for this turn"
-            )
-        assert {tool["function"]["name"] for tool in client.requests[2]["tools"]} == {
-            "evaluate_candidate",
-            "keep_default",
-        }
-        assert {tool["function"]["name"] for tool in client.requests[4]["tools"]} == {
-            "finish"
-        }
 
-    def test_configured_model_turn_limit_stops_the_loop(self, tmp_path: Path) -> None:
-        client = FakeClient()
-        evaluator = FakeEvaluator(tmp_path)
-        evaluator.max_candidates = 1
-        trace = QoAgentPolicy(config(), client).search(
-            evaluator,
-            settings=AgentSettings(
-                candidate_attempts=1,
-                maximum_model_turns=1,
-                inspection_turns_per_alias=0,
-            ),
-        )
-        assert trace["stop_reason"] == "model_turn_limit"
-        assert len(client.requests) == 1
+class ScriptedTransport:
+    def __init__(self, responses: list[JsonObject]) -> None:
+        self.responses = responses
+        self.requests: list[JsonObject] = []
+        self.token_requests: list[JsonObject] = []
+        self.count = PROMPT_TOKENS
 
-    def test_inconsistent_candidate_limits_fail_before_model_request(
-        self, tmp_path: Path
-    ) -> None:
-        client = FakeClient()
-        evaluator = FakeEvaluator(tmp_path)
-        with pytest.raises(ValueError, match="candidate limits must agree"):
-            QoAgentPolicy(config(), client).search(
-                evaluator,
-                settings=AgentSettings(
-                    candidate_attempts=1,
-                    maximum_model_turns=6,
-                    inspection_turns_per_alias=1,
-                ),
-            )
-        assert client.requests == []
+    def request(self, path: str, body: JsonObject | None = None) -> JsonObject:
+        assert body is not None
+        if path in ("../tokenize", "responses/input_tokens"):
+            self.token_requests.append(body)
+            return {
+                "count": self.count,
+                "max_model_len": CONTEXT_LENGTH,
+                "input_tokens": self.count,
+            }
+        assert path in ("chat/completions", "responses")
+        self.requests.append(body)
+        return self.responses.pop(0)
 
-    def test_keep_default_ends_without_a_candidate(self, tmp_path: Path) -> None:
-        client = KeepDefaultClient()
-        policy = QoAgentPolicy(config(), client)
-        evaluator = FakeEvaluator(tmp_path)
 
-        trace = policy.search(evaluator)
-
-        assert trace["stop_reason"] == "model_keep_default"
-        assert evaluator.kept_default
-        assert evaluator.candidates == []
-        assert trace["tool_events"][0]["result"]["status"] == "kept_default"
-
-    @pytest.mark.parametrize(
-        "error",
-        [PostgresError("connection lost"), ContainerError("container disappeared")],
+def policy(
+    transport: ScriptedTransport,
+    *,
+    turns: int = MODEL_TURNS,
+    inspections: int = 3,
+    attempts: int = 1,
+    seed: int | None = SEED,
+) -> QoAgentPolicy:
+    model = ModelSettings(
+        provider=ModelProvider.LOCAL,
+        name_or_path="test-model",
+        context_length=CONTEXT_LENGTH,
+        base_url="http://example.test/v1",
+        request_timeout_seconds=1,
     )
-    def test_plan_validation_infrastructure_failure_escapes_the_agent_loop(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        error: PostgresError | ContainerError,
-    ) -> None:
-        worker = PlanOnlyWorker(
-            settings=FakeEvaluator(tmp_path).worker.settings,
-            indexes=PostgresIndexes(by_table={}),
+    decoding = LocalDecodingSettings(
+        max_tokens=OUTPUT_TOKENS,
+        temperature=1,
+        top_p=1,
+        top_k=0,
+        min_p=0,
+        presence_penalty=0,
+        repetition_penalty=1,
+        thinking=False,
+    )
+    return QoAgentPolicy(
+        LocalModelClient(model, decoding, transport=transport),
+        AgentSettings(
+            candidate_attempts=attempts,
+            maximum_model_turns=turns,
+            inspection_turns_per_alias=inspections,
+        ),
+        context_length=CONTEXT_LENGTH,
+        max_tokens=OUTPUT_TOKENS,
+        seed=seed,
+    )
+
+
+def test_request_goldens(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
+    )
+    policy(transport).search(evaluator)
+    # Interface v5: explicit decoding and preserved reasoning in the transport envelope.
+    assert [
+        hashlib.sha256(json.dumps(request).encode()).hexdigest()
+        for request in transport.requests
+    ] == [
+        "2037e940c7182a39fb786385cac8642afa7dbcd868bfa34f781cc9181f500830",
+        "1e65a354460c3085787eef8ec473a3129c2928945721d4c6f296f9a6f8478205",
+    ]
+
+
+def test_evaluate_then_finish(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    database: Database,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
+    )
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert trace.agent_interface_version == AGENT_INTERFACE_VERSION
+    assert trace.usage.prompt_tokens == PROMPT_TOKENS * 2
+    assert trace.usage.reasoning_tokens is None
+    assert trace.prompt_tokens == PROMPT_TOKENS
+    assert database.explain_calls == 2
+    assert "candidate-01: validated" in capsys.readouterr().out
+    assert evaluator.candidates[0].measurement_status == MeasurementStatus.NOT_MEASURED
+    assert [message.role for message in trace.transcript] == [
+        MessageRole.SYSTEM,
+        MessageRole.USER,
+        MessageRole.ASSISTANT,
+        MessageRole.TOOL,
+        MessageRole.ASSISTANT,
+        MessageRole.TOOL,
+    ]
+    feedback = trace.tool_events[0].result
+    assert feedback["action_valid"] and feedback["constraints_satisfied"]
+    assert feedback["structurally_novel"] is False
+    assert feedback["structural_duplicate_of"] == "default"
+    assert feedback["attempts_remaining"] == 0
+    for field in ("plan_sha256", "structural_plan_sha256", "timing_reuse_key"):
+        assert field not in feedback
+        assert getattr(evaluator.candidates[0], field) is not None
+    assert AgentTrace.model_validate_json(trace.model_dump_json()) == trace
+    for message in trace.transcript:
+        if message.role == MessageRole.TOOL:
+            assert message.content is not None
+            event = next(
+                item
+                for item in trace.tool_events
+                if item.tool_call_id == message.tool_call_id
+            )
+            assert message.content == json.dumps(event.result, sort_keys=True)
+    initial = JSON_OBJECT.validate_python(trace.initial_observation["planner_settings"])
+    assert set(initial) == set(PostgresSettings.model_fields)
+    assert "postgresql_server_version_num" not in trace.initial_observation
+    assert transport.requests[1]["messages"] == transport.token_requests[1]["messages"]
+    assert transport.requests[1]["messages"] != transport.requests[0]["messages"]
+    assert '"reasoning": "choose a tool"' in json.dumps(transport.requests[1])
+
+
+def test_budgets_mask_tools_and_reject_unavailable_calls(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport(
+        [
+            reply("get_plan", '{"candidate_id":"default"}'),
+            reply("get_plan", '{"candidate_id":"default"}'),
+            reply("get_plan", '{"candidate_id":"default"}'),
+            reply("evaluate_candidate", '{"action":{"version":1}}'),
+            reply("evaluate_candidate", '{"action":{"version":1}}'),
+            reply("finish"),
+        ]
+    )
+    trace = policy(transport, turns=6, inspections=1).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert len(evaluator.candidates) == 1
+    for index in (0, 1):
+        assert trace.tool_events[index].result["Plan"] == {
+            "Node Type": "Result",
+            "Plan Rows": 1,
+        }
+    for index in (2, 4):
+        assert (
+            trace.tool_events[index].result["error"]
+            == "tool is not available for this turn"
         )
-        evaluator = PlanValidationEvaluator(
-            worker,
-            SqlFixture(),
-            Task.model_validate(TASK),
-            default_timeout_ms=5_000,
-            max_candidates=1,
+    tools = transport.requests[4]["tools"]
+    assert isinstance(tools, list)
+    assert [JSON_OBJECT.validate_python(tool)["function"] for tool in tools] == [
+        next(
+            tool.function.model_dump(mode="json")
+            for tool in trace.tools
+            if tool.function.name == "finish"
         )
-        evaluator.start()
+    ]
 
-        def fail(
-            sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
-        ) -> ExplainResult:
-            raise error
 
-        monkeypatch.setattr(worker, "explain", fail)
-        client = FakeClient()
-        with pytest.raises(type(error), match=str(error)):
-            QoAgentPolicy(config(), client).search(evaluator)
-        assert len(client.requests) == 1
-        assert evaluator.candidates == []
+def test_context_budget_is_counted_before_generation(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport([])
+    transport.count = CONTEXT_LENGTH - OUTPUT_TOKENS + 1
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.CONTEXT_BUDGET
+    assert trace.prompt_tokens == transport.count
+    assert len(transport.token_requests) == 1
+    assert transport.requests == []
+    assert evaluator.candidates == []
 
-    def test_terminal_tools_enforce_the_decision_order(self, tmp_path: Path) -> None:
-        evaluator = FakeEvaluator(tmp_path)
-        environment = AgentEnvironment(evaluator)
 
-        result, finished = environment.execute("finish", {})
-        assert "use keep_default" in result["error"]
-        assert not finished
+@pytest.mark.parametrize("arguments", ["not-json", "[]", '{"action":{"unknown":1}}'])
+def test_malformed_decision_consumes_a_slot_without_sql(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    database: Database,
+    arguments: str,
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", arguments), reply("finish")]
+    )
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert len(evaluator.candidates) == 1
+    assert not evaluator.candidates[0].action_valid
+    assert database.explain_calls == 1
+    assert trace.tool_events[0].result["attempts_remaining"] == 0
 
-        evaluator.evaluate({"version": 1})
-        result, finished = environment.execute("keep_default", {})
-        assert "before submitting a candidate" in result["error"]
-        assert not finished
 
-    def test_reserved_turns_only_offer_decision_tools(self, tmp_path: Path) -> None:
-        client = FakeClient()
-        policy = QoAgentPolicy(replace(config(), maximum_model_turns=2), client)
-        evaluator = FakeEvaluator(tmp_path)
+def test_two_candidates_can_use_validation_feedback(database: Database) -> None:
+    evaluator = PlanValidationEvaluator[InspectionExecutor](
+        database,
+        SqlFixture(),
+        TASK,
+        default_timeout_ms=TIMEOUT_MS,
+        max_candidates=2,
+    )
+    evaluator.start()
+    transport = ScriptedTransport(
+        [
+            reply("evaluate_candidate", "not-json"),
+            reply("evaluate_candidate", '{"action":{"version":1}}'),
+            reply("finish"),
+        ]
+    )
+    trace = policy(transport, attempts=2).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert [candidate.action_valid for candidate in evaluator.candidates] == [
+        False,
+        True,
+    ]
+    assert database.explain_calls == 2
+    assert trace.tool_events[0].result["errors_or_diagnostics"]
+    assert trace.tool_events[0].result["attempts_remaining"] == 1
 
-        policy.search(evaluator)
 
-        first_tools = {tool["function"]["name"] for tool in client.requests[0]["tools"]}
-        assert first_tools == {"evaluate_candidate", "keep_default"}
+def test_missing_usage_does_not_block_counted_turns(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    first = reply("evaluate_candidate", '{"action":{"version":1}}')
+    first.pop("usage")
+    transport = ScriptedTransport([first, reply("finish")])
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert trace.usage.prompt_tokens is None
+    assert len(transport.token_requests) == 2
 
-    def test_stops_before_the_next_turn_would_exceed_context(
-        self, tmp_path: Path
-    ) -> None:
-        client = ContextLimitClient()
-        policy = QoAgentPolicy(replace(config(), context_length=20_480), client)
-        evaluator = FakeEvaluator(tmp_path)
 
-        trace = policy.search(evaluator)
+def test_truncated_tool_is_never_executed(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    truncated = reply("keep_default")
+    choices = truncated["choices"]
+    assert isinstance(choices, list)
+    choice = JSON_OBJECT.validate_python(choices[0])
+    choice["finish_reason"] = "length"
+    truncated["choices"] = [choice]
+    trace = policy(ScriptedTransport([truncated])).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_OUTPUT_LIMIT
+    assert not evaluator.kept_default
+    assert trace.tool_events == []
+    assert trace.model_responses[0].truncated
+    assert trace.transcript[-1].tool_calls is not None
 
-        assert trace["stop_reason"] == "context_budget"
-        assert len(client.requests) == 1
-        assert trace["context_estimate_tokens"] > 19_000
 
-    def test_stops_if_the_server_omits_token_usage(self, tmp_path: Path) -> None:
-        client = MissingUsageClient()
-        policy = QoAgentPolicy(config(), client)
-        evaluator = FakeEvaluator(tmp_path)
+def test_turn_limit_and_candidate_limit(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", '{"action":{"version":1}}')]
+    )
+    with pytest.raises(ValueError, match="candidate limits must agree"):
+        policy(transport, attempts=2).search(evaluator)
+    assert transport.requests == []
+    assert (
+        policy(transport, turns=1).search(evaluator).stop_reason
+        == StopReason.MODEL_TURN_LIMIT
+    )
+    assert len(transport.requests) == 1
 
-        trace = policy.search(evaluator)
 
-        assert trace["stop_reason"] == "missing_token_usage"
-        assert len(client.requests) == 1
+def test_terminal_order(evaluator: PlanValidationEvaluator[InspectionExecutor]) -> None:
+    environment = AgentEnvironment(evaluator)
+    result, finished = environment.execute("finish", {})
+    assert "use keep_default" in result["error"]
+    assert not finished
+    evaluator.evaluate({"version": 1})
+    result, finished = environment.execute("keep_default", {})
+    assert "before submitting a candidate" in result["error"]
+    assert not finished
+    result, finished = environment.execute(
+        "evaluate_candidate", {"action": {"version": 1}}
+    )
+    assert result == {"error": "rollout candidate budget is exhausted"}
+    assert not finished
 
-    def test_evaluate_tool_contains_resolvable_join_tree_schema(self) -> None:
-        evaluate = next(
-            item
-            for item in agent_tools(["a", "b"])
-            if item["function"]["name"] == "evaluate_candidate"
+
+def test_keep_default_and_unseeded_requests(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport([reply("keep_default")])
+    trace = policy(transport, seed=None).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_KEEP_DEFAULT
+    assert evaluator.kept_default and not evaluator.candidates
+    assert "seed" not in transport.requests[0]
+    assert turn_seed(SEED, TASK.task_id, 1) == turn_seed(SEED, TASK.task_id, 1)
+    assert turn_seed(SEED, TASK.task_id, 1) != turn_seed(SEED, TASK.task_id, 2)
+
+
+@pytest.mark.parametrize("error", [PostgresError("lost"), ContainerError("lost")])
+def test_failure_keeps_submitted_evidence_unfinished(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", '{"action":{"version":1}}')]
+    )
+    agent = policy(transport)
+
+    def fail(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        raise error
+
+    monkeypatch.setattr(evaluator.worker, "explain", fail)
+    with pytest.raises(type(error), match="lost"):
+        agent.search(evaluator)
+    assert agent.trace is not None
+    assert agent.trace.stop_reason is None
+    assert len(agent.trace.model_responses) == 1
+    assert agent.trace.transcript[-1].tool_calls is not None
+    assert evaluator.candidates == []
+
+
+def test_model_failure_retains_completed_tool_evidence(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = ScriptedTransport(
+        [reply("evaluate_candidate", '{"action":{"version":1}}')]
+    )
+    original = transport.request
+
+    def fail_on_second_turn(path: str, body: JsonObject | None = None) -> JsonObject:
+        if path == "chat/completions" and transport.requests:
+            raise ModelError("provider unavailable")
+        return original(path, body)
+
+    monkeypatch.setattr(transport, "request", fail_on_second_turn)
+    agent = policy(transport)
+    with pytest.raises(ModelError, match="provider unavailable"):
+        agent.search(evaluator)
+    assert agent.trace is not None and agent.trace.stop_reason is None
+    assert len(agent.trace.tool_events) == 1
+    assert len(evaluator.candidates) == 1
+
+
+def test_cancel_after_validation_retains_candidate(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancel = Event()
+    evaluator.cancel = cancel
+    original = evaluator.worker.explain
+
+    def complete_then_cancel(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = original(sql, timeout_ms, analyze=analyze, hint=hint)
+        cancel.set()
+        return result
+
+    monkeypatch.setattr(evaluator.worker, "explain", complete_then_cancel)
+    agent = policy(
+        ScriptedTransport([reply("evaluate_candidate", '{"action":{"version":1}}')])
+    )
+    with pytest.raises(CancelledError):
+        agent.search(evaluator)
+    assert len(evaluator.candidates) == 1
+    assert agent.trace is not None and agent.trace.stop_reason is None
+
+
+def test_astra_continuation_survives_real_tool_loop(
+    repository_root: Path,
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    from qorl.model.schemas import AstraDecodingSettings
+
+    preset = ModelPreset.model_validate(
+        tomllib.loads(
+            (
+                repository_root / "configs/defaults/models/000-gpt-6-astra.toml"
+            ).read_text()
         )
-        parameters = evaluate["function"]["parameters"]
-        leading = parameters["properties"]["action"]["properties"]["leading"]
-        assert leading["$ref"] == "#/$defs/JoinNode"
-        join_node = parameters["$defs"]["JoinNode"]
-        assert join_node["properties"]["left"]["anyOf"][1]["$ref"] == "#/$defs/JoinNode"
-        assert join_node["properties"]["left"]["anyOf"][0]["enum"] == ["a", "b"]
-        scans = parameters["$defs"]["ScanConstraint"]
-        assert scans["properties"]["relation"]["enum"] == ["a", "b"]
+    )
+    assert isinstance(preset.decoding, AstraDecodingSettings)
+    output: list[JsonObject] = [
+        {
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [],
+            "encrypted_content": "opaque",
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "phase": "commentary",
+            "content": [{"type": "output_text", "text": "Inspect the default."}],
+        },
+        {
+            "type": "function_call",
+            "id": "fc_1",
+            "call_id": "call_1",
+            "name": "get_plan",
+            "arguments": '{"candidate_id":"default"}',
+        },
+    ]
+    first: JsonObject = {
+        "model": "gpt-6-astra",
+        "status": "completed",
+        "output": list(output),
+    }
+    second: JsonObject = {
+        "model": "gpt-6-astra",
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "keep_default",
+                "arguments": "{}",
+            }
+        ],
+    }
+    transport = ScriptedTransport([first, second])
+    agent = QoAgentPolicy(
+        AstraModelClient(preset.model, preset.decoding, transport=transport),
+        AgentSettings(
+            candidate_attempts=1,
+            maximum_model_turns=MODEL_TURNS,
+            inspection_turns_per_alias=3,
+        ),
+        context_length=preset.model.context_length,
+        max_tokens=preset.decoding.max_tokens,
+        seed=SEED,
+    )
+    trace = agent.search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_KEEP_DEFAULT
+    inputs = transport.requests[1]["input"]
+    assert isinstance(inputs, list)
+    assert inputs[2:5] == output
+    assert inputs[5] == {
+        "type": "function_call_output",
+        "call_id": "call_1",
+        "output": trace.transcript[3].content,
+    }
+    assert trace.transcript[2].continuation is not None
+    assert trace.transcript[2].continuation.output == output
+    assert trace.model_responses[0].raw_response == first
+    assert "seed" not in transport.requests[0]
+    assert transport.token_requests[1]["input"] == inputs
+
+
+def test_single_candidate_observation_and_recursive_schema(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    interface = AgentInterface.from_evaluator(evaluator, MODEL_TURNS)
+    assert interface.observation["candidate_attempts"] == 1
+    assert interface.observation["turn_budget"]["reserved_final_turns"] == 2
+    assert interface.available_tool_names(1, 1) == {"finish"}
+    tool = next(
+        item
+        for item in interface.tools
+        if item["function"]["name"] == "evaluate_candidate"
+    )
+    schema = tool["function"]["parameters"]
+    assert (
+        schema["properties"]["action"]["properties"]["leading"]["$ref"]
+        == "#/$defs/JoinNode"
+    )
+    assert schema["$defs"]["JoinNode"]["properties"]["left"]["anyOf"][0]["enum"] == [
+        "a",
+        "b",
+    ]

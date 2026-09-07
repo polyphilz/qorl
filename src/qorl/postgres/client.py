@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from pydantic import ValidationError
 
-from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes, PostgresSettings
 
 
@@ -137,7 +137,7 @@ exec env \
             )
         except PostgresError as error:
             if "canceling statement due to statement timeout" in str(error):
-                raise QueryTimeout(timeout_ms) from error
+                raise QueryTimeoutError(timeout_ms) from error
             raise
         try:
             parsed = json.loads(completed.stdout)

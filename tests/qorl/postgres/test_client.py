@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from qorl.postgres.client import PostgresClient
-from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
 from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
 
 
@@ -104,7 +104,7 @@ def test_statement_timeout_has_a_specific_error_type(
         )
     )
     client = PostgresClient(execute, postgres_settings, postgres_indexes)
-    with pytest.raises(QueryTimeout) as raised:
+    with pytest.raises(QueryTimeoutError) as raised:
         client.explain("SELECT 1", 5_000, analyze=analyze)
     assert raised.value.timeout_ms == 5_000
     assert client.explain_calls == 1

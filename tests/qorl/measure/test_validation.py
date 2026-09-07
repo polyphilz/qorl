@@ -8,7 +8,7 @@ from pydantic import JsonValue
 from qorl.measure.schemas import MeasurementStatus
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
-from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import Relation, Task
 
@@ -271,7 +271,7 @@ def test_keep_default_closes_candidate_submission() -> None:
 
 
 def test_planning_timeout_is_not_a_completed_latency_measurement() -> None:
-    worker = Worker(plain(), QueryTimeout(TIMEOUT_MS))
+    worker = Worker(plain(), QueryTimeoutError(TIMEOUT_MS))
     run = evaluator(worker)
     run.start()
     candidate = run.evaluate(LEADING)

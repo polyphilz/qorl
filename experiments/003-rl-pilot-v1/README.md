@@ -1,5 +1,8 @@
 # 003 — RL pilot v1
 
+Execution entrypoint retired on 2026-09-07 during the shared-agent migration.
+The inputs and recorded results below are historical evidence, not rerun instructions.
+
 **Status:** completed
 
 This 12-update pilot uses 48 CEB training tasks and a fixed 16-task validation

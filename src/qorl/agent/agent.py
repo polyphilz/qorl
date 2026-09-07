@@ -1,291 +1,193 @@
-from __future__ import annotations
+"""One provider-independent conversation loop over QORL's existing tools and budgets."""
 
 import hashlib
 import json
-from dataclasses import asdict
-from typing import Any
 
-from qorl.agent.client import ModelClient, ModelError, OpenAIModelClient
-from qorl.agent.config import QoAgentConfig
-from qorl.agent.interface import (
-    AGENT_INTERFACE_VERSION,
-    INSPECTION_TURNS_PER_ALIAS,
-    AgentInterface,
-)
-from qorl.agent.prompts import system_prompt
-from qorl.agent.schemas import AgentSettings
+from pydantic import JsonValue, TypeAdapter
+
+from qorl.agent.interface import AGENT_INTERFACE_VERSION, AgentInterface
+from qorl.agent.schemas import AgentSettings, AgentTrace, ToolEvent
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import (
     TERMINAL_STOP_REASON,
     TURN_BUDGET_FIELD,
     AgentEvaluator,
-    PolicyType,
     StopReason,
     ToolName,
 )
+from qorl.model.client import JSON_OBJECT, ModelClient
+from qorl.model.exceptions import ContextBudgetError
+from qorl.model.schemas import (
+    GenerationRequest,
+    Message,
+    MessageRole,
+    TokenUsage,
+    ToolDefinition,
+)
 from qorl.util.hashing import sha256_json
 
-MIN_COMPLETION_RESERVE_TOKENS = 256
-TOOL_MESSAGE_FRAME_BYTES = 64
+SEED_BYTES = 4
+JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+
+
+def turn_seed(seed: int | None, task_id: str, turn: int) -> int | None:
+    """Derive the same turn seed across experiments without using names or timestamps."""
+    if seed is None:
+        return None
+    digest = hashlib.sha256(f"{seed}:{task_id}:{turn}".encode()).digest()
+    return int.from_bytes(digest[:SEED_BYTES], "big")
+
+
+def total_usage(responses: list[TokenUsage]) -> TokenUsage:
+    """An aggregate count is unknown if any constituent count is unknown."""
+
+    def total(values: list[int | None]) -> int | None:
+        return (
+            None
+            if any(value is None for value in values)
+            else sum(value for value in values if value is not None)
+        )
+
+    return TokenUsage(
+        prompt_tokens=total([usage.prompt_tokens for usage in responses]),
+        completion_tokens=total([usage.completion_tokens for usage in responses]),
+        reasoning_tokens=total([usage.reasoning_tokens for usage in responses]),
+        cached_tokens=total([usage.cached_tokens for usage in responses]),
+    )
 
 
 class QoAgentPolicy:
+    """Apply agent rules to a supplied model client; serving and identity live outside."""
+
     def __init__(
         self,
-        config: QoAgentConfig,
-        client: ModelClient | None = None,
-    ) -> None:
-        self.config = config
-        self.client = client or OpenAIModelClient(
-            config.base_url, config.request_timeout_seconds
-        )
-        self.server_identity: dict[str, Any] | None = None
-
-    def preflight(self) -> dict[str, Any]:
-        response = self.client.models()
-        models = [
-            item
-            for item in response.get("data", [])
-            if isinstance(item, dict) and isinstance(item.get("id"), str)
-        ]
-        model_ids = sorted(item["id"] for item in models)
-        if self.config.model not in model_ids:
-            raise ModelError(
-                f"model server does not advertise {self.config.model}: {model_ids}"
-            )
-        model = next(item for item in models if item["id"] == self.config.model)
-        effective_context_model = model
-        if model.get("max_model_len") is None and model.get("parent"):
-            effective_context_model = next(
-                (item for item in models if item["id"] == model["parent"]),
-                model,
-            )
-        if effective_context_model.get("max_model_len") != self.config.context_length:
-            raise ModelError(
-                "model context length mismatch: "
-                f"expected={self.config.context_length} "
-                f"actual={model.get('max_model_len')} "
-                f"parent={model.get('parent')} "
-                "parent_actual="
-                f"{effective_context_model.get('max_model_len')}"
-            )
-        version = self.client.version()
-        if version.get("version") != self.config.vllm_version:
-            raise ModelError(
-                "vLLM version mismatch: "
-                f"expected={self.config.vllm_version} actual={version.get('version')}"
-            )
-        self.server_identity = {
-            "base_url": self.config.base_url,
-            "advertised_models": model_ids,
-            "model": model,
-            "effective_context_model": effective_context_model,
-            "vllm": version,
-        }
-        return self.server_identity
-
-    def manifest(self, candidate_attempts: int) -> dict[str, Any]:
-        prompt = system_prompt(candidate_attempts)
-        return {
-            "type": PolicyType.QO_AGENT.value,
-            "agent_interface_version": AGENT_INTERFACE_VERSION,
-            **asdict(self.config),
-            "system_prompt": prompt,
-            "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-            "server_identity": self.server_identity,
-        }
-
-    def request_body(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        task_id: str,
-        turn: int,
-    ) -> dict[str, Any]:
-        body = {
-            "model": self.config.model,
-            "messages": messages,
-            "tools": tools,
-            "tool_choice": "required",
-            "parallel_tool_calls": False,
-            **self.config.sampling,
-            "chat_template_kwargs": {"enable_thinking": self.config.thinking},
-        }
-        if self.config.seed is not None:
-            seed_bytes = hashlib.sha256(
-                f"{self.config.seed}:{task_id}:{turn}".encode()
-            ).digest()
-            body["seed"] = int.from_bytes(seed_bytes[:4], "big")
-        return body
-
-    def search(
-        self,
-        evaluator: AgentEvaluator,
+        client: ModelClient,
+        settings: AgentSettings,
         *,
-        settings: AgentSettings | None = None,
-    ) -> dict[str, Any]:
-        settings = settings or AgentSettings(
-            candidate_attempts=evaluator.max_candidates,
-            maximum_model_turns=self.config.maximum_model_turns,
-            inspection_turns_per_alias=INSPECTION_TURNS_PER_ALIAS,
-        )
-        if settings.candidate_attempts != evaluator.max_candidates:
+        context_length: int,
+        max_tokens: int,
+        seed: int | None,
+    ) -> None:
+        if not 0 < max_tokens <= context_length:
+            raise ValueError("completion allowance must fit the context length")
+        self.client = client
+        self.settings = settings
+        self.context_length = context_length
+        self.max_tokens = max_tokens
+        self.seed = seed
+        self.trace: AgentTrace | None = None
+
+    def search(self, evaluator: AgentEvaluator) -> AgentTrace:
+        """Retain completed turns and tool results even if the rollout is interrupted."""
+        self.trace = None
+        if self.settings.candidate_attempts != evaluator.max_candidates:
             raise ValueError("agent and evaluator candidate limits must agree")
-        completion_reserve = max(
-            MIN_COMPLETION_RESERVE_TOKENS,
-            int(self.config.sampling.get("max_tokens", 0)),
-        )
         interface = AgentInterface.from_evaluator(
             evaluator,
-            settings.maximum_model_turns,
-            self.config.context_length,
-            completion_reserve,
-            inspection_turns_per_alias=settings.inspection_turns_per_alias,
+            self.settings.maximum_model_turns,
+            self.context_length,
+            self.max_tokens,
+            inspection_turns_per_alias=self.settings.inspection_turns_per_alias,
         )
-        messages = interface.initial_messages()
-        responses: list[dict[str, Any]] = []
-        events: list[dict[str, Any]] = []
+        trace = AgentTrace(
+            agent_interface_version=AGENT_INTERFACE_VERSION,
+            seed=self.seed,
+            initial_observation=JSON_OBJECT.validate_python(interface.observation),
+            tools=[ToolDefinition.model_validate(tool) for tool in interface.tools],
+            tools_sha256=sha256_json(interface.tools),
+            transcript=[
+                Message.model_validate(message)
+                for message in interface.initial_messages()
+            ],
+        )
+        self.trace = trace
         environment = AgentEnvironment(evaluator)
-        stop_reason = StopReason.MODEL_TURN_LIMIT
-        context_estimate_tokens: int | None = None
-
-        for turn in range(1, settings.maximum_model_turns + 1):
+        for turn in range(1, self.settings.maximum_model_turns + 1):
             evaluator.check_cancelled()
-            available_tools = interface.available_tools(turn, len(evaluator.candidates))
             available_names = interface.available_tool_names(
                 turn, len(evaluator.candidates)
             )
-            response = self.client.chat(
-                self.request_body(
-                    messages, available_tools, evaluator.task.task_id, turn
-                )
+            request = GenerationRequest(
+                messages=list(trace.transcript),
+                tools=[
+                    tool
+                    for tool in trace.tools
+                    if tool.function.name in available_names
+                ],
+                seed=turn_seed(self.seed, evaluator.task.task_id, turn),
             )
-            responses.append(response)
-            evaluator.check_cancelled()
             try:
-                raw_message = response["choices"][0]["message"]
-                assistant = {
-                    key: raw_message[key]
-                    for key in ("role", "content", "tool_calls")
-                    if key in raw_message
-                }
-            except (KeyError, IndexError, TypeError) as error:
-                raise ModelError(
-                    "model server returned an invalid chat response"
-                ) from error
-            messages.append(assistant)
-            calls = assistant.get("tool_calls") or []
+                response = self.client.generate(request)
+            except ContextBudgetError as error:
+                trace.stop_reason = StopReason.CONTEXT_BUDGET
+                trace.prompt_tokens = error.prompt_tokens
+                break
+            trace.model_responses.append(response)
+            trace.transcript.append(response.message)
+            trace.usage = total_usage([item.usage for item in trace.model_responses])
+            trace.prompt_tokens = response.prompt_tokens
+            evaluator.check_cancelled()
+            if response.truncated:
+                trace.stop_reason = StopReason.MODEL_OUTPUT_LIMIT
+                break
+            calls = response.message.tool_calls or []
             if not calls:
-                messages.append(
-                    {"role": "user", "content": "Call exactly one available tool."}
-                )
-                events.append({"turn": turn, "error": "model emitted no tool call"})
-                continue
-
-            should_finish = False
-            terminal_tool: str | None = None
-            pending_tool_tokens = 0
-            for index, call in enumerate(calls):
-                call_id = call.get("id", f"turn-{turn}-call-{index + 1}")
-                name = call.get("function", {}).get("name", "")
-                raw_arguments = call.get("function", {}).get("arguments", "{}")
-                try:
-                    arguments = (
-                        json.loads(raw_arguments)
-                        if isinstance(raw_arguments, str)
-                        else raw_arguments
+                trace.transcript.append(
+                    Message(
+                        role=MessageRole.USER,
+                        content="Call exactly one available tool.",
                     )
-                except json.JSONDecodeError:
-                    arguments = raw_arguments
+                )
+                continue
+            terminal_tool: ToolName | None = None
+            for index, call in enumerate(calls):
+                evaluator.check_cancelled()
+                name = call.function.name
+                try:
+                    arguments = JSON_VALUE.validate_json(call.function.arguments)
+                except ValueError:
+                    arguments = call.function.arguments
                 if index != 0:
-                    result, finished = {"error": "call one tool at a time"}, False
+                    raw_result, finished = {"error": "call one tool at a time"}, False
                 elif name not in available_names:
-                    result, finished = (
+                    raw_result, finished = (
                         {"error": "tool is not available for this turn"},
                         False,
                     )
                 else:
-                    result, finished = environment.execute(name, arguments)
-                budget = interface.budget(turn)
-                result = (
-                    {**result, TURN_BUDGET_FIELD: budget}
-                    if isinstance(result, dict)
-                    else {"result": result, TURN_BUDGET_FIELD: budget}
+                    raw_result, finished = environment.execute(name, arguments)
+                result = JSON_VALUE.validate_python(raw_result)
+                body = JSON_OBJECT.validate_python(
+                    {
+                        **(result if isinstance(result, dict) else {"result": result}),
+                        TURN_BUDGET_FIELD: interface.budget(turn),
+                    }
+                )
+                trace.transcript.append(
+                    Message(
+                        role=MessageRole.TOOL,
+                        tool_call_id=call.id,
+                        name=name,
+                        content=json.dumps(body, sort_keys=True),
+                    )
+                )
+                trace.tool_events.append(
+                    ToolEvent(turn=turn, tool_call_id=call.id, name=name, result=body)
                 )
                 if index == 0:
-                    if name == ToolName.EVALUATE_CANDIDATE and "candidate_id" in result:
-                        if not result["constraints_satisfied"]:
-                            label = "invalid"
-                        else:
-                            label = "validated"
-                        print(f"  {result['candidate_id']}: {label}", flush=True)
+                    if name == ToolName.EVALUATE_CANDIDATE and "candidate_id" in body:
+                        label = (
+                            "validated" if body["constraints_satisfied"] else "invalid"
+                        )
+                        print(f"  {body['candidate_id']}: {label}", flush=True)
                     elif name != ToolName.FINISH:
                         print(f"  turn-{turn:02d}: {name}", flush=True)
-                content = json.dumps(result, sort_keys=True)
-                # A byte-fallback tokenizer cannot produce more tokens than
-                # input bytes. Include a small allowance for message framing.
-                pending_tool_tokens += (
-                    len(content.encode("utf-8")) + TOOL_MESSAGE_FRAME_BYTES
-                )
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "name": name,
-                        "content": content,
-                    }
-                )
-                events.append(
-                    {
-                        "turn": turn,
-                        "tool_call_id": call_id,
-                        "name": name,
-                        "result": result,
-                    }
-                )
-                should_finish = should_finish or finished
                 if finished:
-                    terminal_tool = name
-            if should_finish:
-                stop_reason = TERMINAL_STOP_REASON[ToolName(terminal_tool)]
+                    terminal_tool = ToolName(name)
+                evaluator.check_cancelled()
+            if terminal_tool is not None:
+                trace.stop_reason = TERMINAL_STOP_REASON[terminal_tool]
                 break
-            response_usage = response.get("usage", {})
-            total_tokens = response_usage.get("total_tokens")
-            if not isinstance(total_tokens, int):
-                prompt_tokens = response_usage.get("prompt_tokens")
-                completion_tokens = response_usage.get("completion_tokens")
-                if isinstance(prompt_tokens, int) and isinstance(
-                    completion_tokens, int
-                ):
-                    total_tokens = prompt_tokens + completion_tokens
-            if isinstance(total_tokens, int):
-                context_estimate_tokens = total_tokens + pending_tool_tokens
-                if (
-                    context_estimate_tokens + completion_reserve
-                    >= self.config.context_length
-                ):
-                    stop_reason = StopReason.CONTEXT_BUDGET
-                    break
-            else:
-                # Continuing without server-reported usage would make the next
-                # request's fit unknowable. End this rollout cleanly instead.
-                stop_reason = StopReason.MISSING_TOKEN_USAGE
-                break
-
-        usage: dict[str, int] = {}
-        for response in responses:
-            for name, value in response.get("usage", {}).items():
-                if isinstance(value, int):
-                    usage[name] = usage.get(name, 0) + value
-        return {
-            "agent_interface_version": AGENT_INTERFACE_VERSION,
-            "stop_reason": stop_reason.value,
-            "initial_observation": interface.observation,
-            "tools": interface.tools,
-            "tools_sha256": sha256_json(interface.tools),
-            "transcript": messages,
-            "model_responses": responses,
-            "tool_events": events,
-            "usage": usage,
-            "context_estimate_tokens": context_estimate_tokens,
-        }
+        else:
+            trace.stop_reason = StopReason.MODEL_TURN_LIMIT
+        return trace

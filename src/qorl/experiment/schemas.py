@@ -13,7 +13,13 @@ from qorl.adapters.schemas import LoraSettings
 from qorl.agent.schemas import AgentSettings
 from qorl.evaluation.schemas import EvaluationSettings
 from qorl.measure.schemas import CalibrationSettings, RolloutMeasurementSettings
-from qorl.model.schemas import LocalDecodingSettings, ModelProvider, ModelSettings
+from qorl.model.schemas import (
+    AstraDecodingSettings,
+    DecodingSettings,
+    LocalDecodingSettings,
+    ModelProvider,
+    ModelSettings,
+)
 from qorl.rl.schemas import RlSettings, RlTrainingSettings
 from qorl.serving.schemas import ServingSettings
 from qorl.sft.schemas import (
@@ -204,15 +210,19 @@ class ModelExperimentConfig(BaseExperimentConfig):
     agent: AgentSettings
     evaluation: EvaluationSettings
     measurement: RolloutMeasurementSettings
-    decoding: LocalDecodingSettings | None = None
+    decoding: DecodingSettings
     serving: ServingSettings | None = None
     resources: ResourceSettings | None = None
 
     @model_validator(mode="after")
     def applicable_model_settings(self) -> Self:
-        """Hosted evaluation must not inherit local decoding or server settings."""
+        """Require the selected provider's decoding and access settings."""
         if self.model.provider == ModelProvider.LOCAL:
-            if self.serving is None or self.decoding is None or self.resources is None:
+            if (
+                self.serving is None
+                or not isinstance(self.decoding, LocalDecodingSettings)
+                or self.resources is None
+            ):
                 raise ValueError(
                     "local models require serving, decoding, and resources"
                 )
@@ -225,16 +235,27 @@ class ModelExperimentConfig(BaseExperimentConfig):
                 )
             if self.resources.serving_gpu_ids is None:
                 raise ValueError("local serving requires resources.serving_gpu_ids")
-            if self.decoding.max_tokens > self.model.context_length:
-                raise ValueError("decoding.max_tokens exceeds model.context_length")
-        elif (
-            self.serving is not None
-            or self.decoding is not None
-            or self.resources is not None
-        ):
-            raise ValueError(
-                "hosted evaluation cannot use local serving, decoding, or GPUs"
-            )
+        else:
+            if (
+                self.serving is not None
+                or self.resources is not None
+                or not isinstance(self.decoding, AstraDecodingSettings)
+            ):
+                raise ValueError(
+                    "hosted evaluation requires Astra decoding without local serving or GPUs"
+                )
+            if self.model.name_or_path != "gpt-6-astra":
+                raise ValueError("hosted evaluation supports only gpt-6-astra")
+            if (
+                self.model.base_url is None
+                or self.model.request_timeout_seconds is None
+                or self.model.api_key_env is None
+            ):
+                raise ValueError("hosted evaluation requires model API access settings")
+            if self.model.revision is not None or self.model.adapter_path is not None:
+                raise ValueError("hosted models do not accept revisions or adapters")
+        if self.decoding.max_tokens > self.model.context_length:
+            raise ValueError("decoding.max_tokens exceeds model.context_length")
         if self.method != ExperimentMethod.EVAL:
             if (
                 self.model.provider != ModelProvider.LOCAL

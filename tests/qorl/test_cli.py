@@ -15,41 +15,6 @@ from qorl.experiment.schemas import (
 from qorl.taskset.schemas import TaskRole
 
 
-@pytest.mark.parametrize("omitted", ["--postgres-config", "--pool-config"])
-def test_legacy_benchmark_requires_both_config_paths(omitted: str) -> None:
-    options = {
-        "--postgres-config": "docker/postgres/configs/000-pgconf-default",
-        "--pool-config": "docker/worker_pool/configs/001-poolconf-2x16",
-    }
-    arguments = ["run"]
-    for flag, path in options.items():
-        if flag != omitted:
-            arguments.extend([flag, path])
-    with pytest.raises(SystemExit) as error:
-        parser().parse_args(arguments)
-    assert error.value.code == 2
-
-
-def test_cli_forwards_legacy_benchmark_config_paths(
-    repository_root: Path,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    postgres = tmp_path / "test-pgconf"
-    pool = Path("docker/worker_pool/configs/001-poolconf-2x16")
-    execute = Mock(return_value=tmp_path)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "run_benchmark", execute)
-    monkeypatch.setattr(
-        "sys.argv",
-        ["qorl", "run", "--postgres-config", str(postgres), "--pool-config", str(pool)],
-    )
-    assert cli.main() == 0
-    execute.assert_called_once_with(
-        repository_root, postgres_config_path=postgres, pool_config_path=pool
-    )
-
-
 def test_experiment_run_cli_forwards_the_stage_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

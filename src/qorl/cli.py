@@ -4,7 +4,6 @@ import argparse
 from pathlib import Path
 
 from qorl import __version__
-from qorl.evaluation.benchmark import run_benchmark
 from qorl.experiment.create import create_experiment
 from qorl.experiment.run import (
     add_run_arguments,
@@ -17,7 +16,6 @@ from qorl.experiment.schemas import (
     ExperimentMethod,
 )
 from qorl.model.schemas import ModelProvider
-from qorl.paths import REPOSITORY_ROOT
 
 
 def parser() -> argparse.ArgumentParser:
@@ -88,19 +86,6 @@ def parser() -> argparse.ArgumentParser:
     )
     experiment_run.add_argument("experiment_directory", type=Path)
     add_run_arguments(experiment_run)
-    run_parser = commands.add_parser("run", help="run the configured policy on JOB")
-    run_parser.add_argument(
-        "--postgres-config",
-        type=Path,
-        required=True,
-        help="PostgreSQL config directory",
-    )
-    run_parser.add_argument(
-        "--pool-config",
-        type=Path,
-        required=True,
-        help="worker pool config directory or poolconf.json",
-    )
     return root
 
 
@@ -133,14 +118,7 @@ def main() -> int:
             )
             print(f"QORL experiment created: {output_dir}")
             return 0
-        else:
-            output_dir = run_benchmark(
-                REPOSITORY_ROOT,
-                postgres_config_path=arguments.postgres_config,
-                pool_config_path=arguments.pool_config,
-            )
     except (RuntimeError, OSError, ValueError) as error:
         print(f"qorl: {error}")
         return 1
-    print(f"QORL {arguments.command} complete: {output_dir}")
     return 0

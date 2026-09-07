@@ -10,8 +10,8 @@ from urllib.parse import urlsplit
 
 from qorl.adapters.config import adapter_rank
 from qorl.adapters.verify import verify_adapter_base
-from qorl.exceptions import ModelError
 from qorl.model.client import LocalModelClient
+from qorl.model.exceptions import ModelError
 from qorl.model.files import resolve_model
 from qorl.model.schemas import LocalDecodingSettings, ModelSettings
 from qorl.paths import REPOSITORY_ROOT

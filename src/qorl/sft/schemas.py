@@ -24,7 +24,6 @@ JSON_OBJECT_LIST_ADAPTER: TypeAdapter[list[JsonObject]] = TypeAdapter(list[JsonO
 STRING_LIST_ADAPTER: TypeAdapter[list[str]] = TypeAdapter(list[str])
 GENERATOR_MODELS = {
     ModelProvider.OPENAI: "gpt-6-astra",
-    ModelProvider.ANTHROPIC: "claude-fable-5-1",
 }
 
 
@@ -62,11 +61,9 @@ class GenerationSettings(BaseModel):
         """Generation uses a hosted model, never the trainee or a local adapter."""
         if isinstance(self.model, ModelSettings):
             if self.model.provider == ModelProvider.LOCAL:
-                raise ValueError("SFT generation requires an OpenAI or Anthropic model")
+                raise ValueError("SFT generation requires GPT-6 Astra through OpenAI")
             if self.model.name_or_path != GENERATOR_MODELS[self.model.provider]:
-                raise ValueError(
-                    "SFT generation supports only GPT-6 Astra or Claude Fable 5.1"
-                )
+                raise ValueError("SFT generation supports only GPT-6 Astra")
             if self.model.revision is not None or self.model.adapter_path is not None:
                 raise ValueError(
                     "hosted generators do not accept revisions or adapters"

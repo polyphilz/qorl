@@ -47,7 +47,7 @@ def test_local_generator_is_rejected() -> None:
         name_or_path="a/local-model",
         context_length=20_480,
     )
-    with pytest.raises(ValidationError, match="OpenAI or Anthropic"):
+    with pytest.raises(ValidationError, match="GPT-6 Astra through OpenAI"):
         GenerationSettings(model=model, generations_per_task=1)
 
 
@@ -62,7 +62,6 @@ def test_dataset_reuse_needs_both_conversation_splits() -> None:
     "provider,name",
     [
         (ModelProvider.OPENAI, "gpt-6-astra"),
-        (ModelProvider.ANTHROPIC, "claude-fable-5-1"),
     ],
 )
 def test_supported_hosted_generators(provider: ModelProvider, name: str) -> None:

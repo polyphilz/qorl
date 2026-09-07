@@ -1,21 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import random
 from contextlib import suppress
-from dataclasses import replace
-from pathlib import Path
 from threading import Event
 
 import verifiers.v1 as vf
 
-from qorl.agent import QoAgentConfig, QoAgentPolicy
-from qorl.agent.client import OpenAIModelClient
+from qorl.agent.agent import QoAgentPolicy
 from qorl.agent.schemas import AgentSettings
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
-from qorl.paths import REPOSITORY_ROOT
+from qorl.model.client import HttpTransport, LocalModelClient
+from qorl.model.schemas import LocalDecodingSettings, ModelSettings
 from qorl.rl.reward import scalar_reward
 from qorl.rl.schemas import AnchoredGrpoSettings, RlRolloutRecord, RlSettings
 from qorl.training import runtime as shared_runtime
@@ -26,8 +23,8 @@ class QorlHarnessConfig(vf.HarnessConfig):
     """Allow Verifiers' fallback construction; experiments supply resolved settings."""
 
     id: str = "qorl"
-    run_config: Path = Path("model/configs/000-modelconf/modelconf.json")
-    context_length: int = 20_480
+    model: ModelSettings | None = None
+    decoding: LocalDecodingSettings | None = None
     agent: AgentSettings = AgentSettings(
         candidate_attempts=1,
         maximum_model_turns=64,
@@ -97,26 +94,32 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         data: vf.TaskData,
         cancel: Event,
     ) -> None:
+        model, decoding = self.config.model, self.config.decoding
+        if model is None or decoding is None:
+            raise ValueError(
+                "RL execution requires resolved model and decoding settings"
+            )
         active = shared_runtime.current()
         task_data = QorlTaskData.model_validate(data.model_dump())
         task = next(
             task for task in active.task_set.tasks if task.task_id == task_data.task_id
         )
-        config_path = self.config.run_config
-        if not config_path.is_absolute():
-            config_path = REPOSITORY_ROOT / config_path
-        policy_data = json.loads(config_path.read_text(encoding="utf-8"))["policy"]
-        policy_config = replace(
-            QoAgentConfig.from_dict(policy_data),
-            model=ctx.model,
-            base_url=endpoint.rstrip("/"),
-            context_length=self.config.context_length,
-            seed=None,
+        client = LocalModelClient(
+            model,
+            decoding,
+            served_model_name=ctx.model,
+            transport=HttpTransport(
+                model.model_copy(update={"base_url": endpoint.rstrip("/")}),
+                api_key=secret,
+            ),
+            token_transport=HttpTransport(model),
         )
-        client = OpenAIModelClient(
-            policy_config.base_url,
-            policy_config.request_timeout_seconds,
-            api_key=secret,
+        policy = QoAgentPolicy(
+            client,
+            self.config.agent,
+            context_length=model.context_length,
+            max_tokens=decoding.max_tokens,
+            seed=None,
         )
 
         with active.claim_worker() as slot:
@@ -145,14 +148,14 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
 
             try:
                 evaluator.start()
-                policy_trace = QoAgentPolicy(policy_config, client).search(
-                    evaluator, settings=self.config.agent
-                )
-                trace.info["qorl_policy"] = policy_trace
+                policy_trace = policy.search(evaluator)
+                trace.info["qorl_policy"] = policy_trace.model_dump(mode="json")
                 evaluator.finish(
                     random.Random(f"qorl-rl:{task.task_id}:{trace.id}:pairs")
                 )
                 store_record(evaluator.record())
             except BaseException as error:
+                if policy.trace is not None:
+                    trace.info["qorl_policy"] = policy.trace.model_dump(mode="json")
                 store_record(evaluator.record(error))
                 raise

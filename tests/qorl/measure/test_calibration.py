@@ -31,7 +31,7 @@ from qorl.measure.schemas import (
 )
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
-from qorl.postgres.exceptions import QueryTimeout
+from qorl.postgres.exceptions import QueryTimeoutError
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import BenchmarkId, TaskRole, TaskSelection
 from qorl.taskset.taskset import TaskSet
@@ -261,7 +261,7 @@ def test_statement_timeout_retains_partial_evidence_and_continues_other_tasks(
         assert timeout_ms == 10
         calls[sql] += 1
         if sql == failed_sql and calls[sql] == 4:
-            raise QueryTimeout(timeout_ms)
+            raise QueryTimeoutError(timeout_ms)
         return explain()
 
     monkeypatch.setattr(PostgresClient, "explain", execute)
@@ -289,7 +289,7 @@ def test_statement_timeout_retains_partial_evidence_and_continues_other_tasks(
     assert len(failed.warmups) == 2
     assert len(failed.measurements) == 1
     assert failed.statement_timeout_ms == 10
-    assert failed.error_type == "QueryTimeout"
+    assert failed.error_type == "QueryTimeoutError"
     assert activity.closed == activity.started
 
 
@@ -438,7 +438,7 @@ def test_generated_entrypoint_measures_saved_selection_and_retains_results(
     ) -> ExplainResult:
         result = execute(worker, sql, timeout_ms, analyze=analyze)
         if timeout and sql == first_sql:
-            raise QueryTimeout(timeout_ms)
+            raise QueryTimeoutError(timeout_ms)
         return result
 
     monkeypatch.setattr(PostgresClient, "explain", explain_or_timeout)

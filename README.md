@@ -5,7 +5,7 @@ harness for training and evaluating an agent that steers PostgreSQL's query
 optimizer toward faster physical plans.
 
 `benchmarks/` holds stable workloads, `experiments/NNN-name/` collocates each run's
-inputs, and [`model/configs/`](model/README.md) holds model and sampling settings.
+inputs, and [`configs/defaults/`](configs/defaults/) supplies experiment defaults.
 
 IMDb preparation is under [`scripts/imdb/`](scripts/imdb/README.md); raw inputs,
 the prepared archive, and verification reports live in ignored `data/`.
@@ -50,8 +50,13 @@ SFT/RL require `train=...` and `validation=...`, with optional `test=...`.
 Evaluation/calibration require only `test=...`. Splits must have disjoint query
 topologies. Model-based methods require a complete local model directory or a
 Hugging Face ID plus an immutable `--base-model-revision`. Hosted evaluation selects
-`--model-provider openai` or `anthropic`; local evaluation also accepts a separate
+`--model-provider openai --base-model-name-or-path gpt-6-astra`; local evaluation also accepts a separate
 `--adapter-path` without merging it.
+
+Local models and Astra use the same agent tools and budgets. Astra uses the
+Responses API and the `OPENAI_API_KEY` environment variable; credentials do not
+belong in experiment files. Creation copies its connection and decoding preset
+from `configs/defaults/models/` into the experiment's `config.toml`.
 
 SFT `--dataset-from` imports a QORL conversation artifact's saved train/validation
 selections and original seeds. It accepts only an optional new `test=...` selection.
@@ -93,37 +98,6 @@ the command exits unsuccessfully if any task fails. Workers are closed on exit.
 `--run 000` explicitly selects recorded inputs; changed experiment inputs require
 a new run. Existing calibration outputs cannot be overwritten, and calibration
 does not support `--resume`. Start a new run after an interrupted calibration.
-
-## Existing execution commands
-
-`run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
-shared policy in `model/configs/000-modelconf/modelconf.json`. It runs one JOB task per worker,
-using the required `--postgres-config` and `--pool-config` selections,
-then records trusted results plus the complete policy trace under
-`outputs/runs/`. The default policy is the untrained
-`empero-ai/Qwen3.8-4B-Distill` `qo-agent` served through a local
-OpenAI-compatible vLLM endpoint.
-
-The SFT gate and live-validation runners manage their model servers. A direct `qorl run`
-requires a server matching its selected policy configuration.
-The Linux GPU environment uses PyTorch 2.13.0 and vLLM 0.28.0 with CUDA 13.0,
-matching `model/configs/002-modelconf/modelconf.json`. Configs 000 and 001 retain
-their vLLM 0.27.1 requirement; their version check rejects this environment,
-including the frozen config selected by the `qorl run` command below.
-
-```bash
-uv run --extra gpu qorl run \
-  --postgres-config docker/postgres/configs/000-pgconf-default \
-  --pool-config docker/worker_pool/configs/002-poolconf-4x8
-```
-
-To reproduce the frozen random baseline instead:
-
-```bash
-uv run python experiments/000-vanilla-baseline/run.py \
-  --postgres-config docker/postgres/configs/000-pgconf-default \
-  --pool-config docker/worker_pool/configs/002-poolconf-4x8
-```
 
 ## Training and development
 

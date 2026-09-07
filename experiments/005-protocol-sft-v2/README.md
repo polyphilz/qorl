@@ -1,5 +1,8 @@
 # 005 — Tool-use SFT v2
 
+Execution entrypoint retired on 2026-09-07 during the shared-agent migration.
+The inputs and recorded results below are historical evidence, not rerun instructions.
+
 **Status:** sampling and teacher generation complete; ready to assemble
 
 This experiment teaches the one-candidate agent language, not query performance.

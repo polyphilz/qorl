@@ -22,7 +22,7 @@ from qorl.plans.fingerprint import (
 )
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import compact_plan, hint_status, verify_action
-from qorl.postgres.exceptions import QueryTimeout
+from qorl.postgres.exceptions import QueryTimeoutError
 from qorl.taskset.schemas import Task
 
 
@@ -69,7 +69,7 @@ def validate_candidate(
     )
     try:
         plain = worker.explain(sql, timeout_ms, hint=hint)
-    except QueryTimeout as error:
+    except QueryTimeoutError as error:
         return candidate.model_copy(
             update={
                 "execution_timed_out": True,

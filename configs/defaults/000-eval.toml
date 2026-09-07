@@ -16,6 +16,12 @@ revision = "FILL_ME_IN"
 context_length = 20480
 base_url = "http://127.0.0.1:8000/v1"
 request_timeout_seconds = 300
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
 
 [data.test]
 file = "test-tasks.json"

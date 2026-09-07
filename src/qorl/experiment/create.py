@@ -2,6 +2,7 @@
 
 import re
 import shutil
+import tomllib
 from pathlib import Path
 
 import tomli_w
@@ -25,7 +26,7 @@ from qorl.experiment.schemas import (
     load_config,
 )
 from qorl.model.files import validate_model_directory
-from qorl.model.schemas import ModelProvider, ModelSettings
+from qorl.model.schemas import ModelPreset, ModelProvider, ModelSettings
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.schemas import ImportedGenerationSeeds, PreparedDatasetManifest
@@ -63,9 +64,14 @@ if __name__ == "__main__":
 def latest_template(method: ExperimentMethod) -> Path:
     """Select the method family's highest numeric version, ignoring mtime."""
     family = "calibration" if method == ExperimentMethod.CALIBRATE else method.value
-    pattern = re.compile(rf"(?P<version>[0-9]+)-{family}\.toml")
+    return latest_config(DEFAULTS_DIRECTORY, family)
+
+
+def latest_config(directory: Path, family: str) -> Path:
+    """Select one numbered template or model preset by version, never modification time."""
+    pattern = re.compile(rf"(?P<version>[0-9]+)-{re.escape(family)}\.toml")
     versions: dict[int, Path] = {}
-    for path in DEFAULTS_DIRECTORY.iterdir():
+    for path in directory.iterdir():
         match = pattern.fullmatch(path.name)
         if match is None or not path.is_file():
             continue
@@ -76,7 +82,7 @@ def latest_template(method: ExperimentMethod) -> Path:
             )
         versions[version] = path
     if not versions:
-        raise ValueError(f"no default template for method {method.value}")
+        raise ValueError(f"no default template for {family}")
     return versions[max(versions)]
 
 
@@ -164,6 +170,8 @@ def model_settings(request: CreateRequest, template: ModelSettings) -> ModelSett
         api_key_env=template.api_key_env
         if request.model_provider == template.provider
         else None,
+        max_concurrent_requests=template.max_concurrent_requests,
+        retry=template.retry,
     )
 
 
@@ -265,13 +273,35 @@ def configure(
             update={"data": EvaluationData(test=selected.inputs[TaskRole.TEST])}
         )
     if not isinstance(config, CalibrationExperimentConfig):
+        if request.model_provider == ModelProvider.OPENAI:
+            if request.method != ExperimentMethod.EVAL:
+                raise ValueError(
+                    "hosted base models are only valid for standalone evaluation"
+                )
+            if request.base_model_name_or_path != "gpt-6-astra":
+                raise ValueError("hosted evaluation supports only gpt-6-astra")
+            preset_path = latest_config(
+                DEFAULTS_DIRECTORY / "models", request.base_model_name_or_path
+            )
+            preset = ModelPreset.model_validate(tomllib.loads(preset_path.read_text()))
+            if (
+                preset.model.provider != request.model_provider
+                or preset.model.name_or_path != request.base_model_name_or_path
+            ):
+                raise ValueError(
+                    "model preset does not match the selected provider/model"
+                )
+            config = config.model_copy(
+                update={
+                    "model": preset.model,
+                    "decoding": preset.decoding,
+                    "serving": None,
+                    "resources": None,
+                }
+            )
         config = config.model_copy(
             update={"model": model_settings(request, config.model)}
         )
-        if request.model_provider != ModelProvider.LOCAL:
-            config = config.model_copy(
-                update={"serving": None, "decoding": None, "resources": None}
-            )
     return type(config).model_validate(config.model_dump())
 
 

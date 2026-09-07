@@ -19,7 +19,7 @@ from qorl.measure.schemas import (
     RolloutRecord,
     TimedOutOutcome,
 )
-from qorl.postgres.exceptions import PostgresError, QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import Task
 
@@ -106,7 +106,7 @@ class Worker:
             for call in self.calls
         )
         if self.failure == f"{role}_{phase}" and count == self.fail_execution:
-            raise QueryTimeout(timeout_ms)
+            raise QueryTimeoutError(timeout_ms)
         if self.failure == "infrastructure" and hint:
             raise PostgresError("connection lost")
         plan = deepcopy(PLAN)
@@ -254,7 +254,7 @@ def test_default_and_infrastructure_failures_are_unscored(
         run.finish(random.Random(0))
     record = run.record(caught.value)
     assert record.final is None and record.failure is not None
-    assert record.failure.error_type in {"QueryTimeout", "PostgresError"}
+    assert record.failure.error_type in {"QueryTimeoutError", "PostgresError"}
     if failure == "default_execution" and execution == 2:
         assert record.default is not None and len(record.default.warmups) == 1
     if failure == "default_execution" and execution >= 3:
