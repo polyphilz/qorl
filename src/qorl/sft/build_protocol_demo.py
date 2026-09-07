@@ -9,17 +9,20 @@ from typing import Any
 from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import ToolName
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import plan_join_tree
 from qorl.postgres.config import PostgresConfig
-from qorl.sft.validate import validate_protocol_demo
+from qorl.sft.schemas import require_object
+from qorl.sft.validate import PROTOCOL_DEMO_SCHEMA_VERSION, validate_protocol_demo
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import start_pool
 from qorl.worker_pool.schemas import PoolConfig
 
-DEMONSTRATION_ID = "protocol-demo-v1"
+DEMONSTRATION_ID = "protocol-demo-v2"
 TASK_ID = "ceb-4a-4a434"
 MAXIMUM_MODEL_TURNS = 64
 CALL_SEQUENCE = [
@@ -111,7 +114,13 @@ def build_demo(
         pool.claim_worker() as slot,
     ):
         worker = slot.client
-        evaluator = RolloutEvaluator(worker, task_set, task)
+        evaluator = PlanValidationEvaluator(
+            worker,
+            task_set,
+            Task.model_validate(task),
+            default_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
+            max_candidates=1,
+        )
         evaluator.start()
         interface = AgentInterface.from_evaluator(evaluator, MAXIMUM_MODEL_TURNS)
         environment = AgentEnvironment(evaluator)
@@ -127,7 +136,9 @@ def build_demo(
         )
         if evaluator.default is None:
             raise RuntimeError("rollout baseline has not been started")
-        action = leading_action(evaluator.default.plain_explain["Plan"])
+        action = leading_action(
+            require_object(evaluator.default.plain_explain["Plan"], "default plan")
+        )
         candidate, _ = call_tool(
             messages,
             environment,
@@ -157,7 +168,7 @@ def build_demo(
 
         measured_candidate = evaluator.candidates[0]
         return {
-            "schema_version": 1,
+            "schema_version": PROTOCOL_DEMO_SCHEMA_VERSION,
             "messages": messages,
             "tools": interface.tools,
             "metadata": {
@@ -179,6 +190,7 @@ def build_demo(
                     candidate_id: {
                         "action": measured_candidate.action,
                         "plain_explain": measured_candidate.plain_explain,
+                        "plan_sha256": measured_candidate.plan_sha256,
                         "pg_hint_plan": measured_candidate.pg_hint_plan,
                     }
                 },

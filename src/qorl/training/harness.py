@@ -3,25 +3,55 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 import verifiers.v1 as vf
-from pydantic import Field
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import OpenAIModelClient
-from qorl.measure.rollout import RolloutEvaluator, training_protocol
-from qorl.measure.schemas import MeasurementProtocolId
+from qorl.agent.schemas import AgentSettings
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
 from qorl.paths import REPOSITORY_ROOT
-from qorl.training import runtime
+from qorl.rl.reward import scalar_reward
+from qorl.rl.schemas import AnchoredGrpoSettings, RlRolloutRecord, RlSettings
+from qorl.training import runtime as shared_runtime
+from qorl.training.taskset import QorlTaskData
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
+    """Allow Verifiers' fallback construction; experiments supply resolved settings."""
+
     id: str = "qorl"
     run_config: Path = Path("model/configs/000-modelconf/modelconf.json")
     context_length: int = 20_480
-    candidate_attempts: int = Field(5, ge=1)
+    agent: AgentSettings = AgentSettings(
+        candidate_attempts=1,
+        maximum_model_turns=64,
+        inspection_turns_per_alias=3,
+    )
+    measurement: RolloutMeasurementSettings = RolloutMeasurementSettings(
+        default_warmups=1,
+        default_measurements=1,
+        paired_warmups=1,
+        paired_measurements=3,
+        default_timeout_seconds=300.0,
+        candidate_timeout_floor_seconds=5.0,
+        candidate_timeout_multiplier=3.0,
+    )
+    rl: RlSettings = RlSettings(
+        algorithm=AnchoredGrpoSettings(
+            type="qorl_anchored_grpo",
+            tau=0.05,
+            c=0.10,
+            d=0.02,
+            t=0.10,
+            min_peers=2,
+        )
+    )
 
 
 class QorlHarness(vf.Harness[QorlHarnessConfig]):
@@ -33,30 +63,44 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
     async def launch(
         self,
         ctx: vf.ModelContext,
-        trace: vf.Trace,
-        sandbox: vf.Runtime,
+        trace: vf.Trace[vf.TaskData],
+        runtime: vf.Runtime,
         endpoint: str,
         secret: str,
         mcp_urls: dict[str, str],
         data: vf.TaskData,
     ) -> vf.ProgramResult:
-        del sandbox, mcp_urls
-        await asyncio.to_thread(self._run, ctx, trace, endpoint, secret, data)
+        del runtime, mcp_urls
+        cancel = Event()
+        work = asyncio.create_task(
+            asyncio.to_thread(self._run, ctx, trace, endpoint, secret, data, cancel)
+        )
+        try:
+            await asyncio.shield(work)
+        except asyncio.CancelledError:
+            cancel.set()
+            # Repeated cancellation must not release the slot while its thread is active.
+            with suppress(Exception, asyncio.CancelledError):
+                while not work.done():
+                    with suppress(asyncio.CancelledError):
+                        await asyncio.shield(work)
+                work.result()
+            raise
         return vf.ProgramResult(exit_code=0, stdout="", stderr="")
 
     def _run(
         self,
         ctx: vf.ModelContext,
-        trace: vf.Trace,
+        trace: vf.Trace[vf.TaskData],
         endpoint: str,
         secret: str,
         data: vf.TaskData,
+        cancel: Event,
     ) -> None:
-        active = runtime.current()
+        active = shared_runtime.current()
+        task_data = QorlTaskData.model_validate(data.model_dump())
         task = next(
-            task.model_dump()
-            for task in active.task_set.tasks
-            if task.task_id == data.task_id
+            task for task in active.task_set.tasks if task.task_id == task_data.task_id
         )
         config_path = self.config.run_config
         if not config_path.is_absolute():
@@ -76,69 +120,39 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
 
         with active.claim_worker() as slot:
-            protocol_id = (
-                MeasurementProtocolId.RL_TRAINING_V1
-                if active.calibrated_timeouts is None
-                else MeasurementProtocolId.RL_TRAINING_V2
-            )
             evaluator = RolloutEvaluator(
                 slot.client,
                 active.task_set,
                 task,
-                measurement_protocol=training_protocol(protocol_id),
-                calibrated_timeout=(
-                    active.calibrated_timeouts.task(task["task_id"])
-                    if active.calibrated_timeouts is not None
-                    else None
-                ),
-                timeout_manifest_id=(
-                    active.calibrated_timeouts.manifest["manifest_id"]
-                    if active.calibrated_timeouts is not None
-                    else None
-                ),
-                max_candidates=self.config.candidate_attempts,
-            )
-            baseline = evaluator.start()
-            policy_trace = QoAgentPolicy(policy_config, client).search(evaluator)
-            final = evaluator.finish(
-                random.Random(f"qorl-rl:{task['task_id']}:{trace.id}:pairs")
+                measurement=self.config.measurement,
+                max_candidates=self.config.agent.candidate_attempts,
+                cancel=cancel,
             )
 
-        trace.info["qorl"] = {
-            "task_id": task["task_id"],
-            "template_id": task["template_id"],
-            "data_identity": {"fixture_id": active.task_set.fixture_id},
-            "runtime_identity": {
-                "postgres_config_id": active.postgres_config.config_id
-            },
-            "database_pool": active.pool_manifest().model_dump(),
-            "database_worker": slot.resources.manifest().model_dump(),
-            "candidate_timeout_manifest": (
-                active.calibrated_timeouts.identity()
-                if active.calibrated_timeouts is not None
-                else None
-            ),
-            "measurement_protocol": evaluator.measurement_protocol.manifest(
-                evaluator.max_candidates
-            ),
-            "default": {
-                "plan_sha256": baseline.plan_sha256,
-                "median_execution_time_ms": baseline.median_execution_time_ms,
-                "candidate_timeout": (
-                    baseline.candidate_timeout.to_wire()
-                    if baseline.candidate_timeout is not None
+            def store_record(record: RolloutRecord) -> None:
+                reward = (
+                    scalar_reward(record, self.config.rl.reward)
+                    if record.final is not None and self.config.rl.reward is not None
                     else None
-                ),
-            },
-            "candidates": [
-                {**candidate.feedback(), "action": candidate.action}
-                for candidate in evaluator.candidates
-            ],
-            "final": final.to_wire(),
-            "policy": {
-                "stop_reason": policy_trace["stop_reason"],
-                "tools_sha256": policy_trace["tools_sha256"],
-                "usage": policy_trace["usage"],
-                "context_estimate_tokens": policy_trace["context_estimate_tokens"],
-            },
-        }
+                )
+                result = RlRolloutRecord(
+                    **record.model_dump(),
+                    database_pool=active.pool_manifest(),
+                    database_worker=slot.resources.manifest(),
+                    scalar_reward=reward,
+                )
+                trace.info["qorl"] = result.to_wire()
+
+            try:
+                evaluator.start()
+                policy_trace = QoAgentPolicy(policy_config, client).search(
+                    evaluator, settings=self.config.agent
+                )
+                trace.info["qorl_policy"] = policy_trace
+                evaluator.finish(
+                    random.Random(f"qorl-rl:{task.task_id}:{trace.id}:pairs")
+                )
+                store_record(evaluator.record())
+            except BaseException as error:
+                store_record(evaluator.record(error))
+                raise

@@ -35,26 +35,6 @@ class WorkerPoolTest(unittest.TestCase):
                 ["create", "restore", "start", "load_indexes"],
             )
 
-    def test_start_validates_timeouts_against_selected_postgres_config(self) -> None:
-        environment = {
-            runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
-            runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
-            runtime.TIMEOUT_MANIFEST_ENV: "timeouts.json",
-        }
-        with (
-            patch.object(runtime, "_runtime", None),
-            patch.object(runtime, "QorlRuntime"),
-            patch.object(runtime.CalibratedTimeouts, "load") as load_timeouts,
-        ):
-            started = runtime.start(ROOT, environment)
-            load_timeouts.assert_called_once_with(
-                ROOT,
-                Path("timeouts.json"),
-                started.task_set,
-                "000-pgconf-default",
-            )
-            self.assertIs(started.calibrated_timeouts, load_timeouts.return_value)
-
     def test_start_requires_both_configuration_paths(self) -> None:
         for missing in (runtime.POSTGRES_CONFIG_ENV, runtime.POOL_CONFIG_ENV):
             for value in (None, "", " "):

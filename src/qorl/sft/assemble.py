@@ -9,16 +9,15 @@ from pathlib import Path
 from typing import Any
 
 from qorl.agent.types import ToolName
-from qorl.measure.schemas import MeasurementStatus
+from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import AUTO, MemoizeMode
 from qorl.sft.validate import validate_protocol_demo
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 
 DATASET_ID = "protocol-sft-v1"
-DATASET_MANIFEST_SCHEMA_VERSION = 2
+DATASET_MANIFEST_SCHEMA_VERSION = 3
 SPLIT_COUNTS = {"train": 256, "validation": 64}
-SPEEDUP_BOUNDS = (0.5, 0.9, 1.1, 2.0)
 
 
 def canonical_json(value: Any) -> str:
@@ -119,34 +118,6 @@ def distribution(values: list[int]) -> dict[str, int | float]:
     }
 
 
-def speedup_distribution(values: list[float]) -> dict[str, Any]:
-    if not values:
-        return {
-            "count": 0,
-            "status": MeasurementStatus.NOT_MEASURED.value,
-            "selection_used_speed": False,
-        }
-    bins = Counter()
-    for value in values:
-        if value < SPEEDUP_BOUNDS[0]:
-            bins["<0.5"] += 1
-        elif value < SPEEDUP_BOUNDS[1]:
-            bins["0.5-0.9"] += 1
-        elif value <= SPEEDUP_BOUNDS[2]:
-            bins["0.9-1.1"] += 1
-        elif value <= SPEEDUP_BOUNDS[3]:
-            bins["1.1-2.0"] += 1
-        else:
-            bins[">2.0"] += 1
-    return {
-        "minimum": min(values),
-        "median": statistics.median(values),
-        "maximum": max(values),
-        "bins": dict(sorted(bins.items())),
-        "selection_used_speed": False,
-    }
-
-
 def load_documents(output_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
     records: list[tuple[Path, dict[str, Any]]] = []
     for partition in SPLIT_COUNTS:
@@ -191,7 +162,6 @@ def finalize_dataset(
     turn_counts: list[int] = []
     action_hashes: set[str] = set()
     plan_hashes: set[str] = set()
-    speedups: list[float] = []
     demonstrations: list[dict[str, Any]] = []
     split_task_ids: dict[str, set[str]] = defaultdict(set)
     split_templates: dict[str, set[str]] = defaultdict(set)
@@ -228,10 +198,8 @@ def finalize_dataset(
                 and message["name"] == ToolName.EVALUATE_CANDIDATE
             ):
                 result = json.loads(message["content"])
-                plan_hashes.add(result["plan_sha256"])
-                speedup = result.get("provisional_speedup")
-                if isinstance(speedup, (int, float)):
-                    speedups.append(float(speedup))
+                candidate = document["evidence"]["candidates"][result["candidate_id"]]
+                plan_hashes.add(plan_sha256(candidate["plain_explain"]["Plan"]))
 
         relative = path.relative_to(output_dir)
         demonstrations.append(
@@ -311,7 +279,6 @@ def finalize_dataset(
             "candidate_attempts": tool_calls[ToolName.EVALUATE_CANDIDATE],
             "unique_normalized_actions": len(action_hashes),
             "unique_physical_plans": len(plan_hashes),
-            "provisional_speedups": speedup_distribution(speedups),
         },
         "generation_failures": failures,
         "demonstrations": demonstrations,

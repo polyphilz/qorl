@@ -3,139 +3,23 @@
     {
       "action": {
         "settings": {
-          "seq_page_cost": 1.0
-        },
-        "version": 1
-      },
-      "action_valid": true,
-      "attempts_remaining": 4,
-      "candidate_id": "candidate-01",
-      "compact_plan": {
-        "Node Type": "Hash Join",
-        "Plan Rows": 1,
-        "Plans": [
-          {
-            "Alias": "a",
-            "Node Type": "Seq Scan"
-          },
-          {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
-          }
-        ]
-      },
-      "compiled_hint": "/*+ Set(seq_page_cost 1) */",
-      "constraints_satisfied": true,
-      "duplicate_of": null,
-      "errors_or_diagnostics": [],
-      "timing_reuse_key": "27ba86f226a54b242bb81599ddc9c187177a6c5b34d15825c5b1daf61494fffd",
-      "execution_timed_out": false,
-      "measured_explain_analyze": {
-        "Execution Time": 11.0,
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 1,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        },
-        "Planning Time": 1.0
-      },
-      "measurement_status": "measured",
-      "pg_hint_plan": {
-        "duplicate": "(none)",
-        "error": "(none)",
-        "not_used": "(none)",
-        "used": "Set(seq_page_cost)"
-      },
-      "plain_explain": {
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 1,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "plan_fingerprint_version": 4,
-      "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-      "provisional_measurements": [
-        {
-          "execution_time_ms": 11.0,
-          "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-          "planning_time_ms": 1.0
-        }
-      ],
-      "provisional_median_execution_time_ms": 11.0,
-      "provisional_speedup": 0.9090909090909091,
-      "structural_duplicate_of": "default",
-      "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-      "timeout_ms": 5000,
-      "warmup": {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      }
-    },
-    {
-      "action": {
-        "settings": {
           "seq_page_cost": 2.0
         },
         "version": 1
       },
       "action_valid": true,
-      "attempts_remaining": 3,
-      "candidate_id": "candidate-02",
+      "attempts_remaining": 0,
+      "candidate_id": "candidate-01",
       "compact_plan": {
         "Node Type": "Hash Join",
-        "Plan Rows": 2,
         "Plans": [
           {
             "Alias": "a",
             "Node Type": "Seq Scan"
           },
           {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
+            "Alias": "b",
+            "Node Type": "Seq Scan"
           }
         ]
       },
@@ -143,32 +27,7 @@
       "constraints_satisfied": true,
       "duplicate_of": null,
       "errors_or_diagnostics": [],
-      "timing_reuse_key": "137dcba0a158809105fed19d7ffdc57d1af2d575f163a9eda020e016c4787e98",
       "execution_timed_out": false,
-      "measured_explain_analyze": {
-        "Execution Time": 12.0,
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 2,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        },
-        "Planning Time": 1.0
-      },
       "measurement_status": "measured",
       "pg_hint_plan": {
         "duplicate": "(none)",
@@ -179,543 +38,186 @@
       "plain_explain": {
         "Plan": {
           "Node Type": "Hash Join",
-          "Plan Rows": 2,
           "Plans": [
             {
               "Alias": "a",
               "Node Type": "Seq Scan"
             },
             {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
+              "Alias": "b",
+              "Node Type": "Seq Scan"
             }
           ]
         }
       },
       "plan_fingerprint_version": 4,
-      "plan_sha256": "2768b71b498eba545ae0aa3c82de03a7778b3e18c4aee07832b668a61383c69c",
-      "provisional_measurements": [
-        {
-          "execution_time_ms": 12.0,
-          "plan_sha256": "2768b71b498eba545ae0aa3c82de03a7778b3e18c4aee07832b668a61383c69c",
-          "planning_time_ms": 1.0
-        }
-      ],
-      "provisional_median_execution_time_ms": 12.0,
-      "provisional_speedup": 0.8333333333333334,
+      "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
       "structural_duplicate_of": "default",
-      "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-      "timeout_ms": 5000,
-      "warmup": {
-        "execution_time_ms": 12.0,
-        "plan_sha256": "2768b71b498eba545ae0aa3c82de03a7778b3e18c4aee07832b668a61383c69c",
-        "planning_time_ms": 1.0
-      }
-    },
-    {
-      "action": {
-        "settings": {
-          "seq_page_cost": 3.0
-        },
-        "version": 1
-      },
-      "action_valid": true,
-      "attempts_remaining": 2,
-      "candidate_id": "candidate-03",
-      "compact_plan": {
-        "Node Type": "Hash Join",
-        "Plan Rows": 3,
-        "Plans": [
-          {
-            "Alias": "a",
-            "Node Type": "Seq Scan"
-          },
-          {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
-          }
-        ]
-      },
-      "compiled_hint": "/*+ Set(seq_page_cost 3) */",
-      "constraints_satisfied": true,
-      "duplicate_of": null,
-      "errors_or_diagnostics": [],
-      "timing_reuse_key": "8b4baad6cf9f0fd59265481c081cd1c61c94141baf34aec0ab0181a32e7217e4",
-      "execution_timed_out": false,
-      "measured_explain_analyze": {
-        "Execution Time": 13.0,
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 3,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        },
-        "Planning Time": 1.0
-      },
-      "measurement_status": "measured",
-      "pg_hint_plan": {
-        "duplicate": "(none)",
-        "error": "(none)",
-        "not_used": "(none)",
-        "used": "Set(seq_page_cost)"
-      },
-      "plain_explain": {
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 3,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "plan_fingerprint_version": 4,
-      "plan_sha256": "4881165ab8d55472ee8fb059d41fe92ba5166df1b3830cb9e2437f1d94aa78a9",
-      "provisional_measurements": [
-        {
-          "execution_time_ms": 13.0,
-          "plan_sha256": "4881165ab8d55472ee8fb059d41fe92ba5166df1b3830cb9e2437f1d94aa78a9",
-          "planning_time_ms": 1.0
-        }
-      ],
-      "provisional_median_execution_time_ms": 13.0,
-      "provisional_speedup": 0.7692307692307693,
-      "structural_duplicate_of": "default",
-      "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-      "timeout_ms": 5000,
-      "warmup": {
-        "execution_time_ms": 13.0,
-        "plan_sha256": "4881165ab8d55472ee8fb059d41fe92ba5166df1b3830cb9e2437f1d94aa78a9",
-        "planning_time_ms": 1.0
-      }
-    },
-    {
-      "action": {
-        "settings": {
-          "seq_page_cost": 4.0
-        },
-        "version": 1
-      },
-      "action_valid": true,
-      "attempts_remaining": 1,
-      "candidate_id": "candidate-04",
-      "compact_plan": {
-        "Node Type": "Hash Join",
-        "Plan Rows": 4,
-        "Plans": [
-          {
-            "Alias": "a",
-            "Node Type": "Seq Scan"
-          },
-          {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
-          }
-        ]
-      },
-      "compiled_hint": "/*+ Set(seq_page_cost 4) */",
-      "constraints_satisfied": true,
-      "duplicate_of": null,
-      "errors_or_diagnostics": [],
-      "timing_reuse_key": "62ce7732f7a0ab0e6730f5a3bf4d4430268ea5fc1fc73fbaa3e74f6767d01d24",
-      "execution_timed_out": false,
-      "measured_explain_analyze": {
-        "Execution Time": 14.0,
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 4,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        },
-        "Planning Time": 1.0
-      },
-      "measurement_status": "measured",
-      "pg_hint_plan": {
-        "duplicate": "(none)",
-        "error": "(none)",
-        "not_used": "(none)",
-        "used": "Set(seq_page_cost)"
-      },
-      "plain_explain": {
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 4,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "plan_fingerprint_version": 4,
-      "plan_sha256": "de7d697265694f7927d442633a3346916e143d476df33ca8c15e763fff310b5a",
-      "provisional_measurements": [
-        {
-          "execution_time_ms": 14.0,
-          "plan_sha256": "de7d697265694f7927d442633a3346916e143d476df33ca8c15e763fff310b5a",
-          "planning_time_ms": 1.0
-        }
-      ],
-      "provisional_median_execution_time_ms": 14.0,
-      "provisional_speedup": 0.7142857142857143,
-      "structural_duplicate_of": "default",
-      "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-      "timeout_ms": 5000,
-      "warmup": {
-        "execution_time_ms": 14.0,
-        "plan_sha256": "de7d697265694f7927d442633a3346916e143d476df33ca8c15e763fff310b5a",
-        "planning_time_ms": 1.0
-      }
-    },
-    {
-      "action": {
-        "settings": {
-          "seq_page_cost": 5.0
-        },
-        "version": 1
-      },
-      "action_valid": true,
-      "attempts_remaining": 0,
-      "candidate_id": "candidate-05",
-      "compact_plan": {
-        "Node Type": "Hash Join",
-        "Plan Rows": 5,
-        "Plans": [
-          {
-            "Alias": "a",
-            "Node Type": "Seq Scan"
-          },
-          {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
-          }
-        ]
-      },
-      "compiled_hint": "/*+ Set(seq_page_cost 5) */",
-      "constraints_satisfied": true,
-      "duplicate_of": null,
-      "errors_or_diagnostics": [],
-      "timing_reuse_key": "6f6e041a5249421bbc3505c3678358ebd05973511f92727ea42ee77f989db9f0",
-      "execution_timed_out": false,
-      "measured_explain_analyze": {
-        "Execution Time": 15.0,
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 5,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        },
-        "Planning Time": 1.0
-      },
-      "measurement_status": "measured",
-      "pg_hint_plan": {
-        "duplicate": "(none)",
-        "error": "(none)",
-        "not_used": "(none)",
-        "used": "Set(seq_page_cost)"
-      },
-      "plain_explain": {
-        "Plan": {
-          "Node Type": "Hash Join",
-          "Plan Rows": 5,
-          "Plans": [
-            {
-              "Alias": "a",
-              "Node Type": "Seq Scan"
-            },
-            {
-              "Node Type": "Hash",
-              "Plans": [
-                {
-                  "Alias": "b",
-                  "Index Name": "table_b_pkey",
-                  "Node Type": "Index Scan"
-                }
-              ]
-            }
-          ]
-        }
-      },
-      "plan_fingerprint_version": 4,
-      "plan_sha256": "bae46259c316ddaa750b898b6f6111ea931d4b913215a175458c817f785850d8",
-      "provisional_measurements": [
-        {
-          "execution_time_ms": 15.0,
-          "plan_sha256": "bae46259c316ddaa750b898b6f6111ea931d4b913215a175458c817f785850d8",
-          "planning_time_ms": 1.0
-        }
-      ],
-      "provisional_median_execution_time_ms": 15.0,
-      "provisional_speedup": 0.6666666666666666,
-      "structural_duplicate_of": "default",
-      "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-      "timeout_ms": 5000,
-      "warmup": {
-        "execution_time_ms": 15.0,
-        "plan_sha256": "bae46259c316ddaa750b898b6f6111ea931d4b913215a175458c817f785850d8",
-        "planning_time_ms": 1.0
-      }
+      "structural_plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+      "timeout_ms": null,
+      "timing_reuse_key": "c6f5aaf031d56b9cc43ebea241c7e5195957a22c580ee2f2e66a90d5c6e80022"
     }
   ],
   "default": {
-    "candidate_timeout": {
-      "calibrated_default_median_ms": null,
-      "manifest_id": null,
-      "source": "live_default",
-      "timeout_ms": 5000
-    },
+    "candidate_timeout_ms": 5000,
     "compact_plan": {
       "Node Type": "Hash Join",
-      "Plan Rows": 0,
       "Plans": [
         {
           "Alias": "a",
           "Node Type": "Seq Scan"
         },
         {
-          "Node Type": "Hash",
-          "Plans": [
-            {
-              "Alias": "b",
-              "Index Name": "table_b_pkey",
-              "Node Type": "Index Scan"
-            }
-          ]
+          "Alias": "b",
+          "Node Type": "Seq Scan"
         }
       ]
     },
-    "timing_reuse_key": "8dff646bb3b33b24b407d488936977d15d90d1aeb6169ea76c27485f2b7ecfd6",
-    "measurement_protocol_id": "rigorous-evaluation-v1",
     "measurements": [
       {
         "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
+        "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+        "planning_time_ms": 1.0,
+        "shared_hit_blocks": 0,
+        "shared_read_blocks": 0
       }
     ],
     "median_execution_time_ms": 10.0,
     "plain_explain": {
       "Plan": {
         "Node Type": "Hash Join",
-        "Plan Rows": 0,
         "Plans": [
           {
             "Alias": "a",
             "Node Type": "Seq Scan"
           },
           {
-            "Node Type": "Hash",
-            "Plans": [
-              {
-                "Alias": "b",
-                "Index Name": "table_b_pkey",
-                "Node Type": "Index Scan"
-              }
-            ]
+            "Alias": "b",
+            "Node Type": "Seq Scan"
           }
         ]
       }
     },
     "plan_fingerprint_version": 4,
-    "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-    "structural_plan_sha256": "892b5eeb246635fd4b0be8edcb66879831779a34099e2d5194a8a16d9e7c6407",
-    "warmup": {
-      "execution_time_ms": 10.0,
-      "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-      "planning_time_ms": 1.0
-    }
+    "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+    "structural_plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+    "timing_reuse_key": "96049fe4eb577871b4e2558011f7a401ed999df477888ffbfa109c0f15b8ec71",
+    "warmups": [
+      {
+        "execution_time_ms": 10.0,
+        "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+        "planning_time_ms": 1.0,
+        "shared_hit_blocks": 0,
+        "shared_read_blocks": 0
+      }
+    ]
   },
+  "failure": null,
   "final": {
-    "candidate_measurements": [
-      {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 11.0,
-        "plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0",
-        "planning_time_ms": 1.0
-      }
-    ],
-    "candidate_median_execution_time_ms": 11.0,
-    "decision": "candidate",
-    "default_measurements": [
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      },
-      {
-        "execution_time_ms": 10.0,
-        "plan_sha256": "3e268a125dbc1d3d56008e0ea8e2b45c8f8c1f906bdcec303f586776a3d9c1d2",
-        "planning_time_ms": 1.0
-      }
-    ],
+    "candidate_median_execution_time_ms": 5.0,
     "default_median_execution_time_ms": 10.0,
-    "duplicate_attempt_count": 0,
-    "invalid_attempt_count": 0,
-    "measurement_protocol_id": "rigorous-evaluation-v1",
-    "pair_orders": [
-      [
-        "candidate",
-        "default"
+    "kind": "measured",
+    "paired": {
+      "measurements": [
+        {
+          "candidate": {
+            "execution_time_ms": 5.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "default": {
+            "execution_time_ms": 10.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "order": [
+            "candidate",
+            "default"
+          ]
+        },
+        {
+          "candidate": {
+            "execution_time_ms": 5.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "default": {
+            "execution_time_ms": 10.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "order": [
+            "candidate",
+            "default"
+          ]
+        },
+        {
+          "candidate": {
+            "execution_time_ms": 5.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "default": {
+            "execution_time_ms": 10.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "order": [
+            "default",
+            "candidate"
+          ]
+        }
       ],
-      [
-        "candidate",
-        "default"
-      ],
-      [
-        "default",
-        "candidate"
-      ],
-      [
-        "candidate",
-        "default"
-      ],
-      [
-        "candidate",
-        "default"
+      "warmups": [
+        {
+          "candidate": {
+            "execution_time_ms": 5.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "default": {
+            "execution_time_ms": 10.0,
+            "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+            "planning_time_ms": 1.0,
+            "shared_hit_blocks": 0,
+            "shared_read_blocks": 0
+          },
+          "order": [
+            "candidate",
+            "default"
+          ]
+        }
       ]
-    ],
-    "score": 0.9090909090909091,
-    "score_source": "interleaved_measurement",
-    "status": "completed",
-    "timeout_attempt_count": 0,
-    "trajectory_reward": -0.0953101798043249,
-    "winning_candidate_id": "candidate-01",
-    "winning_plan_sha256": "1cf59bfe3a33aeedd149bc9fd5c0b1f16c2cb00df7be7bafbc3ca491e7aee4c0"
+    },
+    "selected_candidate_id": "candidate-01",
+    "selected_plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
+    "speedup": 2.0,
+    "timing_reuse_key": "c6f5aaf031d56b9cc43ebea241c7e5195957a22c580ee2f2e66a90d5c6e80022"
   },
-  "schema_version": 1,
+  "measurement": {
+    "candidate_timeout_floor_seconds": 5.0,
+    "candidate_timeout_multiplier": 3.0,
+    "default_measurements": 1,
+    "default_timeout_seconds": 300.0,
+    "default_warmups": 1,
+    "paired_measurements": 3,
+    "paired_warmups": 1
+  },
+  "schema_version": 2,
   "task_id": "job-test",
-  "template_id": "test"
+  "template_id": "job-test-template"
 }

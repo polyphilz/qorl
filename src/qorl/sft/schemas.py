@@ -13,7 +13,7 @@ from pydantic import (
     model_validator,
 )
 
-from qorl.measure.schemas import Baseline, Candidate, Outcome, RunStatus
+from qorl.measure.schemas import Baseline, Candidate, RunStatus
 from qorl.model.schemas import ModelProvider, ModelSettings, TrainerModelSettings
 from qorl.taskset.schemas import TaskSelection
 
@@ -180,7 +180,7 @@ class SamplerIdentity(SftRecord):
 
 
 class SampleRecord(SftRecord):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     status: RunStatus
     completed_at_utc: str
     task_id: str
@@ -396,63 +396,6 @@ class FilterManifest(SftRecord):
     summary: FilterSummary
 
 
-class MeasurementAttempt(SftRecord):
-    attempt: int = Field(ge=1)
-    completed_at_utc: str
-    worker: JsonObject
-    baseline: Baseline
-    candidate: Candidate
-    outcome: Outcome
-
-
-class ScoreInterval(SftRecord):
-    lower: float
-    upper: float
-
-
-class CandidateMeasurement(SftRecord):
-    schema_version: Literal[1] = 1
-    task_id: str
-    template_id: str
-    source: ExampleSource
-    plan_sha256: str
-    sample_path: str
-    attempts: list[MeasurementAttempt]
-    failed_attempts: list[PipelineError]
-    score_interval: ScoreInterval | None = None
-    candidate_label: CandidateLabel | None = None
-
-
-class MeasurementFailure(SftRecord):
-    task_id: str
-    plan_sha256: str
-    attempt: int
-    error: PipelineError
-
-
-class MeasurementSummary(SftRecord):
-    measured_candidates: int
-    remeasured_candidates: int
-    failed_attempts: int
-    candidate_labels: dict[CandidateLabel, int]
-    task_labels: dict[TaskLabel, int]
-
-
-class MeasurementManifest(SftRecord):
-    schema_version: Literal[1] = 1
-    measurement_id: str
-    status: RunStatus
-    started_at_utc: str
-    completed_at_utc: str | None
-    dataset_config_sha256: str
-    filter_records_sha256: str
-    timeouts: JsonObject
-    database_pool: JsonObject | None
-    summary: MeasurementSummary | None
-    task_labels: dict[str, TaskLabel] | None
-    failures: list[MeasurementFailure]
-
-
 class SamplingSettings(SftRecord):
     concurrency: int = Field(ge=1)
     initial_samples_per_task: int = Field(ge=1)
@@ -616,19 +559,6 @@ class FilterProvenance(SftRecord):
     rejection_reason: str | None
     syntax_eligible: bool
     action_families: list[ActionFamily]
-
-
-class MeasurementProvenance(SftRecord):
-    plan_sha256: str
-    candidate_label: CandidateLabel
-    score_interval: ScoreInterval
-    attempt_count: int = Field(ge=1)
-
-
-class DefaultBestProvenance(SftRecord):
-    task_label: Literal[TaskLabel.DEFAULT_BEST]
-    measured_fingerprint_count: int = Field(ge=1)
-    best_upper_speedup: float
 
 
 class DemonstrationProvenance(SftRecord):

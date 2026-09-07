@@ -1,547 +1,474 @@
-from __future__ import annotations
-
 import json
-import math
 import random
+from concurrent.futures import CancelledError
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from threading import Event
 
 import pytest
+from pydantic import JsonValue, ValidationError
 
-from qorl.measure.protocols import QueryExecutor
-from qorl.measure.rollout import (
-    RIGOROUS_EVALUATION_PROTOCOL_V1,
-    RolloutEvaluator,
-    measured,
-    training_protocol,
-)
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import (
-    TIMEOUT_ATTEMPT_PENALTY,
-    Baseline,
-    Candidate,
-    MeasurementProtocolId,
-    Outcome,
-    OutcomeKind,
-    score,
+    DefaultDuplicateOutcome,
+    KeptDefaultOutcome,
+    MeasuredOutcome,
+    NoValidCandidateOutcome,
+    RolloutMeasurementSettings,
+    RolloutRecord,
+    TimedOutOutcome,
 )
-from qorl.measure.timeouts import TaskTimeout, task_timeout_ms
-from qorl.plans.fingerprint import plan_sha256
-from qorl.postgres.exceptions import QueryTimeout
+from qorl.postgres.exceptions import PostgresError, QueryTimeout
 from qorl.postgres.schemas import ExplainResult, PostgresIndexes
 from qorl.taskset.schemas import Task
 
-TASK: dict[str, Any] = {
-    "task_id": "job-test",
-    "template_id": "job-test-template",
-    "sql_path": "queries/test.sql",
-    "sql_sha256": "unused",
-    "tables": ["table_a", "table_b"],
-    "relations": [
-        {"alias": "a", "table": "table_a"},
-        {"alias": "b", "table": "table_b"},
-    ],
-    "join_edges": ["a:table_a.id=b:table_b.a_id"],
-    "table_count": 2,
-    "relation_count": 2,
-    "join_predicate_count": 1,
-}
-
-DEFAULT_PLAN = {
+SETTINGS = RolloutMeasurementSettings(
+    default_warmups=1,
+    default_measurements=1,
+    paired_warmups=1,
+    paired_measurements=3,
+    default_timeout_seconds=300.0,
+    candidate_timeout_floor_seconds=5.0,
+    candidate_timeout_multiplier=3.0,
+)
+TASK = Task.model_validate(
+    {
+        "task_id": "job-test",
+        "template_id": "job-test-template",
+        "sql_path": "queries/test.sql",
+        "sql_sha256": "unused",
+        "tables": ["table_a", "table_b"],
+        "relations": [
+            {"alias": "a", "table": "table_a"},
+            {"alias": "b", "table": "table_b"},
+        ],
+        "join_edges": ["a:table_a.id=b:table_b.a_id"],
+        "table_count": 2,
+        "relation_count": 2,
+        "join_predicate_count": 1,
+    }
+)
+PLAN: dict[str, JsonValue] = {
     "Node Type": "Hash Join",
     "Plans": [
         {"Node Type": "Seq Scan", "Alias": "a"},
-        {
-            "Node Type": "Hash",
-            "Plans": [
-                {
-                    "Node Type": "Index Scan",
-                    "Alias": "b",
-                    "Index Name": "table_b_pkey",
-                }
-            ],
-        },
+        {"Node Type": "Seq Scan", "Alias": "b"},
     ],
 }
+ACTION: dict[str, JsonValue] = {"version": 1, "settings": {"seq_page_cost": 2.0}}
 
 
-class Fixture:
+class Sql:
     def load_sql(self, task: Task) -> str:
-        assert isinstance(task, Task)
+        assert task == TASK
         return "SELECT 1;"
 
 
+@dataclass(frozen=True)
+class Call:
+    analyze: bool
+    candidate: bool
+    timeout_ms: int
+
+
 class Worker:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        default_ms: float = 10.0,
+        candidate_ms: float = 5.0,
+        failure: str = "",
+        fail_execution: int = 1,
+        changed_structure: bool = False,
+        changed_estimates: bool = False,
+    ) -> None:
         self.indexes = PostgresIndexes(
-            by_table={
-                "table_a": frozenset({"table_a_pkey"}),
-                "table_b": frozenset({"table_b_pkey"}),
-            }
+            by_table={"table_a": frozenset(), "table_b": frozenset()}
         )
-        self.times = iter([11.0, 10.0, 12.0, 30.0, 29.0])
-        self.analyze_calls = 0
-
-    def explain(
-        self,
-        sql: str,
-        timeout_ms: int,
-        *,
-        analyze: bool = False,
-        hint: str = "",
-    ) -> ExplainResult:
-        document: dict[str, Any] = {"Plan": DEFAULT_PLAN}
-        if analyze:
-            self.analyze_calls += 1
-            document |= {
-                "Planning Time": 1.0,
-                "Execution Time": next(self.times),
-            }
-        diagnostic = (
-            "HintStateDump: {used hints:SeqScan(a)}, "
-            "{not used hints:(none)}, {duplicate hints:(none)}, "
-            "{error hints:(none)}"
-            if hint
-            else ""
-        )
-        return ExplainResult(document, diagnostic)
-
-
-class CountingWorker:
-    def __init__(self) -> None:
-        self.indexes = PostgresIndexes(
-            by_table={
-                "table_a": frozenset({"table_a_pkey"}),
-                "table_b": frozenset({"table_b_pkey"}),
-            }
-        )
-        self.analyze_calls = 0
-        self.plain_calls = 0
-        self.plan_ids: dict[str, int] = {}
-
-    def explain(
-        self,
-        sql: str,
-        timeout_ms: int,
-        *,
-        analyze: bool = False,
-        hint: str = "",
-    ) -> ExplainResult:
-        del sql, timeout_ms
-        self.analyze_calls += int(analyze)
-        self.plain_calls += int(not analyze)
-        plan_id = self.plan_ids.setdefault(hint, len(self.plan_ids))
-        plan = deepcopy(DEFAULT_PLAN)
-        plan["Plan Rows"] = plan_id
-        document: dict[str, Any] = {"Plan": plan}
-        if analyze:
-            document |= {
-                "Planning Time": 1.0,
-                "Execution Time": 10.0 + plan_id,
-            }
-        diagnostic = (
-            "HintStateDump: {used hints:Set(seq_page_cost)}, "
-            "{not used hints:(none)}, {duplicate hints:(none)}, "
-            "{error hints:(none)}"
-            if hint
-            else ""
-        )
-        return ExplainResult(document, diagnostic)
-
-
-class TimeoutWorker(CountingWorker):
-    def explain(
-        self,
-        sql: str,
-        timeout_ms: int,
-        *,
-        analyze: bool = False,
-        hint: str = "",
-    ) -> ExplainResult:
-        if analyze and hint:
-            raise QueryTimeout(timeout_ms)
-        return super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
-
-
-class SamePlanWorker(CountingWorker):
-    """The settings affect execution without altering the returned planned tree."""
+        self.calls: list[Call] = []
+        self.default_ms = default_ms
+        self.candidate_ms = candidate_ms
+        self.failure = failure
+        self.fail_execution = fail_execution
+        self.changed_structure = changed_structure
+        self.changed_estimates = changed_estimates
 
     def explain(
         self, sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
     ) -> ExplainResult:
-        result = super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
-        result.document["Plan"] = deepcopy(DEFAULT_PLAN)
+        assert sql == "SELECT 1;"
+        self.calls.append(Call(analyze, bool(hint), timeout_ms))
+        role = "candidate" if hint else "default"
+        phase = "execution" if analyze else "plan"
+        count = sum(
+            call.analyze == analyze and call.candidate == bool(hint)
+            for call in self.calls
+        )
+        if self.failure == f"{role}_{phase}" and count == self.fail_execution:
+            raise QueryTimeout(timeout_ms)
+        if self.failure == "infrastructure" and hint:
+            raise PostgresError("connection lost")
+        plan = deepcopy(PLAN)
+        if hint and self.changed_structure:
+            plan["Node Type"] = "Merge Join"
+        if hint and self.changed_estimates:
+            plan["Plan Rows"] = 999
+        document: dict[str, JsonValue] = {"Plan": plan}
         if analyze:
-            result.document["Execution Time"] = 5.0 if hint else 10.0
-        return result
-
-
-class CalibratedTimeoutWorker(CountingWorker):
-    def __init__(self, successful_candidate_executions: int) -> None:
-        super().__init__()
-        self.successful_candidate_executions = successful_candidate_executions
-        self.candidate_executions = 0
-
-    def explain(
-        self,
-        sql: str,
-        timeout_ms: int,
-        *,
-        analyze: bool = False,
-        hint: str = "",
-    ) -> ExplainResult:
-        if analyze and hint:
-            self.candidate_executions += 1
-            if self.candidate_executions > self.successful_candidate_executions:
-                raise QueryTimeout(timeout_ms)
-        result = super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
-        if analyze:
-            result.document["Execution Time"] = 2_900.0 if hint else 1_000.0
-        return result
-
-
-class TestRollout:
-    def test_same_plan_different_settings_does_not_reuse_default_timings(self) -> None:
-        worker = SamePlanWorker()
-        evaluator = RolloutEvaluator(worker, Fixture(), TASK)
-        baseline = evaluator.start()
-        initial_executions = worker.analyze_calls
-        unchanged = evaluator.evaluate({"version": 1})
-        assert unchanged.duplicate_of == "default"
-        assert worker.analyze_calls == initial_executions
-
-        action = {"version": 1, "settings": {"seq_page_cost": 2}}
-        changed = evaluator.evaluate(action)
-        assert changed.plan_sha256 == baseline.plan_sha256
-        assert changed.structural_duplicate_of == "default"
-        assert changed.timing_reuse_key != baseline.timing_reuse_key
-        assert changed.duplicate_of is None
-        assert worker.analyze_calls == initial_executions + 2
-        repeated = evaluator.evaluate(action)
-        assert repeated.duplicate_of == changed.candidate_id
-        assert worker.analyze_calls == initial_executions + 2
-
-        outcome = evaluator.finish(random.Random(7))
-        assert outcome.winning_plan_sha256 == baseline.plan_sha256
-        assert outcome.kind == OutcomeKind.MEASURED
-        assert outcome.score == 2.0
-        assert worker.analyze_calls == initial_executions + 2 + 12
-
-    def test_task_relative_timeout(self) -> None:
-        assert task_timeout_ms(10, 120_000) == 5_000
-        assert task_timeout_ms(30_000, 120_000) == 90_000
-        assert task_timeout_ms(50_000, 120_000) == 120_000
-
-    def test_score_is_clipped(self) -> None:
-        assert score(100, 1) == 10.0
-        assert score(1, 100) == 0.1
-
-    def test_measurement_records_postgres_buffer_counts(self) -> None:
-        result = ExplainResult(
-            {
-                "Plan": {
-                    "Node Type": "Seq Scan",
-                    "Shared Hit Blocks": 90,
-                    "Shared Read Blocks": 10,
-                },
-                "Planning Time": 1.0,
-                "Execution Time": 2.0,
-            },
-            "",
-        )
-
-        observation = measured(result)
-
-        assert observation.shared_hit_blocks == 90
-        assert observation.shared_read_blocks == 10
-
-    def test_invalid_action_consumes_attempt(self) -> None:
-        evaluator = RolloutEvaluator(
-            Worker(),
-            Fixture(),
-            TASK,
-        )
-        evaluator.start()
-        result = evaluator.evaluate({"version": 2})
-        assert not result.action_valid
-        assert result.errors_or_diagnostics == ["version must equal 1"]
-        assert result.attempts_remaining == 4
-
-    def test_candidate_budget_can_be_reduced_for_training(self) -> None:
-        evaluator = RolloutEvaluator(
-            Worker(),
-            Fixture(),
-            TASK,
-            max_candidates=1,
-        )
-        evaluator.start()
-
-        result = evaluator.evaluate({"version": 2})
-
-        assert result.attempts_remaining == 0
-        with pytest.raises(RuntimeError, match="budget is exhausted"):
-            evaluator.evaluate({"version": 2})
-        assert (
-            evaluator.measurement_protocol.manifest(1)["max_explain_analyze_executions"]
-            == 18
-        )
-
-    def test_default_plan_duplicate_reuses_measurements(self) -> None:
-        evaluator = RolloutEvaluator(
-            Worker(),
-            Fixture(),
-            TASK,
-        )
-        evaluator.start()
-        result = evaluator.evaluate(
-            {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
-        )
-        assert result.action_valid
-        assert result.duplicate_of == "default"
-        assert result.provisional_speedup == 1.0
-
-    def test_default_fingerprint_winner_is_exactly_one_without_remeasurement(
-        self,
-    ) -> None:
-        worker = Worker()
-        evaluator = RolloutEvaluator(
-            worker,
-            Fixture(),
-            TASK,
-        )
-        evaluator.start()
-        evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
-        analyze_calls_before_finish = worker.analyze_calls
-
-        final = evaluator.finish(random.Random(0))
-
-        assert worker.analyze_calls == analyze_calls_before_finish
-        assert final.score == 1.0
-        assert final.kind == OutcomeKind.DEFAULT_DUPLICATE
-        assert final.score_source == "default_fingerprint"
-        assert final.pair_orders == []
-        assert (
-            final.candidate_median_execution_time_ms
-            == final.default_median_execution_time_ms
-        )
-
-    def test_keep_default_is_a_zero_reward_terminal_decision(self) -> None:
-        worker = Worker()
-        evaluator = RolloutEvaluator(
-            worker,
-            Fixture(),
-            TASK,
-        )
-        baseline = evaluator.start()
-        analyze_calls_before_decision = worker.analyze_calls
-
-        assert evaluator.keep_default() == {"status": "kept_default"}
-        final = evaluator.finish(random.Random(0))
-
-        assert worker.analyze_calls == analyze_calls_before_decision
-        assert evaluator.candidates == []
-        assert final.status == "completed"
-        assert final.kind == OutcomeKind.KEPT_DEFAULT
-        assert final.decision == "keep_default"
-        assert final.winning_candidate_id == "default"
-        assert final.winning_plan_sha256 == baseline.plan_sha256
-        assert final.score == 1.0
-        assert final.trajectory_reward == 0.0
-        assert final.pair_orders == []
-
-    def test_keep_default_is_rejected_after_a_candidate(self) -> None:
-        evaluator = RolloutEvaluator(
-            Worker(),
-            Fixture(),
-            TASK,
-        )
-        evaluator.start()
-        evaluator.evaluate({"version": 1, "scans": [{"relation": "a", "force": "seq"}]})
-
-        with pytest.raises(RuntimeError, match="before submitting a candidate"):
-            evaluator.keep_default()
-
-    def test_rigorous_protocol_remains_26_executions(self) -> None:
-        worker = CountingWorker()
-        evaluator = RolloutEvaluator(
-            worker,
-            Fixture(),
-            TASK,
-        )
-
-        default, candidates, final = self.run_full_rollout(evaluator)
-
-        assert worker.analyze_calls == 26
-        assert worker.plain_calls == 6
-        assert len(default.measurements) == 3
-        assert candidates[0].warmup is not None
-        assert len(final.pair_orders) == 5
-        assert final.measurement_protocol_id == "rigorous-evaluation-v1"
-        assert RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions == 26
-
-    def test_training_protocol_warms_each_candidate_once(self) -> None:
-        worker = CountingWorker()
-        protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V1)
-        evaluator = RolloutEvaluator(
-            worker,
-            Fixture(),
-            TASK,
-            measurement_protocol=protocol,
-        )
-
-        default, candidates, final = self.run_full_rollout(evaluator)
-
-        assert worker.analyze_calls == 18
-        assert worker.plain_calls == 6
-        assert len(default.measurements) == 1
-        assert candidates[0].warmup is not None
-        assert len(final.pair_orders) == 3
-        assert final.measurement_protocol_id == "rl-training-v1"
-        assert protocol.max_explain_analyze_executions == 18
-        assert protocol.manifest(1)["max_explain_analyze_executions"] == 10
-
-    def test_serialized_rollout_record_is_unchanged(self) -> None:
-        evaluator = RolloutEvaluator(
-            CountingWorker(),
-            Fixture(),
-            TASK,
-        )
-
-        default, candidates, final = self.run_full_rollout(evaluator)
-        record = {
-            "schema_version": 1,
-            "task_id": TASK["task_id"],
-            "template_id": "test",
-            "default": default.to_wire(),
-            "candidates": [candidate.to_wire() for candidate in candidates],
-            "final": final.to_wire(),
-        }
-
-        golden_path = Path(__file__).with_name("golden_rollout.json")
-        expected = json.loads(golden_path.read_text(encoding="utf-8"))
-        assert record == expected
-
-    def test_calibrated_candidate_timeout_is_a_handled_failure(self) -> None:
-        default_plan = deepcopy(DEFAULT_PLAN)
-        default_plan["Plan Rows"] = 0
-        default_plan_sha256 = plan_sha256(default_plan)
-        evaluator = RolloutEvaluator(
-            TimeoutWorker(),
-            Fixture(),
-            TASK,
-            measurement_protocol=training_protocol(
-                MeasurementProtocolId.RL_TRAINING_V2
-            ),
-            calibrated_timeout=TaskTimeout(
-                "job-test", 1_500.0, 5_000, (default_plan_sha256,)
-            ),
-            timeout_manifest_id="test-timeouts",
-        )
-        baseline = evaluator.start()
-
-        candidate = evaluator.evaluate(
-            {"version": 1, "settings": {"seq_page_cost": 2.0}}
-        )
-        final = evaluator.finish(random.Random(0))
-
-        assert evaluator.timeout_ms == 5_000
-        assert baseline.candidate_timeout is not None
-        assert baseline.candidate_timeout.source == "calibrated"
-        assert candidate.action_valid
-        assert candidate.constraints_satisfied
-        assert candidate.execution_timed_out
-        assert candidate.provisional_speedup == 0.1
-        assert final.status == "no_valid_candidate"
-        assert final.kind == OutcomeKind.NO_VALID_CANDIDATE
-        assert final.invalid_attempt_count == 0
-        assert final.timeout_attempt_count == 1
-
-    def test_timeout_scores_use_the_consumed_budget(self) -> None:
-        default_plan = deepcopy(DEFAULT_PLAN)
-        default_plan["Plan Rows"] = 0
-        evaluator = RolloutEvaluator(
-            CalibratedTimeoutWorker(successful_candidate_executions=0),
-            Fixture(),
-            TASK,
-            measurement_protocol=training_protocol(
-                MeasurementProtocolId.RL_TRAINING_V2
-            ),
-            calibrated_timeout=TaskTimeout(
-                "job-test", 1_000.0, 3_000, (plan_sha256(default_plan),)
-            ),
-            timeout_manifest_id="test-timeouts",
-        )
-        evaluator.start()
-
-        candidate = evaluator.evaluate(
-            {"version": 1, "settings": {"seq_page_cost": 2.0}}
-        )
-
-        assert candidate.execution_timed_out
-        assert candidate.provisional_speedup == pytest.approx(1 / 3)
-
-    def test_final_timeout_adds_a_fixed_penalty(self) -> None:
-        default_plan = deepcopy(DEFAULT_PLAN)
-        default_plan["Plan Rows"] = 0
-        evaluator = RolloutEvaluator(
-            CalibratedTimeoutWorker(successful_candidate_executions=2),
-            Fixture(),
-            TASK,
-            measurement_protocol=training_protocol(
-                MeasurementProtocolId.RL_TRAINING_V2
-            ),
-            calibrated_timeout=TaskTimeout(
-                "job-test", 1_000.0, 3_000, (plan_sha256(default_plan),)
-            ),
-            timeout_manifest_id="test-timeouts",
-        )
-        evaluator.start()
-        candidate = evaluator.evaluate(
-            {"version": 1, "settings": {"seq_page_cost": 2.0}}
-        )
-
-        final = evaluator.finish(random.Random(0))
-
-        assert candidate.provisional_speedup == pytest.approx(1_000 / 2_900)
-        assert final.status == "candidate_timeout"
-        assert final.score == pytest.approx(1 / 3)
-        assert final.default_median_execution_time_ms == 1_000
-        assert final.invalid_attempt_count == 0
-        assert final.timeout_attempt_count == 1
-        assert final.trajectory_reward == pytest.approx(
-            math.log(1 / 3) - TIMEOUT_ATTEMPT_PENALTY
-        )
-
-    def test_calibrated_default_plan_must_still_match(self) -> None:
-        protocol = training_protocol(MeasurementProtocolId.RL_TRAINING_V2)
-        evaluator = RolloutEvaluator(
-            CountingWorker(),
-            Fixture(),
-            TASK,
-            measurement_protocol=protocol,
-            calibrated_timeout=TaskTimeout("job-test", 1_500.0, 5_000, ("stale-plan",)),
-            timeout_manifest_id="test-timeouts",
-        )
-
-        with pytest.raises(RuntimeError, match="default plan differs"):
-            evaluator.start()
-        assert evaluator.measurement_protocol.protocol_id == "rl-training-v2"
-        assert protocol.max_explain_analyze_executions == 18
-
-    @staticmethod
-    def run_full_rollout(
-        evaluator: RolloutEvaluator[QueryExecutor],
-    ) -> tuple[Baseline, list[Candidate], Outcome]:
-        default = evaluator.start()
-        candidates = [
-            evaluator.evaluate(
+            document.update(
                 {
-                    "version": 1,
-                    "settings": {"seq_page_cost": float(value)},
+                    "Execution Time": self.candidate_ms if hint else self.default_ms,
+                    "Planning Time": 1.0,
                 }
             )
-            for value in range(1, 6)
-        ]
-        if not all(candidate.constraints_satisfied for candidate in candidates):
-            raise AssertionError("test candidates must all be valid")
-        return default, candidates, evaluator.finish(random.Random(0))
+        diagnostics = (
+            "HintStateDump: {used hints:Set(seq_page_cost)}, {not used hints:(none)}, {duplicate hints:(none)}, {error hints:(none)}"
+            if hint
+            else ""
+        )
+        return ExplainResult(document, diagnostics)
+
+
+def evaluator(
+    worker: Worker,
+    *,
+    attempts: int = 1,
+    settings: RolloutMeasurementSettings = SETTINGS,
+) -> RolloutEvaluator[Worker]:
+    return RolloutEvaluator(
+        worker, Sql(), TASK, measurement=settings, max_candidates=attempts
+    )
+
+
+@pytest.mark.parametrize(
+    "structure,estimates", [(False, False), (False, True), (True, False)]
+)
+def test_valid_candidate_needs_timing_when_reuse_key_differs(
+    structure: bool, estimates: bool
+) -> None:
+    worker = Worker(changed_structure=structure, changed_estimates=estimates)
+    run = evaluator(worker)
+    baseline = run.start()
+    candidate = run.evaluate(ACTION)
+    assert candidate.constraints_satisfied
+    assert candidate.structurally_novel == structure
+    assert candidate.timing_reuse_key != baseline.timing_reuse_key
+    assert sum(call.analyze for call in worker.calls) == 2
+    final = run.finish(random.Random(0))
+    assert isinstance(final, MeasuredOutcome)
+    assert final.speedup == 2.0
+    assert len(final.paired.warmups) == 1
+    assert len(final.paired.measurements) == 3
+    assert sum(call.analyze for call in worker.calls) == 10
+    assert sum(not call.analyze for call in worker.calls) == 2
+    assert (
+        RolloutRecord.model_validate_json(run.record().model_dump_json())
+        == run.record()
+    )
+
+
+@pytest.mark.parametrize("decision", ["keep_default", "duplicate", "invalid"])
+def test_branches_without_candidate_measurements(decision: str) -> None:
+    worker = Worker()
+    run = evaluator(worker)
+    baseline = run.start()
+    if decision == "keep_default":
+        run.keep_default()
+    else:
+        candidate = run.evaluate({"version": 1 if decision == "duplicate" else 2})
+        assert candidate.attempts_remaining == 0
+    final = run.finish(random.Random(0))
+    assert sum(call.analyze for call in worker.calls) == 2
+    if decision == "keep_default":
+        assert isinstance(final, KeptDefaultOutcome)
+        assert final.selected_candidate_id is None
+    elif decision == "duplicate":
+        assert isinstance(final, DefaultDuplicateOutcome)
+        assert final.selected_plan_sha256 == baseline.plan_sha256
+    else:
+        assert isinstance(final, NoValidCandidateOutcome)
+        assert final.speedup is None
+    assert "paired" not in final.to_wire()
+    run.record()
+
+
+@pytest.mark.parametrize(
+    "failure,execution",
+    [
+        ("candidate_plan", 1),
+        ("candidate_execution", 1),
+        ("candidate_execution", 2),
+        ("candidate_execution", 3),
+    ],
+)
+def test_candidate_timeouts_preserve_cutoff_and_partial_evidence(
+    failure: str, execution: int
+) -> None:
+    worker = Worker(failure=failure, fail_execution=execution, default_ms=120_000.0)
+    run = evaluator(worker)
+    run.start()
+    run.evaluate(ACTION)
+    final = run.finish(random.Random(0))
+    assert isinstance(final, TimedOutOutcome)
+    assert final.speedup is None
+    assert final.timeout_ms == 360_000
+    assert final.initial_default_median_execution_time_ms == 120_000.0
+    assert (final.selected_plan_sha256 is None) == (failure == "candidate_plan")
+    assert (final.timing_reuse_key is None) == (failure == "candidate_plan")
+    candidate_samples = [
+        pair.candidate
+        for pair in [*final.paired.warmups, *final.paired.measurements]
+        if pair.candidate is not None
+    ]
+    assert len(candidate_samples) == (
+        0 if failure == "candidate_plan" else execution - 1
+    )
+    assert all(sample.execution_time_ms == 5.0 for sample in candidate_samples)
+    assert all(
+        call.timeout_ms == (360_000 if call.candidate else 300_000)
+        for call in worker.calls
+    )
+    run.record()
+
+
+@pytest.mark.parametrize(
+    "failure,execution",
+    [
+        ("default_plan", 1),
+        ("default_execution", 1),
+        ("default_execution", 2),
+        ("default_execution", 3),
+        ("default_execution", 4),
+        ("infrastructure", 1),
+    ],
+)
+def test_default_and_infrastructure_failures_are_unscored(
+    failure: str, execution: int
+) -> None:
+    worker = Worker(failure=failure, fail_execution=execution)
+    run = evaluator(worker)
+    with pytest.raises(PostgresError) as caught:
+        run.start()
+        run.evaluate(ACTION)
+        run.finish(random.Random(0))
+    record = run.record(caught.value)
+    assert record.final is None and record.failure is not None
+    assert record.failure.error_type in {"QueryTimeout", "PostgresError"}
+    if failure == "default_execution" and execution == 2:
+        assert record.default is not None and len(record.default.warmups) == 1
+    if failure == "default_execution" and execution >= 3:
+        assert record.failure.paired.warmups[0].candidate is not None
+    assert RolloutRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_raw_speedup_is_not_training_clipped() -> None:
+    run = evaluator(Worker(default_ms=100.0, candidate_ms=5.0))
+    run.start()
+    run.evaluate(ACTION)
+    assert run.finish(random.Random(0)).speedup == 20.0
+
+
+def test_counts_are_driven_by_settings() -> None:
+    worker = Worker()
+    settings = SETTINGS.model_copy(
+        update={
+            "default_warmups": 2,
+            "default_measurements": 3,
+            "paired_warmups": 2,
+            "paired_measurements": 4,
+        }
+    )
+    run = evaluator(worker, settings=settings)
+    run.start()
+    run.evaluate(ACTION)
+    run.finish(random.Random(0))
+    assert sum(call.analyze for call in worker.calls) == 17
+    run.record()
+
+
+def test_multiple_attempts_select_one_result_without_intermediate_timing() -> None:
+    worker = Worker(failure="candidate_plan")
+    run = evaluator(worker, attempts=4)
+    run.start()
+    run.evaluate({"version": 2})
+    run.evaluate(ACTION)  # Planning timeout, retained as an earlier attempt.
+    third = run.evaluate(ACTION)
+    fourth = run.evaluate(ACTION)
+    assert fourth.duplicate_of == third.candidate_id
+    assert sum(call.analyze for call in worker.calls) == 2
+    with pytest.raises(ValueError, match="explicit selected_candidate_id"):
+        run.finish(random.Random(0))
+    final = run.finish(random.Random(0), selected_candidate_id=fourth.candidate_id)
+    assert isinstance(final, MeasuredOutcome)
+    assert final.selected_candidate_id == fourth.candidate_id
+    assert run.candidates[1].execution_timed_out
+    assert sum(call.analyze for call in worker.calls) == 10
+    run.record()
+
+
+def test_outcomes_require_consistent_evidence() -> None:
+    run = evaluator(Worker())
+    run.start()
+    run.evaluate(ACTION)
+    final = run.finish(random.Random(0))
+    assert isinstance(final, MeasuredOutcome)
+    with pytest.raises(ValidationError, match="unclipped"):
+        MeasuredOutcome.model_validate({**final.model_dump(), "speedup": 10.0})
+    record = run.record().model_dump()
+    record["final"]["selected_candidate_id"] = "invented"
+    with pytest.raises(ValidationError, match="recorded attempt"):
+        RolloutRecord.model_validate(record)
+    with pytest.raises(RuntimeError, match="already started"):
+        run.finish(random.Random(0))
+
+
+def test_reviewed_rollout_record() -> None:
+    run = evaluator(Worker())
+    run.start()
+    run.evaluate(ACTION)
+    run.finish(random.Random(0))
+    expected = json.loads(Path(__file__).with_name("golden_rollout.json").read_text())
+    assert run.record().to_wire() == expected
+
+
+def test_cancellation_between_queries_remains_unscored() -> None:
+    cancel = Event()
+    worker = Worker()
+    run = RolloutEvaluator(
+        worker, Sql(), TASK, measurement=SETTINGS, max_candidates=1, cancel=cancel
+    )
+    run.start()
+    cancel.set()
+    with pytest.raises(CancelledError) as caught:
+        run.evaluate(ACTION)
+    assert len(worker.calls) == 3
+    record = run.record(caught.value)
+    assert record.final is None and record.failure is not None
+    assert record.failure.error_type == "CancelledError"
+
+
+def test_cancellation_retains_completed_default_explain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cancel = Event()
+    worker = Worker()
+    original_explain = worker.explain
+
+    def explain(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = original_explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        cancel.set()
+        return result
+
+    monkeypatch.setattr(worker, "explain", explain)
+    run = RolloutEvaluator(
+        worker, Sql(), TASK, measurement=SETTINGS, max_candidates=1, cancel=cancel
+    )
+    with pytest.raises(CancelledError) as caught:
+        run.start()
+    record = run.record(caught.value)
+    assert record.final is None and record.failure is not None
+    assert record.default is not None and record.default.plain_explain == {"Plan": PLAN}
+    assert record.default.measurements == []
+    assert len(worker.calls) == 1
+
+
+@pytest.mark.parametrize("planning_timeout", [False, True])
+def test_cancellation_retains_completed_candidate_validation(
+    monkeypatch: pytest.MonkeyPatch, planning_timeout: bool
+) -> None:
+    cancel = Event()
+    worker = Worker(failure="candidate_plan" if planning_timeout else "")
+    original_explain = worker.explain
+
+    def explain(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        try:
+            return original_explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        finally:
+            if hint:
+                cancel.set()
+
+    monkeypatch.setattr(worker, "explain", explain)
+    run = RolloutEvaluator(
+        worker, Sql(), TASK, measurement=SETTINGS, max_candidates=1, cancel=cancel
+    )
+    run.start()
+    with pytest.raises(CancelledError) as caught:
+        run.evaluate(ACTION)
+    record = run.record(caught.value)
+    assert record.final is None and record.failure is not None
+    assert record.failure.error_type == "CancelledError"
+    assert len(record.candidates) == 1
+    candidate = record.candidates[0]
+    assert candidate.action == ACTION
+    assert candidate.attempts_remaining == 0
+    assert candidate.execution_timed_out == planning_timeout
+    if planning_timeout:
+        assert candidate.plain_explain is None
+        assert candidate.errors_or_diagnostics
+    else:
+        assert candidate.constraints_satisfied
+        assert candidate.plain_explain == {"Plan": PLAN}
+        assert candidate.structural_duplicate_of == "default"
+        assert candidate.timing_reuse_key is not None
+        assert candidate.pg_hint_plan is not None
+    assert sum(call.analyze for call in worker.calls) == 2
+
+
+def test_warmups_do_not_enter_the_paired_medians(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = Worker()
+    original_explain = worker.explain
+    defaults = iter([900.0, 100.0, 800.0, 90.0, 110.0, 100.0])
+    candidates = iter([700.0, 60.0, 40.0, 50.0])
+
+    def explain(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = original_explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        if analyze:
+            result.document["Execution Time"] = next(candidates if hint else defaults)
+        return result
+
+    monkeypatch.setattr(worker, "explain", explain)
+    run = evaluator(worker)
+    assert run.start().median_execution_time_ms == 100.0
+    run.evaluate(ACTION)
+    final = run.finish(random.Random(0))
+    assert isinstance(final, MeasuredOutcome)
+    assert final.default_median_execution_time_ms == 100.0
+    assert final.candidate_median_execution_time_ms == 50.0
+    assert final.speedup == 2.0
+    assert final.paired.warmups[0].candidate is not None
+    assert final.paired.warmups[0].candidate.execution_time_ms == 700.0
+    run.record()
+
+
+def test_changed_plan_during_measurement_is_an_unscored_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = Worker()
+    original_explain = worker.explain
+
+    def explain(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = original_explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        if analyze and hint:
+            result.document["Plan"]["Plan Rows"] = 123.0
+        return result
+
+    monkeypatch.setattr(worker, "explain", explain)
+    run = evaluator(worker)
+    run.start()
+    run.evaluate(ACTION)
+    with pytest.raises(PostgresError, match="plan changed") as caught:
+        run.finish(random.Random(0))
+    record = run.record(caught.value)
+    assert record.final is None and record.failure is not None
+    assert record.failure.paired.warmups[0].candidate is not None

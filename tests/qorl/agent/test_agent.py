@@ -18,9 +18,7 @@ from qorl.agent.interface import AgentInterface
 from qorl.agent.schemas import AgentSettings
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.tools import agent_tools
-from qorl.agent.types import InspectionExecutor
-from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import Baseline, Candidate, Measurement, MeasurementStatus
+from qorl.measure.schemas import Baseline, Candidate, MeasurementStatus
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.schemas import (
@@ -112,7 +110,7 @@ class FakeClient:
         return {"version": "test"}
 
     def chat(self, body: dict) -> dict:
-        self.requests.append(body)
+        self.requests.append(deepcopy(body))
         return self.responses.pop(0)
 
 
@@ -174,7 +172,7 @@ class MissingUsageClient(FakeClient):
         self.responses[0].pop("usage")
 
 
-class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
+class FakeEvaluator:
     def __init__(self, repository: Path) -> None:
         def admin_sql(sql: str) -> str:
             del sql
@@ -216,6 +214,13 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
         self.actions = []
         self.kept_default = False
 
+    @property
+    def worker(self):
+        return self._worker
+
+    def check_cancelled(self) -> None:
+        pass
+
     def evaluate(self, action: object) -> Candidate:
         self.actions.append(action)
         candidate = Candidate(
@@ -227,14 +232,6 @@ class FakeEvaluator(RolloutEvaluator[InspectionExecutor]):
             duplicate_of="default",
             plan_sha256="abc",
             compact_plan={"Node Type": "Result"},
-            provisional_measurements=[
-                Measurement(
-                    planning_time_ms=0.1,
-                    execution_time_ms=1.0,
-                    plan_sha256="abc",
-                )
-            ],
-            provisional_speedup=1.0,
             errors_or_diagnostics=[],
             pg_hint_plan=None,
             attempts_remaining=4,
@@ -306,8 +303,8 @@ class TestQoAgent:
             for request in client.requests
         ]
         assert digests == [
-            "cca30e47e4b7d6ee393a266c486390a42f0e29f9b5ac295224ea5f0e3a23756a",
-            "324507ec86688cd2f91523d7d48d0956ce78c4f39beeff66c27b887e01e0849e",
+            "5f54f61f7d391c117a84d74633e749faa7b46335a71b504f53f210528ed99e69",
+            "76915dab0094f6bd137a9afca95f6302151e992c148fe4a919af77671fd607e2",
         ]
 
     def test_protocol_exposes_a_one_candidate_training_budget(
@@ -466,8 +463,9 @@ class TestQoAgent:
         assert "keep_default" not in second_tools
         assert not client.requests[0]["chat_template_kwargs"]["enable_thinking"]
 
+    @pytest.mark.parametrize("attempts", [1, 2])
     def test_validation_only_candidate_prints_without_a_speedup(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], attempts: int
     ) -> None:
         worker = PlanOnlyWorker(
             settings=FakeEvaluator(tmp_path).worker.settings,
@@ -478,11 +476,12 @@ class TestQoAgent:
             SqlFixture(),
             Task.model_validate(TASK),
             default_timeout_ms=5_000,
-            max_candidates=1,
+            max_candidates=attempts,
         )
         evaluator.start()
 
-        trace = QoAgentPolicy(config(), FakeClient()).search(evaluator)
+        client = FakeClient()
+        trace = QoAgentPolicy(config(), client).search(evaluator)
 
         assert trace["stop_reason"] == "model_finish"
         assert "candidate-01: validated" in capsys.readouterr().out
@@ -490,7 +489,16 @@ class TestQoAgent:
         assert (
             evaluator.candidates[0].measurement_status == MeasurementStatus.NOT_MEASURED
         )
-        assert evaluator.candidates[0].provisional_speedup is None
+        assert "provisional_speedup" not in evaluator.candidates[0].feedback()
+        feedback = json.loads(client.requests[1]["messages"][-1]["content"])
+        assert feedback["action_valid"] and feedback["constraints_satisfied"]
+        assert feedback["structurally_novel"] is False
+        assert feedback["structural_duplicate_of"] == "default"
+        assert feedback["attempts_remaining"] == attempts - 1
+        assert "errors_or_diagnostics" in feedback
+        for field in ("plan_sha256", "structural_plan_sha256", "timing_reuse_key"):
+            assert field not in feedback
+            assert getattr(evaluator.candidates[0], field) is not None
 
     def test_configured_budgets_control_tools_and_enforcement(
         self, tmp_path: Path
@@ -519,7 +527,7 @@ class TestQoAgent:
         )
         trace = QoAgentPolicy(config(), client).search(evaluator, settings=settings)
 
-        assert trace["agent_interface_version"] == 2
+        assert trace["agent_interface_version"] == 3
         observation = trace["initial_observation"]
         assert observation["candidate_attempts"] == 1
         assert observation["turn_budget"]["total_model_turns"] == 6

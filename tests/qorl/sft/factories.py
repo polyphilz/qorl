@@ -5,18 +5,12 @@ import json
 from qorl.measure.schemas import (
     Baseline,
     Candidate,
-    FinalStatus,
-    MeasurementProtocolId,
     MeasurementStatus,
-    Outcome,
     RunStatus,
 )
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
-    CandidateMeasurement,
-    ExampleSource,
     JsonObject,
-    MeasurementAttempt,
     SampleRecord,
     SamplerIdentity,
     SamplingMode,
@@ -91,8 +85,6 @@ def candidate(plan_sha256: str = "novel-plan") -> Candidate:
         structural_plan_sha256=plan_sha256,
         plain_explain={"Plan": {"Node Type": "Seq Scan"}},
         compact_plan={"Node Type": "Seq Scan"},
-        provisional_measurements=[],
-        provisional_speedup=None,
         measurement_status=MeasurementStatus.NOT_MEASURED,
         errors_or_diagnostics=[],
         pg_hint_plan={},
@@ -142,36 +134,4 @@ def sample(sample_number: int = 1) -> SampleRecord:
         policy_trace=trace,
         training_transcript=transcript,
         error=None,
-    )
-
-
-def measurement(task_id: str, plan_sha256: str, *scores: float) -> CandidateMeasurement:
-    attempts = [
-        MeasurementAttempt(
-            attempt=index,
-            completed_at_utc="2026-09-03T00:00:00+00:00",
-            worker={},
-            baseline=baseline(),
-            candidate=candidate(plan_sha256),
-            outcome=Outcome(
-                measurement_protocol_id=MeasurementProtocolId.RL_TRAINING_V2,
-                status=FinalStatus.COMPLETED,
-                winning_candidate_id="candidate-01",
-                score=score,
-                trajectory_reward=0.0,
-                invalid_attempt_count=0,
-                duplicate_attempt_count=0,
-                timeout_attempt_count=0,
-            ),
-        )
-        for index, score in enumerate(scores, start=1)
-    ]
-    return CandidateMeasurement(
-        task_id=task_id,
-        template_id="template-1",
-        source=ExampleSource.STUDENT,
-        plan_sha256=plan_sha256,
-        sample_path=f"samples/{task_id}.json",
-        attempts=attempts,
-        failed_attempts=[],
     )

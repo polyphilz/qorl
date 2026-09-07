@@ -13,7 +13,7 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.types import StopReason
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
-from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS, CalibratedTimeouts
+from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
@@ -51,7 +51,7 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot
 
-SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v2"
+SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v3"
 
 
 @dataclass(frozen=True)
@@ -112,20 +112,14 @@ def evaluate_request(
     task_set: TaskSet,
     request: SampleRequest,
     config: QoAgentConfig,
-    calibrated_timeouts: CalibratedTimeouts | None,
     sampler_identity: SamplerIdentity,
 ) -> tuple[WorkerSlot, SampleRecord]:
     with pool.claim_worker() as slot:
-        timeout = (
-            calibrated_timeouts.task(request.task_id)
-            if calibrated_timeouts is not None
-            else None
-        )
         evaluator = PlanValidationEvaluator(
             slot.client,
             task_set,
             Task.model_validate(request.task),
-            default_timeout_ms=timeout.timeout_ms if timeout else GLOBAL_TIMEOUT_MS,
+            default_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
             max_candidates=1,
         )
         try:
@@ -299,11 +293,6 @@ def main() -> None:
         default=Path("experiments/005-protocol-sft-v2/dataset.json"),
     )
     parser.add_argument(
-        "--timeouts",
-        type=Path,
-        default=Path("experiments/005-protocol-sft-v2/timeouts.json"),
-    )
-    parser.add_argument(
         "--output", type=Path, default=Path("outputs/sft/protocol-sft-v2")
     )
     parser.add_argument("--split", choices=("sampling", "validation"), required=True)
@@ -321,7 +310,6 @@ def main() -> None:
     pool_config = load_pool_config(arguments.pool_config)
     config_path = (repository / arguments.config).resolve()
     output = (repository / arguments.output).resolve()
-    timeout_path = (repository / arguments.timeouts).resolve()
     sampler_manifest_path = (repository / arguments.sampler_manifest).resolve()
     config = load_record(config_path, DatasetConfig)
     selection_path = (repository / config.selection).resolve()
@@ -360,16 +348,6 @@ def main() -> None:
         if arguments.limit < 1:
             raise RuntimeError("--limit must be positive")
         tasks = tasks[: arguments.limit]
-    calibrated_timeouts = (
-        CalibratedTimeouts.load(
-            repository,
-            timeout_path,
-            task_set,
-            postgres_config.config_id,
-        )
-        if arguments.split == "sampling"
-        else None
-    )
     sampler_manifest = load_json_object(sampler_manifest_path)
     require_list(sampler_manifest.get("artifacts"), "sampler.artifacts")
     base_config = replace(QoAgentConfig.from_dict(policy), model=arguments.model)
@@ -471,9 +449,7 @@ def main() -> None:
     def execute(
         pool: ContainerPool, request: SampleRequest
     ) -> tuple[WorkerSlot, SampleRecord]:
-        return evaluate_request(
-            pool, task_set, request, base_config, calibrated_timeouts, sampler_identity
-        )
+        return evaluate_request(pool, task_set, request, base_config, sampler_identity)
 
     with run:
         for completion in run.map(

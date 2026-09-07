@@ -13,12 +13,16 @@ from qorl.evaluation.benchmark import (
     run_task_on_worker,
     summarize,
 )
+from qorl.measure.schemas import NoValidCandidateOutcome, RolloutRecord
+from qorl.rl.schemas import RlRolloutRecord
 
 
 class TestBenchmark:
-    def test_task_keeps_one_claimed_worker_for_its_rollout(self) -> None:
+    def test_task_keeps_one_claimed_worker_for_its_rollout(
+        self, rl_rollout_record: RlRolloutRecord
+    ) -> None:
         resources = Mock()
-        resources.manifest.return_value = {"slot": 2}
+        resources.manifest.return_value = rl_rollout_record.database_worker
         slot = SimpleNamespace(resources=resources, client=object())
         pool = Mock()
         pool.claim_worker.return_value = nullcontext(slot)
@@ -31,11 +35,15 @@ class TestBenchmark:
             "qorl.evaluation.benchmark.run_task",
             return_value={"status": "completed"},
         ) as run_task:
-            claimed, result = run_task_on_worker(pool, task_set, task, policy, agent)
+            claimed, result = run_task_on_worker(
+                pool, task_set, task, policy, agent, rl_rollout_record.measurement
+            )
 
         assert claimed is slot
-        assert result["worker"] == {"slot": 2}
-        run_task.assert_called_once_with(slot.client, task_set, task, policy, agent)
+        assert result["worker"] == rl_rollout_record.database_worker.model_dump()
+        run_task.assert_called_once_with(
+            slot.client, task_set, task, policy, agent, rl_rollout_record.measurement
+        )
 
     def test_run_config_loads_policy_without_schema_version(
         self, tmp_path: Path
@@ -103,24 +111,25 @@ class TestBenchmark:
             repository_root / "experiments/000-vanilla-baseline/random-policy.json"
         )
 
-    def test_summary_reports_primary_metrics(self) -> None:
+    def test_summary_reports_primary_metrics(
+        self, rollout_record: RolloutRecord
+    ) -> None:
+        invalid = RolloutRecord.model_validate(
+            {
+                **rollout_record.model_dump(),
+                "candidates": [],
+                "final": NoValidCandidateOutcome(),
+            }
+        )
         results = [
-            {
-                "candidates": [{"constraints_satisfied": True, "duplicate_of": None}],
-                "final": {
-                    "status": "completed",
-                    "score": 2.0,
-                    "candidate_median_execution_time_ms": 5.0,
-                    "default_median_execution_time_ms": 10.0,
-                },
-            },
-            {
-                "candidates": [{"constraints_satisfied": False, "duplicate_of": None}],
-                "final": {"status": "no_valid_candidate"},
-            },
+            {"rollout": rollout_record.to_wire()},
+            {"rollout": invalid.to_wire()},
+            {"status": "failed"},
         ]
         summary = summarize(results)
         assert summary["scored_task_count"] == 1
-        assert summary["failure_rate"] == 0.5
+        assert summary["failure_count"] == 1
+        assert summary["no_valid_candidate_count"] == 1
         assert summary["geometric_mean_speedup"] == 2.0
-        assert summary["invalid_attempt_count"] == 1
+        assert summary["candidate_workload_time_ms"] == 5.0
+        assert summary["default_workload_time_ms"] == 10.0

@@ -1,5 +1,8 @@
 """Validate candidate plans with plain EXPLAIN, without collecting latency samples."""
 
+from concurrent.futures import CancelledError
+from threading import Event
+
 from pydantic import JsonValue
 
 from qorl.measure.protocols import QueryExecutor, SqlSource
@@ -51,7 +54,6 @@ def validate_candidate(
         structural_plan_sha256=None,
         structural_duplicate_of=None,
         timing_reuse_key=None,
-        provisional_speedup=None,
         execution_timed_out=False,
         measurement_status=MeasurementStatus.NOT_MEASURED,
         pg_hint_plan=None,
@@ -103,6 +105,7 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         *,
         default_timeout_ms: int,
         max_candidates: int,
+        cancel: Event | None = None,
     ) -> None:
         if default_timeout_ms < 1 or max_candidates < 1:
             raise ValueError("timeout and candidate limit must be positive")
@@ -117,6 +120,12 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         self.kept_default = False
         self.by_structure: dict[str, str] = {}
         self.by_reuse_key: dict[str, str] = {}
+        self.cancel = cancel
+
+    def check_cancelled(self) -> None:
+        """Stop between bounded calls without abandoning an in-flight database worker."""
+        if self.cancel is not None and self.cancel.is_set():
+            raise CancelledError("rollout cancelled")
 
     @property
     def worker(self) -> ExecutorT:
@@ -126,6 +135,7 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         """Explain the default once, recording identities but no execution samples."""
         if self.default is not None:
             raise RuntimeError("rollout baseline has already been started")
+        self.check_cancelled()
         plain = self.worker.explain(self.sql, self.timeout_ms)
         plan = plain.document["Plan"]
         fingerprint = plan_sha256(plan)
@@ -142,10 +152,12 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         )
         self.by_structure[structure] = "default"
         self.by_reuse_key[reuse_key] = "default"
+        self.check_cancelled()
         return self.default
 
     def evaluate(self, raw_action: JsonValue) -> Candidate:
         """Issue one attempt and distinguish structural from execution duplicates."""
+        self.check_cancelled()
         if self.default is None:
             raise RuntimeError("rollout baseline has not been started")
         if self.kept_default:
@@ -175,6 +187,7 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
             self.by_structure.setdefault(structure, candidate.candidate_id)
             self.by_reuse_key.setdefault(reuse_key, candidate.candidate_id)
         self.candidates.append(candidate)
+        self.check_cancelled()
         return candidate
 
     def keep_default(self) -> dict[str, str]:

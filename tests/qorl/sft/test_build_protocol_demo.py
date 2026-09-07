@@ -9,7 +9,6 @@ import pytest
 
 from qorl.agent.interface import AgentInterface
 from qorl.agent.tools import agent_tools
-from qorl.measure.rollout import MAX_CANDIDATES
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
@@ -28,9 +27,7 @@ def raw_plan(tree: str | dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def synthetic_demo(
-    repository: Path, candidate_attempts: int = MAX_CANDIDATES
-) -> dict[str, Any]:
+def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, Any]:
     task_set = TaskSet.load(repository, "ceb")
     selected_task = next(item for item in task_set.tasks if item.task_id == TASK_ID)
     task = selected_task.model_dump()
@@ -114,7 +111,7 @@ def synthetic_demo(
             "action_valid": True,
             "constraints_satisfied": True,
             "compiled_hint": hint,
-            "plan_sha256": plan_sha256(plan["Plan"]),
+            "compact_plan": compact_plan(plan["Plan"]),
         },
     )
     call_sequence = ["get_plan", "evaluate_candidate"]
@@ -126,7 +123,7 @@ def synthetic_demo(
         add(3, "finish", {}, {"status": "finished"})
         call_sequence.append("finish")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "messages": messages,
         "tools": tools,
         "metadata": {
@@ -146,6 +143,7 @@ def synthetic_demo(
                 "candidate-01": {
                     "action": action,
                     "plain_explain": plan,
+                    "plan_sha256": plan_sha256(plan["Plan"]),
                     "pg_hint_plan": {
                         "used": "Leading",
                         "not_used": "(none)",

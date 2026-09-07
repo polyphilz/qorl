@@ -15,7 +15,7 @@ from qorl.plans.fingerprint import (
     timing_reuse_key,
 )
 from qorl.plans.schemas import PlanAction
-from qorl.sft.schemas import TeacherGenerationRecord
+from qorl.sft.schemas import load_json_object, require_list, require_object
 
 
 class ExplainDocument(BaseModel):
@@ -48,11 +48,16 @@ def test_recorded_teacher_estimate_only_changes_are_not_novel(
         / "experiments/005-protocol-sft-v2/teacher/records"
         / record_path
     )
-    record = TeacherGenerationRecord.model_validate_json(path.read_text())
-    sample = record.accepted_sample
-    assert sample is not None and sample.default is not None
-    default = ExplainDocument.model_validate(sample.default.plain_explain).Plan
-    candidate = ExplainDocument.model_validate(sample.candidates[0].plain_explain).Plan
+    # Read the original plan evidence, not the retired teacher record schema.
+    sample = require_object(
+        load_json_object(path)["accepted_sample"], "accepted_sample"
+    )
+    baseline = require_object(sample["default"], "default")
+    first = require_object(
+        require_list(sample["candidates"], "candidates")[0], "candidate"
+    )
+    default = ExplainDocument.model_validate(baseline["plain_explain"]).Plan
+    candidate = ExplainDocument.model_validate(first["plain_explain"]).Plan
     assert plan_sha256(default) != plan_sha256(candidate)
     assert structural_plan_sha256(default) == structural_plan_sha256(candidate)
 

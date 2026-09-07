@@ -121,7 +121,7 @@ class AgentEnvironment:
         )
         if candidate is None:
             raise ValueError("candidate_id was not issued by the server")
-        plan = candidate.plain_explain or candidate.measured_explain_analyze
+        plan = candidate.plain_explain
         if plan is None:
             raise ValueError("candidate has no PostgreSQL plan")
         return {"Plan": compact_plan(plan["Plan"])}

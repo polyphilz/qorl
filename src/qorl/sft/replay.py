@@ -8,7 +8,7 @@ from typing import Any
 
 from qorl.agent.types import ToolName
 from qorl.measure.schemas import RunStatus
-from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS
+from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.fingerprint import plan_sha256
@@ -86,7 +86,7 @@ def main() -> None:
                 worker,
                 task_set,
                 Task.model_validate(tasks[task_id]),
-                default_timeout_ms=GLOBAL_TIMEOUT_MS,
+                default_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
                 max_candidates=len(actions),
             )
             baseline = evaluator.start()

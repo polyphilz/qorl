@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from qorl.postgres.schemas import ExplainResult
 from qorl.taskset.schemas import BenchmarkId
 from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
 
-MIN_SCORE = 0.1
-MAX_SCORE = 10.0
-INVALID_ATTEMPT_PENALTY = 0.10
-DUPLICATE_ATTEMPT_PENALTY = 0.05
-TIMEOUT_ATTEMPT_PENALTY = 0.10
-NO_VALID_CANDIDATE_REWARD = -3.0
 MIN_CALIBRATION_RUNS = 2
+ROLLOUT_SCHEMA_VERSION = 2
 
 
 class RolloutMeasurementSettings(BaseModel):
@@ -55,27 +51,9 @@ class RunStatus(StrEnum):
     PASSED = "passed"
 
 
-class MeasurementProtocolId(StrEnum):
-    RIGOROUS_EVALUATION_V1 = "rigorous-evaluation-v1"
-    RL_TRAINING_V1 = "rl-training-v1"
-    RL_TRAINING_V2 = "rl-training-v2"
-
-
-class FinalStatus(StrEnum):
-    COMPLETED = "completed"
-    NO_VALID_CANDIDATE = "no_valid_candidate"
-    CANDIDATE_TIMEOUT = "candidate_timeout"
-
-
-class Decision(StrEnum):
-    KEEP_DEFAULT = "keep_default"
+class MeasuredPlan(StrEnum):
+    DEFAULT = "default"
     CANDIDATE = "candidate"
-
-
-class ScoreSource(StrEnum):
-    EXPLICIT_KEEP_DEFAULT = "explicit_keep_default"
-    DEFAULT_FINGERPRINT = "default_fingerprint"
-    INTERLEAVED_MEASUREMENT = "interleaved_measurement"
 
 
 class MeasurementStatus(StrEnum):
@@ -97,15 +75,17 @@ class OutcomeKind(StrEnum):
 
 
 class Record(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, allow_inf_nan=False
+    )
 
-    def to_wire(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude_unset=True)
+    def to_wire(self) -> dict[str, JsonValue]:
+        return self.model_dump(mode="json")
 
 
 class Measurement(Record):
-    execution_time_ms: float
-    planning_time_ms: float
+    execution_time_ms: float = Field(ge=0)
+    planning_time_ms: float = Field(ge=0)
     plan_sha256: str
     shared_hit_blocks: int = 0
     shared_read_blocks: int = 0
@@ -193,25 +173,17 @@ class QueryRun:
     explain: ExplainResult
 
 
-class CandidateTimeout(Record):
-    timeout_ms: int
-    source: str
-    manifest_id: str | None
-    calibrated_default_median_ms: float | None
-
-
 class Baseline(Record):
-    measurement_protocol_id: MeasurementProtocolId | None = None
     plan_sha256: str
     structural_plan_sha256: str | None = None
     timing_reuse_key: str | None = None
     plan_fingerprint_version: int | None = None
-    plain_explain: dict[str, Any]
+    plain_explain: dict[str, JsonValue]
     median_execution_time_ms: float | None
-    warmup: Measurement | None = None
+    warmups: list[Measurement] = []
     measurements: list[Measurement] = []
-    candidate_timeout: CandidateTimeout | None = None
-    compact_plan: dict[str, Any]
+    candidate_timeout_ms: int | None = Field(default=None, gt=0)
+    compact_plan: dict[str, JsonValue]
 
 
 class Candidate(Record):
@@ -222,7 +194,7 @@ class Candidate(Record):
     """
 
     candidate_id: str
-    action: Any
+    action: JsonValue
     action_valid: bool
     constraints_satisfied: bool
     compiled_hint: str
@@ -232,43 +204,31 @@ class Candidate(Record):
     structural_duplicate_of: str | None = None
     timing_reuse_key: str | None = None
     plan_fingerprint_version: int | None = None
-    provisional_measurements: list[Measurement] = []
-    provisional_speedup: float | None
     errors_or_diagnostics: list[str] = []
     pg_hint_plan: dict[str, str] | None
     attempts_remaining: int
-    plain_explain: dict[str, Any] | None = None
-    compact_plan: dict[str, Any] | None = None
-    warmup: Measurement | None = None
-    measured_explain_analyze: dict[str, Any] | None = None
-    provisional_median_execution_time_ms: float | None = None
+    plain_explain: dict[str, JsonValue] | None = None
+    compact_plan: dict[str, JsonValue] | None = None
     execution_timed_out: bool = False
     timeout_ms: int | None = None
     measurement_status: MeasurementStatus | None = None
 
-    def feedback(self) -> dict[str, Any]:
-        return {
-            "candidate_id": self.candidate_id,
-            "action_valid": self.action_valid,
-            "constraints_satisfied": self.constraints_satisfied,
-            "compiled_hint": self.compiled_hint,
-            "duplicate_of": self.duplicate_of,
-            "plan_sha256": self.plan_sha256,
-            "structural_plan_sha256": self.structural_plan_sha256,
-            "structural_duplicate_of": self.structural_duplicate_of,
-            "compact_plan": self.compact_plan,
-            "planning_time_ms": [
-                item.planning_time_ms for item in self.provisional_measurements
-            ],
-            "execution_time_ms": [
-                item.execution_time_ms for item in self.provisional_measurements
-            ],
-            "provisional_speedup": self.provisional_speedup,
-            "execution_timed_out": self.execution_timed_out,
-            "timeout_ms": self.timeout_ms,
-            "errors_or_diagnostics": self.errors_or_diagnostics,
-            "attempts_remaining": self.attempts_remaining,
-        }
+    def feedback(self) -> dict[str, JsonValue]:
+        """Expose actionable validation results, not stored hashes or invented timing."""
+        return CandidateFeedback(
+            candidate_id=self.candidate_id,
+            action_valid=self.action_valid,
+            constraints_satisfied=self.constraints_satisfied,
+            compiled_hint=self.compiled_hint,
+            duplicate_of=self.duplicate_of,
+            structurally_novel=self.structurally_novel,
+            structural_duplicate_of=self.structural_duplicate_of,
+            compact_plan=self.compact_plan,
+            execution_timed_out=self.execution_timed_out,
+            timeout_ms=self.timeout_ms,
+            errors_or_diagnostics=self.errors_or_diagnostics,
+            attempts_remaining=self.attempts_remaining,
+        ).to_wire()
 
     @property
     def structurally_novel(self) -> bool:
@@ -281,54 +241,250 @@ class Candidate(Record):
         )
 
 
-class Outcome(Record):
-    measurement_protocol_id: MeasurementProtocolId
-    status: FinalStatus
-    winning_candidate_id: str | None
-    score: float
-    trajectory_reward: float
-    invalid_attempt_count: int
-    duplicate_attempt_count: int
-    timeout_attempt_count: int
-    decision: Decision | None = None
-    winning_plan_sha256: str | None = None
-    score_source: ScoreSource | None = None
-    pair_orders: list[list[str]] = []
-    candidate_measurements: list[Measurement] = []
-    default_measurements: list[Measurement] = []
-    candidate_median_execution_time_ms: float | None = None
-    default_median_execution_time_ms: float | None = None
-    timeout_ms: int | None = None
-
-    @property
-    def kind(self) -> OutcomeKind:
-        if self.status == FinalStatus.NO_VALID_CANDIDATE:
-            return OutcomeKind.NO_VALID_CANDIDATE
-        if self.status == FinalStatus.CANDIDATE_TIMEOUT:
-            return OutcomeKind.TIMED_OUT
-        if self.decision == Decision.KEEP_DEFAULT:
-            return OutcomeKind.KEPT_DEFAULT
-        if self.score_source == ScoreSource.DEFAULT_FINGERPRINT:
-            return OutcomeKind.DEFAULT_DUPLICATE
-        return OutcomeKind.MEASURED
+class CandidateFeedback(Record):
+    candidate_id: str
+    action_valid: bool
+    constraints_satisfied: bool
+    compiled_hint: str
+    duplicate_of: str | None
+    structurally_novel: bool
+    structural_duplicate_of: str | None
+    compact_plan: dict[str, JsonValue] | None
+    execution_timed_out: bool
+    timeout_ms: int | None
+    errors_or_diagnostics: list[str]
+    attempts_remaining: int
 
 
-def score(default_median_ms: float, candidate_median_ms: float) -> float:
-    return min(MAX_SCORE, max(MIN_SCORE, default_median_ms / candidate_median_ms))
+class MeasurementPair(Record):
+    """Execution order and completed observations; an interrupted pair may be partial."""
+
+    order: tuple[MeasuredPlan, MeasuredPlan]
+    default: Measurement | None = None
+    candidate: Measurement | None = None
+
+    @model_validator(mode="after")
+    def one_of_each(self) -> Self:
+        if set(self.order) != set(MeasuredPlan):
+            raise ValueError("pair order must contain default and candidate once each")
+        first, second = self.order
+        if getattr(self, second) is not None and getattr(self, first) is None:
+            raise ValueError("pair observations must follow the recorded order")
+        return self
 
 
-def measured_reward(
-    score_value: float,
-    invalid_attempts: int,
-    duplicate_attempts: int,
-    timeout_attempts: int = 0,
-    *,
-    include_quality: bool = True,
-) -> float:
-    quality = math.log(score_value) if include_quality else 0.0
-    return (
-        quality
-        - INVALID_ATTEMPT_PENALTY * invalid_attempts
-        - DUPLICATE_ATTEMPT_PENALTY * duplicate_attempts
-        - TIMEOUT_ATTEMPT_PENALTY * timeout_attempts
-    )
+class PairedMeasurements(Record):
+    """Final measurement evidence, excluding initial default executions."""
+
+    warmups: list[MeasurementPair] = []
+    measurements: list[MeasurementPair] = []
+
+
+class KeptDefaultOutcome(Record):
+    kind: Literal[OutcomeKind.KEPT_DEFAULT] = OutcomeKind.KEPT_DEFAULT
+    selected_candidate_id: None = None
+    selected_plan_sha256: str
+    timing_reuse_key: str
+    baseline_reference: Literal["default"] = "default"
+    speedup: float = Field(default=1.0, ge=1.0, le=1.0)
+
+
+class DefaultDuplicateOutcome(Record):
+    kind: Literal[OutcomeKind.DEFAULT_DUPLICATE] = OutcomeKind.DEFAULT_DUPLICATE
+    selected_candidate_id: str
+    selected_plan_sha256: str
+    timing_reuse_key: str
+    baseline_reference: Literal["default"] = "default"
+    speedup: float = Field(default=1.0, ge=1.0, le=1.0)
+
+
+class MeasuredOutcome(Record):
+    kind: Literal[OutcomeKind.MEASURED] = OutcomeKind.MEASURED
+    selected_candidate_id: str
+    selected_plan_sha256: str
+    timing_reuse_key: str
+    paired: PairedMeasurements
+    default_median_execution_time_ms: float = Field(gt=0)
+    candidate_median_execution_time_ms: float = Field(gt=0)
+    speedup: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def completed_measurements(self) -> Self:
+        if not self.paired.measurements:
+            raise ValueError("measured outcome requires paired observations")
+        for pair in [*self.paired.warmups, *self.paired.measurements]:
+            if pair.default is None or pair.candidate is None:
+                raise ValueError("measured outcome requires complete pairs")
+        default = statistics.median(
+            pair.default.execution_time_ms
+            for pair in self.paired.measurements
+            if pair.default is not None
+        )
+        candidate = statistics.median(
+            pair.candidate.execution_time_ms
+            for pair in self.paired.measurements
+            if pair.candidate is not None
+        )
+        if (
+            default != self.default_median_execution_time_ms
+            or candidate != self.candidate_median_execution_time_ms
+        ):
+            raise ValueError("outcome medians must match the measured pairs")
+        if not math.isclose(self.speedup, default / candidate):
+            raise ValueError(
+                "speedup must equal the unclipped default/candidate median ratio"
+            )
+        return self
+
+
+class TimedOutOutcome(Record):
+    kind: Literal[OutcomeKind.TIMED_OUT] = OutcomeKind.TIMED_OUT
+    selected_candidate_id: str
+    selected_plan_sha256: str | None
+    timing_reuse_key: str | None
+    speedup: None = None
+    initial_default_median_execution_time_ms: float = Field(gt=0)
+    timeout_ms: int = Field(gt=0)
+    paired: PairedMeasurements
+
+
+class NoValidCandidateOutcome(Record):
+    kind: Literal[OutcomeKind.NO_VALID_CANDIDATE] = OutcomeKind.NO_VALID_CANDIDATE
+    selected_candidate_id: None = None
+    selected_plan_sha256: None = None
+    timing_reuse_key: None = None
+    speedup: None = None
+
+
+type Outcome = Annotated[
+    KeptDefaultOutcome
+    | DefaultDuplicateOutcome
+    | MeasuredOutcome
+    | TimedOutOutcome
+    | NoValidCandidateOutcome,
+    Field(discriminator="kind"),
+]
+
+
+class RolloutFailure(Record):
+    """Unscored failure with partial evidence, never a policy outcome."""
+
+    operation: str
+    error_type: str
+    error: str
+    paired: PairedMeasurements
+
+
+class RolloutRecord(Record):
+    """One task, its attempt history and exactly one final outcome or unscored failure."""
+
+    schema_version: Literal[2] = ROLLOUT_SCHEMA_VERSION
+    task_id: str
+    template_id: str
+    measurement: RolloutMeasurementSettings
+    default: Baseline | None
+    candidates: list[Candidate]
+    final: Outcome | None
+    failure: RolloutFailure | None = None
+
+    @model_validator(mode="after")
+    def evidence_matches_outcome(self) -> Self:
+        if (self.final is None) == (self.failure is None):
+            raise ValueError("rollout requires one final outcome or unscored failure")
+        ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("candidate IDs must be unique")
+        final = self.final
+        if final is None:
+            return self
+        baseline = self.default
+        if baseline is None or baseline.median_execution_time_ms is None:
+            raise ValueError("policy outcome requires a measured initial default")
+        if (
+            len(baseline.warmups) != self.measurement.default_warmups
+            or len(baseline.measurements) != self.measurement.default_measurements
+        ):
+            raise ValueError(
+                "initial default observations must match measurement settings"
+            )
+        if (
+            statistics.median(item.execution_time_ms for item in baseline.measurements)
+            != baseline.median_execution_time_ms
+        ):
+            raise ValueError("initial default median must match its observations")
+        selected = next(
+            (
+                item
+                for item in self.candidates
+                if item.candidate_id == final.selected_candidate_id
+            ),
+            None,
+        )
+        if final.selected_candidate_id is not None:
+            if selected is None:
+                raise ValueError(
+                    "selected_candidate_id must reference a recorded attempt"
+                )
+            if (selected.plan_sha256, selected.timing_reuse_key) != (
+                final.selected_plan_sha256,
+                final.timing_reuse_key,
+            ):
+                raise ValueError(
+                    "selected plan identity must match its recorded attempt"
+                )
+        if isinstance(final, (MeasuredOutcome, DefaultDuplicateOutcome)) and (
+            selected is None
+            or not selected.action_valid
+            or not selected.constraints_satisfied
+            or selected.execution_timed_out
+        ):
+            raise ValueError("completed candidate outcome requires a usable candidate")
+        if isinstance(final, (KeptDefaultOutcome, DefaultDuplicateOutcome)) and (
+            final.selected_plan_sha256,
+            final.timing_reuse_key,
+        ) != (
+            baseline.plan_sha256,
+            baseline.timing_reuse_key,
+        ):
+            raise ValueError(
+                "baseline reuse requires matching plan and timing-reuse key"
+            )
+        if isinstance(final, KeptDefaultOutcome) and self.candidates:
+            raise ValueError("keep_default cannot follow candidate attempts")
+        if isinstance(final, NoValidCandidateOutcome) and any(
+            item.constraints_satisfied or item.execution_timed_out
+            for item in self.candidates
+        ):
+            raise ValueError("no_valid_candidate cannot discard a usable attempt")
+        if isinstance(final, MeasuredOutcome):
+            if final.timing_reuse_key == baseline.timing_reuse_key:
+                raise ValueError("measured candidate must require its own timing")
+            if (
+                len(final.paired.warmups) != self.measurement.paired_warmups
+                or len(final.paired.measurements)
+                != self.measurement.paired_measurements
+            ):
+                raise ValueError("completed pairs must match measurement settings")
+            for pair in [*final.paired.warmups, *final.paired.measurements]:
+                if (
+                    pair.default is None
+                    or pair.candidate is None
+                    or pair.default.plan_sha256 != baseline.plan_sha256
+                    or pair.candidate.plan_sha256 != final.selected_plan_sha256
+                ):
+                    raise ValueError(
+                        "paired observations must match the selected plans"
+                    )
+        if isinstance(final, TimedOutOutcome):
+            if (
+                selected is None
+                or not selected.execution_timed_out
+                or selected.timeout_ms != final.timeout_ms
+            ):
+                raise ValueError("timeout must match the selected attempt's cutoff")
+            if (
+                final.initial_default_median_execution_time_ms
+                != baseline.median_execution_time_ms
+            ):
+                raise ValueError("timeout must reference the initial default median")
+        return self

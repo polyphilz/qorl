@@ -1,66 +1,21 @@
-from __future__ import annotations
-
-import json
-from pathlib import Path
-
 import pytest
 
-from qorl.measure.timeouts import CalibratedTimeouts
-from qorl.taskset.taskset import TaskSet
-
-MANIFEST = Path("experiments/004-rl-run-v2/timeouts.json")
+from qorl.measure.schemas import RolloutMeasurementSettings
+from qorl.measure.timeouts import candidate_timeout_ms
 
 
-class TestCalibratedTimeout:
-    def test_checked_manifest_covers_the_selected_400_tasks(
-        self, repository_root: Path
-    ) -> None:
-        timeouts = CalibratedTimeouts.load(
-            repository_root,
-            MANIFEST,
-            TaskSet.load(repository_root, "ceb"),
-        )
-
-        assert len(timeouts.by_task_id) == 400
-        assert len(timeouts.manifest_sha256) == 64
-        assert timeouts.identity()["id"] == "qorl-rl-run-v2-timeouts-v1"
-        replacement = timeouts.task("ceb-7a-7a14")
-        assert replacement.timeout_ms == 5_000
-        assert replacement.calibrated_default_ms == 1362.7295
-
-    def test_manifest_without_postgres_config_id_is_rejected(
-        self, repository_root: Path
-    ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb")
-        with pytest.raises(RuntimeError, match="different PostgreSQL config"):
-            CalibratedTimeouts.load(
-                repository_root,
-                MANIFEST,
-                task_set,
-                "000-pgconf-default",
-            )
-
-    def test_current_manifest_enforces_postgres_config_separately_from_data(
-        self, repository_root: Path, tmp_path: Path
-    ) -> None:
-        task_set = TaskSet.load(repository_root, "ceb")
-        document = json.loads((repository_root / MANIFEST).read_text(encoding="utf-8"))
-        document["data_identity"] = {"fixture_id": task_set.fixture_id}
-        document["runtime_identity"] = {
-            "postgres_image_id": "sha256:current-runtime",
-            "postgres_config_id": "000-pgconf-default",
-        }
-        document.pop("database")
-        path = tmp_path / "timeouts.json"
-        path.write_text(json.dumps(document), encoding="utf-8")
-        loaded = CalibratedTimeouts.load(
-            repository_root, path, task_set, "000-pgconf-default"
-        )
-        assert len(loaded.by_task_id) == 400
-        with pytest.raises(RuntimeError, match="different PostgreSQL config"):
-            CalibratedTimeouts.load(
-                repository_root,
-                path,
-                task_set,
-                "different-config",
-            )
+@pytest.mark.parametrize(
+    "median,expected",
+    [(10.0, 5_000), (30_000.0, 90_000), (120_000.0, 360_000), (299_000.0, 897_000)],
+)
+def test_candidate_timeout_has_no_absolute_cap(median: float, expected: int) -> None:
+    settings = RolloutMeasurementSettings(
+        default_warmups=1,
+        default_measurements=1,
+        paired_warmups=1,
+        paired_measurements=3,
+        default_timeout_seconds=300.0,
+        candidate_timeout_floor_seconds=5.0,
+        candidate_timeout_multiplier=3.0,
+    )
+    assert candidate_timeout_ms(median, settings) == expected

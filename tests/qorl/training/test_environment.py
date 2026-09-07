@@ -10,26 +10,54 @@ from verifiers.v1.utils.loaders import (
     taskset_class,
 )
 
+from qorl.rl.schemas import GrpoSettings, RlSettings, ScalarRewardSettings
 from qorl.training.environment import QorlEnvironment
 from qorl.training.harness import QorlHarness, QorlHarnessConfig
 from qorl.training.taskset import QorlTaskset, QorlTasksetConfig
 
 
-@pytest.mark.parametrize(
-    "config_path",
-    [
-        "experiments/002-rl-spike/train.toml",
-        "experiments/003-rl-pilot-v1/train.toml",
-        "experiments/004-rl-run-v2/train.toml",
-        "experiments/004-rl-run-v2/concurrency-spike.toml",
-    ],
-)
-def test_training_configs_resolve_qorl_plugins(
-    repository_root: Path, config_path: str
+@pytest.mark.parametrize("override_defaults", [False, True])
+def test_training_configs_construct_qorl_environment(
+    repository_root: Path, override_defaults: bool
 ) -> None:
-    config = tomllib.loads((repository_root / config_path).read_text())
-    source = config["orchestrator"]["train"]["source"][0]
-    environment = resolve_env_config(source["env"])
+    defaults = tomllib.loads(
+        (repository_root / "configs/defaults/000-rl.toml").read_text()
+    )
+    supplied = QorlHarnessConfig.model_validate(
+        {key: defaults[key] for key in ("agent", "measurement", "rl")}
+    )
+    if override_defaults:
+        supplied = QorlHarnessConfig(
+            agent=supplied.agent.model_copy(
+                update={"candidate_attempts": supplied.agent.candidate_attempts + 1}
+            ),
+            measurement=supplied.measurement.model_copy(
+                update={
+                    "paired_measurements": supplied.measurement.paired_measurements + 1
+                }
+            ),
+            rl=RlSettings(
+                algorithm=GrpoSettings(type="grpo"),
+                reward=ScalarRewardSettings(
+                    invalid_attempt_penalty=1,
+                    duplicate_attempt_penalty=0,
+                    timeout_attempt_penalty=1,
+                    no_valid_candidate_reward=0,
+                ),
+            ),
+        )
+        fallback = QorlHarnessConfig(id="qorl")
+        assert supplied.agent != fallback.agent
+        assert supplied.measurement != fallback.measurement
+        assert supplied.rl != fallback.rl
+
+    environment = resolve_env_config(
+        {
+            "id": "qorl",
+            "taskset": {"id": "qorl"},
+            "agent": {"harness": supplied.model_dump()},
+        }
+    )
 
     assert isinstance(environment, SingleAgentEnvConfig)
     assert environment.id == "qorl"
@@ -40,3 +68,17 @@ def test_training_configs_resolve_qorl_plugins(
     assert harness_class(environment.agent.harness.id) is QorlHarness
     assert isinstance(environment.taskset, QorlTasksetConfig)
     assert isinstance(environment.agent.harness, QorlHarnessConfig)
+    assert environment.agent.harness == supplied
+    assert environment.agent_harnesses() == {"agent": environment.agent.harness}
+
+    constructed = QorlEnvironment(environment)
+    assert constructed.config is environment
+    assert isinstance(constructed.taskset, QorlTaskset)
+    assert isinstance(constructed._harnesses["agent"], QorlHarness)
+    assert constructed._harnesses["agent"].config == supplied
+
+    assert environment.timeout.episode is None
+    assert environment.timeout.finalize is None
+    assert environment.agent.timeout.setup is None
+    assert environment.agent.timeout.rollout is None
+    assert environment.agent.timeout.finalize is None

@@ -150,6 +150,7 @@ class QoAgentPolicy:
         context_estimate_tokens: int | None = None
 
         for turn in range(1, settings.maximum_model_turns + 1):
+            evaluator.check_cancelled()
             available_tools = interface.available_tools(turn, len(evaluator.candidates))
             available_names = interface.available_tool_names(
                 turn, len(evaluator.candidates)
@@ -160,6 +161,7 @@ class QoAgentPolicy:
                 )
             )
             responses.append(response)
+            evaluator.check_cancelled()
             try:
                 raw_message = response["choices"][0]["message"]
                 assistant = {
@@ -212,13 +214,8 @@ class QoAgentPolicy:
                 )
                 if index == 0:
                     if name == ToolName.EVALUATE_CANDIDATE and "candidate_id" in result:
-                        speedup = result.get("provisional_speedup")
                         if not result["constraints_satisfied"]:
                             label = "invalid"
-                        elif isinstance(speedup, int | float) and not isinstance(
-                            speedup, bool
-                        ):
-                            label = f"{speedup:.3f}x"
                         else:
                             label = "validated"
                         print(f"  {result['candidate_id']}: {label}", flush=True)

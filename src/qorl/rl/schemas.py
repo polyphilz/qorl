@@ -4,7 +4,9 @@ from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from qorl.measure.schemas import RolloutRecord
 from qorl.model.schemas import TrainerModelSettings
+from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
 
 
 class RlTrainingSettings(BaseModel):
@@ -73,3 +75,11 @@ class RlSettings(BaseModel):
         if isinstance(self.algorithm, GrpoSettings) and self.reward is None:
             raise ValueError("GRPO requires rl.reward")
         return self
+
+
+class RlRolloutRecord(RolloutRecord):
+    """Measurement facts plus runtime scope and optional ordinary-GRPO scalar reward."""
+
+    database_pool: PoolManifest
+    database_worker: WorkerManifest
+    scalar_reward: float | None

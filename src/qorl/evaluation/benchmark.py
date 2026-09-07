@@ -14,20 +14,22 @@ from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.client import ModelError
 from qorl.agent.types import PolicyType
 from qorl.evaluation.baselines.random import sample_action, sampler_manifest
-from qorl.measure.rollout import (
-    DEFAULT_MEASUREMENTS,
-    FINAL_PAIRS,
-    GLOBAL_TIMEOUT_MS,
-    MAX_CANDIDATES,
-    RIGOROUS_EVALUATION_PROTOCOL_V1,
-    RolloutEvaluator,
-)
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.run import TaskRun
-from qorl.measure.schemas import FinalStatus, RunStatus
+from qorl.measure.schemas import (
+    DefaultDuplicateOutcome,
+    KeptDefaultOutcome,
+    MeasuredOutcome,
+    OutcomeKind,
+    RolloutMeasurementSettings,
+    RolloutRecord,
+    RunStatus,
+)
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
@@ -37,52 +39,54 @@ from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
 
+MAX_CANDIDATES = 5
+
 DEFAULT_RUN_CONFIG = "experiments/000-vanilla-baseline/run.json"
 
 
 def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
-    completed = [
-        result
+    records = [
+        RolloutRecord.model_validate_json(json.dumps(result["rollout"]))
         for result in results
-        if result.get("final", {}).get("status") == FinalStatus.COMPLETED
+        if "rollout" in result
     ]
-    scores = [result["final"]["score"] for result in completed]
-    candidate_time = sum(
-        result["final"]["candidate_median_execution_time_ms"] for result in completed
-    )
-    default_time = sum(
-        result["final"]["default_median_execution_time_ms"] for result in completed
-    )
-    attempts = [
-        candidate for result in results for candidate in result.get("candidates", [])
-    ]
-    failures = len(results) - len(completed)
-    regressions = sum(value < 1.0 for value in scores)
+    outcomes = [record.final for record in records if record.final is not None]
+    speedups = [outcome.speedup for outcome in outcomes if outcome.speedup is not None]
+    candidate_time = 0.0
+    default_time = 0.0
+    for record in records:
+        final = record.final
+        if isinstance(final, MeasuredOutcome):
+            candidate_time += final.candidate_median_execution_time_ms
+            default_time += final.default_median_execution_time_ms
+        elif isinstance(final, (KeptDefaultOutcome, DefaultDuplicateOutcome)):
+            if (
+                record.default is not None
+                and record.default.median_execution_time_ms is not None
+            ):
+                candidate_time += record.default.median_execution_time_ms
+                default_time += record.default.median_execution_time_ms
     return {
         "task_count": len(results),
-        "scored_task_count": len(completed),
-        "failure_count": failures,
-        "failure_rate": failures / len(results) if results else 0.0,
-        "geometric_mean_speedup": (
-            math.exp(sum(math.log(value) for value in scores) / len(scores))
-            if scores
-            else None
+        "scored_task_count": len(speedups),
+        "failure_count": len(results) - len(outcomes),
+        "timeout_count": sum(
+            outcome.kind == OutcomeKind.TIMED_OUT for outcome in outcomes
         ),
+        "no_valid_candidate_count": sum(
+            outcome.kind == OutcomeKind.NO_VALID_CANDIDATE for outcome in outcomes
+        ),
+        "geometric_mean_speedup": math.exp(
+            sum(math.log(value) for value in speedups) / len(speedups)
+        )
+        if speedups
+        else None,
         "candidate_workload_time_ms": candidate_time,
         "default_workload_time_ms": default_time,
-        "total_workload_speedup": (
-            default_time / candidate_time if candidate_time else None
-        ),
-        "regression_count": regressions,
-        "regression_rate": regressions / len(scores) if scores else None,
-        "worst_regression_speedup": min(scores) if scores else None,
-        "attempt_count": len(attempts),
-        "invalid_attempt_count": sum(
-            not candidate["constraints_satisfied"] for candidate in attempts
-        ),
-        "duplicate_attempt_count": sum(
-            candidate.get("duplicate_of") is not None for candidate in attempts
-        ),
+        "total_workload_speedup": default_time / candidate_time
+        if candidate_time
+        else None,
+        "regression_count": sum(value < 1.0 for value in speedups),
     }
 
 
@@ -92,37 +96,39 @@ def run_task(
     task: dict[str, Any],
     policy: dict[str, Any],
     agent: QoAgentPolicy | None,
+    measurement: RolloutMeasurementSettings,
 ) -> dict[str, Any]:
-    evaluator = RolloutEvaluator(worker, task_set, task)
-    baseline = evaluator.start()
-    trace: dict[str, Any]
-    if policy["type"] == PolicyType.RANDOM_STRUCTURED_ACTION:
-        action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
-        for _ in range(MAX_CANDIDATES):
-            candidate = evaluator.evaluate(sample_action(evaluator.catalog, action_rng))
-            if candidate.constraints_satisfied:
-                print(
-                    f"  {candidate.candidate_id}: {candidate.provisional_speedup:.3f}x"
-                )
-            else:
-                print(f"  {candidate.candidate_id}: invalid")
-        trace = {"random_seed": policy["seed"]}
-    else:
-        if agent is None:
-            raise RuntimeError("qo-agent policy is not initialized")
-        trace = agent.search(evaluator)
-
-    final = evaluator.finish(random.Random(f"{policy['seed']}:{task['task_id']}:pairs"))
+    evaluator = RolloutEvaluator(
+        worker,
+        task_set,
+        Task.model_validate(task),
+        measurement=measurement,
+        max_candidates=MAX_CANDIDATES,
+    )
+    trace: dict[str, Any] = {}
+    try:
+        evaluator.start()
+        if policy["type"] == PolicyType.RANDOM_STRUCTURED_ACTION:
+            action_rng = random.Random(f"{policy['seed']}:{task['task_id']}:actions")
+            for _ in range(MAX_CANDIDATES):
+                evaluator.evaluate(sample_action(evaluator.catalog, action_rng))
+            trace = {"random_seed": policy["seed"]}
+        else:
+            if agent is None:
+                raise RuntimeError("qo-agent policy is not initialized")
+            trace = agent.search(evaluator)
+        evaluator.finish(random.Random(f"{policy['seed']}:{task['task_id']}:pairs"))
+        record = evaluator.record()
+    except Exception as error:
+        record = evaluator.record(error)
     return {
-        "schema_version": 1,
-        "task_id": task["task_id"],
-        "template_id": task["template_id"],
-        "status": final.status,
+        "schema_version": 2,
+        "status": RunStatus.FAILED.value
+        if record.failure
+        else RunStatus.COMPLETED.value,
         "completed_at_utc": utc_now(),
         "policy_trace": trace,
-        "default": baseline.to_wire(),
-        "candidates": [candidate.to_wire() for candidate in evaluator.candidates],
-        "final": final.to_wire(),
+        "rollout": record.to_wire(),
     }
 
 
@@ -132,9 +138,10 @@ def run_task_on_worker(
     task: dict[str, Any],
     policy: dict[str, Any],
     agent: QoAgentPolicy | None,
+    measurement: RolloutMeasurementSettings,
 ) -> tuple[WorkerSlot, dict[str, Any]]:
     with pool.claim_worker() as slot:
-        result = run_task(slot.client, task_set, task, policy, agent)
+        result = run_task(slot.client, task_set, task, policy, agent, measurement)
         result["worker"] = slot.resources.manifest().model_dump()
         return slot, result
 
@@ -195,6 +202,7 @@ def run_benchmark(
     task_set = TaskSet.load(repository, "job")
     config_path, config = load_run_config(repository, configured)
     policy = config["policy"]
+    measurement = RolloutMeasurementSettings.model_validate(config["measurement"])
     agent: QoAgentPolicy | None = None
     if policy["type"] == PolicyType.QO_AGENT:
         agent = QoAgentPolicy(QoAgentConfig.from_dict(policy))
@@ -239,22 +247,8 @@ def run_benchmark(
             }
         ),
         "protocol": {
-            "id": RIGOROUS_EVALUATION_PROTOCOL_V1.protocol_id,
             "plan_fingerprint_version": PLAN_FINGERPRINT_VERSION,
-            "default_warmup_runs": 1,
-            "default_measurement_runs": DEFAULT_MEASUREMENTS,
-            "novel_candidate_warmup_runs": 1,
-            "novel_candidate_measurement_runs": 1,
-            "final_warmup_runs_per_plan": 1,
-            "final_randomized_pair_count": FINAL_PAIRS,
-            "max_explain_analyze_executions": (
-                RIGOROUS_EVALUATION_PROTOCOL_V1.max_explain_analyze_executions
-            ),
-            "global_timeout_ms": GLOBAL_TIMEOUT_MS,
-            "task_timeout": (
-                "min(global_timeout_ms, max(5000, 3 * provisional_default_median_ms))"
-            ),
-            "score": "clip(default_median / candidate_median, 0.1, 10)",
+            **measurement.model_dump(),
         },
         "worker_pool": None,
         "task_count": len(task_set.tasks),
@@ -282,7 +276,7 @@ def run_benchmark(
     def execute_task(
         pool: ContainerPool, task: dict[str, Any]
     ) -> tuple[WorkerSlot, dict[str, Any]]:
-        return run_task_on_worker(pool, task_set, task, policy, agent)
+        return run_task_on_worker(pool, task_set, task, policy, agent, measurement)
 
     try:
         with run:
@@ -315,7 +309,7 @@ def run_benchmark(
                         manifest["completed_task_count"] += 1
                         print(
                             f"  worker={slot.resources.index} "
-                            f"final={result['final']['score']:.3f}x"
+                            f"final={result['rollout']['final']['kind']} speedup={result['rollout']['final']['speedup']}"
                         )
                     else:
                         manifest["failed_task_count"] += 1

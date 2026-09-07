@@ -115,10 +115,7 @@ def test_leading_action_to_compiled_hint_to_novel_plan_without_execution() -> No
     assert candidate.pg_hint_plan["used"] == "Leading((b a))"
     assert candidate.errors_or_diagnostics == []
     assert candidate.measurement_status == MeasurementStatus.NOT_MEASURED
-    assert (
-        candidate.provisional_speedup is None
-        and candidate.provisional_measurements == []
-    )
+    assert "provisional_speedup" not in candidate.feedback()
     assert worker.calls == [
         ExplainCall(SQL, TIMEOUT_MS, False, ""),
         ExplainCall(SQL, TIMEOUT_MS, False, candidate.compiled_hint),
@@ -232,7 +229,7 @@ def test_planning_timeout_is_not_a_completed_latency_measurement() -> None:
     assert candidate.timeout_ms == TIMEOUT_MS
     assert candidate.action_valid and not candidate.constraints_satisfied
     assert candidate.plan_sha256 is None and candidate.plain_explain is None
-    assert candidate.provisional_speedup is None
+    assert "provisional_speedup" not in candidate.feedback()
     assert candidate.measurement_status == MeasurementStatus.NOT_MEASURED
 
 

@@ -132,7 +132,6 @@ def test_unexpected_rollout_error_is_recorded(
         task_set,
         request,
         agent_config,
-        None,
         SamplerIdentity(model="model", manifest_sha256="sha", server_identity={}),
     )
 

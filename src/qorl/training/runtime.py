@@ -4,14 +4,12 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
-from qorl.measure.timeouts import CalibratedTimeouts
 from qorl.postgres.config import PostgresConfig
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import PoolConfig, PoolManifest
 
-TIMEOUT_MANIFEST_ENV = "QORL_RL_TIMEOUT_MANIFEST"
 POSTGRES_CONFIG_ENV = "QORL_RL_POSTGRES_CONFIG"
 POOL_CONFIG_ENV = "QORL_RL_WORKER_POOL_CONFIG"
 
@@ -23,11 +21,9 @@ class QorlRuntime(ContainerPool):
         pool_config: PoolConfig,
         compose_project_name: str,
         postgres_config: PostgresConfig,
-        calibrated_timeouts: CalibratedTimeouts | None = None,
     ) -> None:
         super().__init__(compose_project_name, pool_config, postgres_config)
         self.task_set = task_set
-        self.calibrated_timeouts = calibrated_timeouts
 
     def pool_manifest(self) -> PoolManifest:
         return self.manifest()
@@ -59,17 +55,6 @@ def start(
         runtime.restore(repository / "data/imdb.tar.gz")
         runtime.start()
         runtime.load_indexes()
-        configured_timeouts = environment.get(TIMEOUT_MANIFEST_ENV)
-        runtime.calibrated_timeouts = (
-            CalibratedTimeouts.load(
-                repository,
-                Path(configured_timeouts),
-                runtime.task_set,
-                postgres_config.config_id,
-            )
-            if configured_timeouts
-            else None
-        )
     except BaseException:
         runtime.close()
         raise

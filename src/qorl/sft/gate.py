@@ -13,7 +13,7 @@ from qorl.agent.client import ModelError
 from qorl.agent.types import StopReason
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
-from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS
+from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
@@ -73,7 +73,7 @@ def evaluate_request(
             slot.client,
             task_set,
             Task.model_validate(request.task),
-            default_timeout_ms=GLOBAL_TIMEOUT_MS,
+            default_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
             max_candidates=1,
         )
         try:

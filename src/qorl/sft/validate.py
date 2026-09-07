@@ -12,8 +12,7 @@ from qorl.agent.interface import (
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
-from qorl.measure.rollout import MAX_CANDIDATES
-from qorl.measure.schemas import MeasurementStatus, ToolResultStatus
+from qorl.measure.schemas import ToolResultStatus
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
@@ -27,6 +26,7 @@ class DemoValidationError(ValueError):
 
 
 MIN_DEMONSTRATION_MESSAGES = 4
+PROTOCOL_DEMO_SCHEMA_VERSION = 2
 
 
 def require(condition: bool, message: str) -> None:
@@ -57,7 +57,10 @@ def validate_protocol_demo(
     document: dict[str, Any], repository: Path
 ) -> dict[str, Any]:
     """Validate one frozen tool-use demonstration without executing SQL."""
-    require(document.get("schema_version") == 1, "unsupported demo schema")
+    require(
+        document.get("schema_version") == PROTOCOL_DEMO_SCHEMA_VERSION,
+        "unsupported demo schema",
+    )
     metadata = document.get("metadata")
     messages = document.get("messages")
     tools = document.get("tools")
@@ -99,8 +102,8 @@ def validate_protocol_demo(
     require(
         not isinstance(candidate_attempts, bool)
         and isinstance(candidate_attempts, int)
-        and 1 <= candidate_attempts <= MAX_CANDIDATES,
-        f"candidate_attempts must be between 1 and {MAX_CANDIDATES}",
+        and candidate_attempts >= 1,
+        "candidate_attempts must be positive",
     )
     require(
         messages[0] == {"role": "system", "content": system_prompt(candidate_attempts)},
@@ -221,21 +224,6 @@ def validate_protocol_demo(
                 f"turn {turn}: unsatisfied constraints",
             )
             require(result.get("compiled_hint") == hint, f"turn {turn}: hint mismatch")
-            if metadata.get("measurement_mode") == "plan_validation_only":
-                require(
-                    result.get("measurement_status") == MeasurementStatus.NOT_MEASURED,
-                    f"turn {turn}: unexpected measurement status",
-                )
-                require(
-                    result.get("provisional_speedup") is None,
-                    f"turn {turn}: plan-only demo contains a speedup",
-                )
-                require(
-                    result.get("planning_time_ms") == []
-                    and result.get("execution_time_ms") == [],
-                    f"turn {turn}: plan-only demo contains timings",
-                )
-
             candidate_evidence = evidence.get("candidates", {}).get(expected_id)
             require(
                 isinstance(candidate_evidence, dict),
@@ -252,7 +240,7 @@ def validate_protocol_demo(
             )
             fingerprint = plan_sha256(plan["Plan"])
             require(
-                result.get("plan_sha256") == fingerprint,
+                candidate_evidence.get("plan_sha256") == fingerprint,
                 f"turn {turn}: plan checksum mismatch",
             )
             verification = verify_action(

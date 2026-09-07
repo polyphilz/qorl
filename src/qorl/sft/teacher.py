@@ -21,7 +21,7 @@ from qorl.agent.client import (
 from qorl.agent.types import ToolName
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Candidate, RunStatus
-from qorl.measure.timeouts import CalibratedTimeouts
+from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import contains_node
@@ -62,7 +62,7 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot
 
-GENERATION_ID = "qorl-protocol-sft-v2-teacher-v2"
+GENERATION_ID = "qorl-protocol-sft-v2-teacher-v3"
 TEACHER_SAMPLE_NUMBER = 5
 INITIAL_MESSAGE_COUNT = 2
 DEFAULT_TEACHER_OUTPUT = Path("experiments/005-protocol-sft-v2/teacher")
@@ -400,14 +400,13 @@ def replay_action(
     prefix: PrefixCandidate,
     decision: TeacherDecision,
     policy_config: QoAgentConfig,
-    timeouts: CalibratedTimeouts,
 ) -> SampleRecord:
     task_id = require_string(task.get("task_id"), "task.task_id")
     evaluator = PlanValidationEvaluator(
         slot.client,
         task_set,
         Task.model_validate(task),
-        default_timeout_ms=timeouts.task(task_id).timeout_ms,
+        default_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
         max_candidates=1,
     )
     baseline = evaluator.start()
@@ -571,7 +570,6 @@ def generate_task(
     config: TeacherConfig,
     identity: TeacherIdentity,
     policy_config: QoAgentConfig,
-    timeouts: CalibratedTimeouts,
     client: ModelClient,
     output_root: Path,
     maximum_attempts: int,
@@ -587,7 +585,6 @@ def generate_task(
                 task.prefix,
                 decision,
                 policy_config,
-                timeouts,
             )
 
         result = generate_attempts(
@@ -713,11 +710,6 @@ def main() -> None:
         default=Path("experiments/005-protocol-sft-v2/teacher.json"),
     )
     parser.add_argument(
-        "--timeouts",
-        type=Path,
-        default=Path("experiments/005-protocol-sft-v2/timeouts.json"),
-    )
-    parser.add_argument(
         "--dataset", type=Path, default=Path("outputs/sft/protocol-sft-v2")
     )
     parser.add_argument(
@@ -758,7 +750,6 @@ def main() -> None:
     dataset = (repository / arguments.dataset).resolve()
     config_path = (repository / arguments.config).resolve()
     teacher_config_path = (repository / arguments.teacher_config).resolve()
-    timeout_path = (repository / arguments.timeouts).resolve()
     config = load_record(config_path, DatasetConfig)
     teacher_config = load_record(teacher_config_path, TeacherConfig)
     identity = teacher_identity(repository, teacher_config_path, teacher_config)
@@ -828,12 +819,6 @@ def main() -> None:
     )
     manifest_wire = initial_manifest.to_wire()
     write_json(previous_manifest_path, manifest_wire)
-    timeouts = CalibratedTimeouts.load(
-        repository,
-        timeout_path,
-        task_set,
-        postgres_config.config_id,
-    )
     client = OpenAIModelClient(
         teacher_config.base_url,
         teacher_config.request_timeout_seconds,
@@ -879,7 +864,6 @@ def main() -> None:
                     teacher_config,
                     identity,
                     policy_config,
-                    timeouts,
                     client,
                     dataset,
                     min(

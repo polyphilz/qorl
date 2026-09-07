@@ -7,10 +7,13 @@ from typing import Any
 
 import pytest
 
+from qorl.measure.schemas import RolloutRecord
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
+from qorl.rl.schemas import RlRolloutRecord
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
+from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import PoolConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +50,28 @@ def postgres_indexes() -> PostgresIndexes:
 @pytest.fixture
 def pool_config() -> PoolConfig:
     return load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8"))
+
+
+@pytest.fixture
+def rollout_record(repository_root: Path) -> RolloutRecord:
+    return RolloutRecord.model_validate_json(
+        (repository_root / "tests/qorl/measure/golden_rollout.json").read_text()
+    )
+
+
+@pytest.fixture
+def rl_rollout_record(
+    rollout_record: RolloutRecord,
+    pool_config: PoolConfig,
+    postgres_config: PostgresConfig,
+) -> RlRolloutRecord:
+    pool = ContainerPool("test-record", pool_config, postgres_config)
+    return RlRolloutRecord(
+        **rollout_record.model_dump(),
+        database_pool=pool.manifest(),
+        database_worker=pool_config.workers[0].manifest(),
+        scalar_reward=0.15,
+    )
 
 
 @pytest.fixture
