@@ -107,7 +107,6 @@ through the `qorl` plugin ID. Run all commands from the repository root:
 ```bash
 uv run --frozen --extra gpu rl --help
 uv run --frozen python -m qorl.adapters.merge --help
-uv run --frozen python -m qorl.training.audit.dataset --help
 uv run --frozen pytest
 uv run --frozen ruff check .
 uv run --frozen ruff format --check .

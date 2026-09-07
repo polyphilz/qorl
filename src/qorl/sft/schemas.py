@@ -12,10 +12,11 @@ from pydantic import (
     TypeAdapter,
     model_validator,
 )
+from renderers.configs import AutoRendererConfig, RendererConfig
 
 from qorl.adapters.schemas import LoraSettings
 from qorl.measure.schemas import Baseline, Candidate, RunStatus
-from qorl.model.schemas import ModelProvider, ModelSettings
+from qorl.model.schemas import Message, ModelProvider, ModelSettings, ToolDefinition
 from qorl.taskset.schemas import TaskSelection
 from qorl.training.schemas import (
     CheckpointSettings,
@@ -52,6 +53,7 @@ class SftTrainingSettings(BaseModel):
     lora: LoraSettings
     optimizer: OptimizerSettings
     checkpoints: CheckpointSettings
+    renderer: RendererConfig = AutoRendererConfig()
 
     @model_validator(mode="after")
     def whole_microbatches(self) -> Self:
@@ -103,11 +105,10 @@ class PreparedDatasetManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     format: Literal["qorl-conversations"]
     training: PreparedDatasetSplit
     validation: PreparedDatasetSplit
-    tools: Path
 
 
 class ImportedGenerationSeeds(BaseModel):
@@ -117,6 +118,149 @@ class ImportedGenerationSeeds(BaseModel):
 
     training: int
     validation: int
+
+
+class ConversationRequest(BaseModel):
+    """The exact ordered tool definitions supplied before one assistant reply."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    assistant_message_index: int = Field(ge=0)
+    tools: list[ToolDefinition]
+
+
+class Conversation(BaseModel):
+    """One frozen conversation; metadata belongs to its original generator."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    conversation_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    messages: list[Message] = Field(min_length=1)
+    requests: list[ConversationRequest]
+    metadata: JsonObject
+
+
+class TrainingRow(BaseModel):
+    """Prime-RL's causally shifted, text-only sample or packed row."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    input_ids: list[int] = Field(min_length=1)
+    target_ids: list[int]
+    loss_mask: list[bool]
+    position_ids: list[int]
+    seq_lens: list[int]
+    mm_kwargs: None = None
+    mm_token_type_ids: None = None
+
+    @model_validator(mode="after")
+    def aligned_tokens(self) -> Self:
+        """Every input has a target, mask and position; boundaries cover the row."""
+        length = len(self.input_ids)
+        if any(
+            len(values) != length
+            for values in (self.target_ids, self.loss_mask, self.position_ids)
+        ):
+            raise ValueError(
+                "training row token, target, mask and position lengths differ"
+            )
+        if not self.seq_lens or min(self.seq_lens) < 1 or sum(self.seq_lens) != length:
+            raise ValueError("training row seq_lens must cover the row exactly")
+        return self
+
+
+class RenderingRejection(StrEnum):
+    OVER_CONTEXT = "over_context"
+    NO_TARGETS = "no_targets"
+
+
+class RenderedRequest(BaseModel):
+    """One request's prefix and reply; only that reply contributes to loss."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    conversation_id: str
+    assistant_message_index: int
+    tools_sha256: str
+    rendered_text: str
+    target_message_indices: list[int]
+    sample: TrainingRow
+
+    @model_validator(mode="after")
+    def target_attribution(self) -> Self:
+        """Each shifted target retains exactly one source-message index."""
+        if len(self.target_message_indices) != len(self.sample.target_ids):
+            raise ValueError("target_message_indices must align with target_ids")
+        return self
+
+
+class RenderedConversation(BaseModel):
+    """A conversation's request-level samples, accepted or rejected together."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    conversation_id: str
+    task_id: str
+    requests: list[RenderedRequest]
+    rejection: RenderingRejection | None = None
+
+
+class PackingRowMetadata(BaseModel):
+    """Request order and unpadded lengths alongside native packed seq_lens."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    conversation_ids: list[str]
+    assistant_message_indices: list[int]
+    request_lengths: list[int]
+    padding_tokens: int = Field(ge=0)
+
+
+class DatasetPreparationIdentity(BaseModel):
+    """Inputs that must remain identical when resuming token preparation."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    config_sha256: str
+    source: Path
+    source_files: dict[str, str]
+    tokenizer_sha256: str
+    renderer: JsonObject
+    dependencies: dict[str, str]
+
+
+class PreparedSplitReport(BaseModel):
+    """Count tasks, conversations, accepted request samples and packed rows separately."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selected_tasks: int
+    source_conversations: int
+    accepted_conversations: int
+    accepted_requests: int
+    accepted_tasks: int
+    rejections: dict[RenderingRejection, int]
+    packed_rows: int
+    input_tokens: int
+    supervised_tokens: int
+    padding_tokens: int
+
+
+class DatasetPreparationReport(BaseModel):
+    """Completion marker with both split counts and checksums of prepared files."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = 2
+    context_length: int
+    shuffle_seed: int
+    training: PreparedSplitReport
+    validation: PreparedSplitReport
+    files: dict[str, str]
 
 
 class SamplingMode(StrEnum):

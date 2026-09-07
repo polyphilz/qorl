@@ -199,7 +199,7 @@ def test_reuse_checks_overlap_within_imported_splits(
 
 
 @pytest.mark.parametrize(
-    "member", ["manifest.json", "training.jsonl", "validation.jsonl", "tools.json"]
+    "member", ["manifest.json", "training.jsonl", "validation.jsonl"]
 )
 def test_reuse_requires_artifact_members(
     member: str,

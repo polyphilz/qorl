@@ -54,7 +54,7 @@ def test_local_generator_is_rejected() -> None:
 def test_dataset_reuse_needs_both_conversation_splits() -> None:
     with pytest.raises(ValidationError, match="validation"):
         PreparedDatasetManifest.model_validate(
-            {"schema_version": 1, "format": "qorl-conversations", "tools": "tools.json"}
+            {"schema_version": 2, "format": "qorl-conversations"}
         )
 
 

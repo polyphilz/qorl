@@ -189,7 +189,6 @@ def resolve_selections(request: CreateRequest) -> ResolvedSelections:
         manifest = PreparedDatasetManifest.model_validate_json(
             (source / "manifest.json").read_bytes()
         )
-        artifact_file(source, manifest.tools)
         for role, split in (
             (TaskRole.TRAIN, manifest.training),
             (TaskRole.VALIDATION, manifest.validation),

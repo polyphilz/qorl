@@ -6,8 +6,11 @@ readme = "README.md"
 requires-python = "==3.12.*"
 dependencies = [
     "pydantic>=2.13.5,<3",
+    "jsonschema>=4.23,<5",
+    "referencing>=0.37,<1",
     "prime-rl",
     "torch==2.13.0",
+    "torchdata>=0.11.0",
     "tomli-w>=1.0.0,<2",
 ]
 

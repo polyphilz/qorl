@@ -216,13 +216,19 @@ def create_run(directory: Path, inputs: RunInputs) -> Path:
 
 
 def run_experiment(directory: Path, request: RunRequest) -> Path:
-    """Dispatch calibration or evaluation using recorded inputs and fresh outputs."""
+    """Dispatch a stage using recorded inputs and its owned output directory."""
     directory = (REPOSITORY_ROOT / directory).resolve()
     config = load_config(directory / "config.toml")
     validate_stage(config, request)
-    if request.stage not in (RunStage.CALIBRATE, RunStage.EVALUATE):
+    if request.stage not in (RunStage.CALIBRATE, RunStage.EVALUATE, RunStage.PREPARE):
         raise NotImplementedError(f"stage {request.stage.value} is not implemented")
-    if request.resume:
+    if request.stage == RunStage.PREPARE and (
+        not isinstance(config, SftExperimentConfig) or config.data.dataset_from is None
+    ):
+        raise NotImplementedError(
+            "SFT conversation generation is not implemented; acceptance policy is gated on 032-sft-v3"
+        )
+    if request.resume and request.stage == RunStage.CALIBRATE:
         raise ValueError("calibration cannot resume partial runs; start a new run")
 
     current = load_inputs(directory)
@@ -246,6 +252,25 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
             )
 
     config = inputs.config
+    if request.stage == RunStage.PREPARE:
+        from qorl.sft.dataset import prepare_dataset
+
+        if not isinstance(config, SftExperimentConfig):
+            raise ValueError("dataset preparation requires an SFT experiment")
+        if output is None:
+            output = create_run(directory, inputs)
+        print(f"QORL run {output.name}: {output}", flush=True)
+        report = prepare_dataset(
+            config, inputs.selections, output / "dataset", resume=request.resume
+        )
+        print(
+            f"Prepared {report.training.accepted_conversations} training conversations "
+            f"in {report.training.packed_rows} rows; "
+            f"{report.validation.accepted_conversations} validation conversations "
+            f"in {report.validation.packed_rows} rows.",
+            flush=True,
+        )
+        return output
     if PLACEHOLDER in (str(config.postgres.path), str(config.pool.path)):
         raise ValueError("fill in the PostgreSQL and pool configuration paths")
     postgres_config = PostgresConfig.load(config.postgres.path)

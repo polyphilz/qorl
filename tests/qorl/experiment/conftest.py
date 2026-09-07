@@ -48,9 +48,8 @@ def dataset_artifact(tmp_path: Path, benchmark_task_sets: dict[str, TaskSet]) ->
     # Creation checks metadata and file presence; conversation validation is slice 8.
     for filename in ("training.jsonl", "validation.jsonl"):
         (directory / filename).write_text('{"messages": []}\n')
-    (directory / "tools.json").write_text("[]\n")
     manifest = PreparedDatasetManifest(
-        schema_version=1,
+        schema_version=2,
         format="qorl-conversations",
         training=PreparedDatasetSplit(
             selection=selected[TaskRole.TRAIN],
@@ -66,7 +65,6 @@ def dataset_artifact(tmp_path: Path, benchmark_task_sets: dict[str, TaskSet]) ->
             selection_expression="validation=ceb[4a:1]",
             conversations=Path("validation.jsonl"),
         ),
-        tools=Path("tools.json"),
     )
     (directory / "manifest.json").write_text(manifest.model_dump_json(indent=2))
     return directory
