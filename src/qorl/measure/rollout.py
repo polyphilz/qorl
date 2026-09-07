@@ -5,6 +5,8 @@ import statistics
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import JsonValue
+
 from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
     NO_VALID_CANDIDATE_REWARD,
@@ -15,6 +17,7 @@ from qorl.measure.schemas import (
     FinalStatus,
     Measurement,
     MeasurementProtocolId,
+    MeasurementStatus,
     Outcome,
     ScoreSource,
     ToolResultStatus,
@@ -22,15 +25,18 @@ from qorl.measure.schemas import (
     score,
 )
 from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS, TaskTimeout, task_timeout_ms
+from qorl.measure.validation import validate_candidate
 from qorl.plans.catalog import TaskCatalog
-from qorl.plans.exceptions import ActionError
-from qorl.plans.fingerprint import plan_sha256
-from qorl.plans.schemas import PlanAction
-from qorl.plans.verify import Verification, compact_plan, hint_status, verify_action
+from qorl.plans.fingerprint import (
+    PLAN_FINGERPRINT_VERSION,
+    plan_sha256,
+    structural_plan_sha256,
+    timing_reuse_key,
+)
+from qorl.plans.verify import Verification, compact_plan, verify_action
 from qorl.postgres.exceptions import PostgresError, QueryTimeout
 from qorl.postgres.schemas import ExplainResult
 from qorl.taskset.schemas import Task
-from qorl.worker_pool.exceptions import ContainerError
 
 DEFAULT_MEASUREMENTS = 3
 FINAL_PAIRS = 5
@@ -150,15 +156,16 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         if max_candidates < 1:
             raise ValueError("max_candidates must be at least 1")
         self._worker = worker
-        self.task = task
         typed_task = Task.model_validate(task)
+        self.task = typed_task
         self.sql = task_set.load_sql(typed_task)
         self.global_timeout_ms = global_timeout_ms
         self.measurement_protocol = measurement_protocol
         self.catalog = TaskCatalog.from_postgres(typed_task, worker.indexes)
         self.default: Baseline | None = None
         self.candidates: list[Candidate] = []
-        self.by_fingerprint: dict[str, PlanTiming] = {}
+        self.by_reuse_key: dict[str, PlanTiming] = {}
+        self.by_structure: dict[str, str] = {}
         self.kept_default = False
         self.calibrated_timeout = calibrated_timeout
         self.timeout_manifest_id = timeout_manifest_id
@@ -187,7 +194,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         ):
             raise RuntimeError(
                 "default plan differs from calibrated plan: "
-                f"task={self.task['task_id']} "
+                f"task={self.task.task_id} "
                 f"actual={default_plan_sha256}"
             )
         warmups = [
@@ -204,6 +211,9 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         self.default = Baseline(
             measurement_protocol_id=self.measurement_protocol.protocol_id,
             plan_sha256=default_plan_sha256,
+            structural_plan_sha256=structural_plan_sha256(plain.document["Plan"]),
+            timing_reuse_key=timing_reuse_key(default_plan_sha256),
+            plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
             plain_explain=plain.document,
             warmup=measured(warmups[-1]) if warmups else None,
             measurements=measurements,
@@ -226,51 +236,15 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 (warmups[-1] if warmups else plain).document["Plan"]
             ),
         )
-        self.by_fingerprint[self.default.plan_sha256] = PlanTiming(
+        self.by_structure[structural_plan_sha256(plain.document["Plan"])] = "default"
+        self.by_reuse_key[timing_reuse_key(default_plan_sha256)] = PlanTiming(
             candidate_id="default",
             measurements=measurements,
             median_execution_time_ms=median_ms,
         )
         return self.default
 
-    def invalid_candidate(
-        self,
-        candidate_id: str,
-        action: Any,
-        error: str,
-        *,
-        hint: str = "",
-        action_valid: bool = False,
-        pg_hint_plan: dict[str, str] | None = None,
-        execution_timed_out: bool = False,
-    ) -> Candidate:
-        provisional_speedup = 0.0
-        if execution_timed_out:
-            if self.default is None or self.default.median_execution_time_ms is None:
-                raise RuntimeError("rollout baseline has not been measured")
-            provisional_speedup = score(
-                self.default.median_execution_time_ms, self.timeout_ms
-            )
-        result = Candidate(
-            candidate_id=candidate_id,
-            action=action,
-            action_valid=action_valid,
-            constraints_satisfied=False,
-            compiled_hint=hint,
-            duplicate_of=None,
-            plan_sha256=None,
-            provisional_measurements=[],
-            provisional_speedup=provisional_speedup,
-            execution_timed_out=execution_timed_out,
-            timeout_ms=self.timeout_ms if execution_timed_out else None,
-            errors_or_diagnostics=[error],
-            pg_hint_plan=pg_hint_plan,
-            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
-        )
-        self.candidates.append(result)
-        return result
-
-    def evaluate(self, raw_action: Any) -> Candidate:
+    def evaluate(self, raw_action: JsonValue) -> Candidate:
         if self.default is None:
             raise RuntimeError("rollout baseline has not been started")
         if self.kept_default:
@@ -278,75 +252,55 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         if len(self.candidates) >= self.max_candidates:
             raise RuntimeError("rollout candidate budget is exhausted")
         candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
-        try:
-            plan_action = PlanAction.from_raw(raw_action, self.catalog)
-            action = plan_action.to_wire()
-            hint = plan_action.compile()
-        except ActionError as error:
-            return self.invalid_candidate(candidate_id, raw_action, str(error))
-
-        try:
-            plain = self.worker.explain(self.sql, self.timeout_ms, hint=hint)
-        except QueryTimeout as error:
-            return self.invalid_candidate(
-                candidate_id,
-                action,
-                str(error),
-                hint=hint,
-                action_valid=True,
-                execution_timed_out=True,
-            )
-        except (PostgresError, ContainerError) as error:
-            return self.invalid_candidate(
-                candidate_id, action, str(error), hint=hint, action_valid=True
-            )
-
-        verification = verify_action(
-            action, plain.document["Plan"], plain.hint_diagnostics
+        candidate = validate_candidate(
+            self.worker,
+            self.sql,
+            self.catalog,
+            raw_action,
+            candidate_id=candidate_id,
+            timeout_ms=self.timeout_ms,
+            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
         )
-        pg_hint_plan = hint_status(plain.hint_diagnostics)
-        if not verification.valid:
-            return self.invalid_candidate(
-                candidate_id,
-                action,
-                "; ".join(verification.errors),
-                hint=hint,
-                action_valid=True,
-                pg_hint_plan=pg_hint_plan,
-            )
+        if not candidate.constraints_satisfied:
+            speedup = 0.0
+            if candidate.execution_timed_out:
+                if self.default.median_execution_time_ms is None:
+                    raise RuntimeError("rollout baseline has not been measured")
+                speedup = score(self.default.median_execution_time_ms, self.timeout_ms)
+            candidate = candidate.model_copy(update={"provisional_speedup": speedup})
+            self.candidates.append(candidate)
+            return candidate
 
-        fingerprint = plan_sha256(plain.document["Plan"])
-        duplicate = self.by_fingerprint.get(fingerprint)
+        structure = candidate.structural_plan_sha256
+        reuse_key = candidate.timing_reuse_key
+        if structure is None or reuse_key is None:
+            raise RuntimeError("validated plan has no identity")
+        candidate = candidate.model_copy(
+            update={"structural_duplicate_of": self.by_structure.get(structure)}
+        )
+        self.by_structure.setdefault(structure, candidate_id)
+        duplicate = self.by_reuse_key.get(reuse_key)
         if duplicate is not None:
             if duplicate.median_execution_time_ms is None:
                 raise RuntimeError("duplicate plan has no timing measurement")
             if self.default.median_execution_time_ms is None:
                 raise RuntimeError("default plan has no timing measurement")
-            result = Candidate(
-                candidate_id=candidate_id,
-                action=action,
-                action_valid=True,
-                constraints_satisfied=True,
-                compiled_hint=hint,
-                duplicate_of=duplicate.candidate_id,
-                plan_sha256=fingerprint,
-                plain_explain=plain.document,
-                compact_plan=compact_plan(plain.document["Plan"]),
-                provisional_measurements=duplicate.measurements,
-                provisional_median_execution_time_ms=(
-                    duplicate.median_execution_time_ms
-                ),
-                provisional_speedup=score(
-                    self.default.median_execution_time_ms,
-                    duplicate.median_execution_time_ms,
-                ),
-                errors_or_diagnostics=[],
-                pg_hint_plan=pg_hint_plan,
-                attempts_remaining=self.max_candidates - len(self.candidates) - 1,
+            result = candidate.model_copy(
+                update={
+                    "duplicate_of": duplicate.candidate_id,
+                    "provisional_measurements": duplicate.measurements,
+                    "provisional_median_execution_time_ms": duplicate.median_execution_time_ms,
+                    "provisional_speedup": score(
+                        self.default.median_execution_time_ms,
+                        duplicate.median_execution_time_ms,
+                    ),
+                }
             )
             self.candidates.append(result)
             return result
 
+        action = candidate.action
+        hint = candidate.compiled_hint
         try:
             warmups = [
                 self.checked_execution(action, hint)
@@ -359,62 +313,39 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
         except QueryTimeout as error:
             if self.default.median_execution_time_ms is None:
                 raise RuntimeError("rollout baseline has not been measured") from error
-            result = Candidate(
-                candidate_id=candidate_id,
-                action=action,
-                action_valid=True,
-                constraints_satisfied=True,
-                compiled_hint=hint,
-                duplicate_of=None,
-                plan_sha256=fingerprint,
-                plain_explain=plain.document,
-                compact_plan=compact_plan(plain.document["Plan"]),
-                provisional_measurements=[],
-                provisional_speedup=score(
-                    self.default.median_execution_time_ms, error.timeout_ms
-                ),
-                execution_timed_out=True,
-                timeout_ms=error.timeout_ms,
-                errors_or_diagnostics=[str(error)],
-                pg_hint_plan=pg_hint_plan,
-                attempts_remaining=self.max_candidates - len(self.candidates) - 1,
+            result = candidate.model_copy(
+                update={
+                    "provisional_speedup": score(
+                        self.default.median_execution_time_ms, error.timeout_ms
+                    ),
+                    "execution_timed_out": True,
+                    "timeout_ms": error.timeout_ms,
+                    "errors_or_diagnostics": [str(error)],
+                }
             )
             self.candidates.append(result)
             return result
-        except (PostgresError, ContainerError) as error:
-            return self.invalid_candidate(
-                candidate_id, action, str(error), hint=hint, action_valid=True
-            )
 
         observations = [measured(execution) for execution in executions]
-        median_ms = statistics.median(
-            observation.execution_time_ms for observation in observations
-        )
+        median_ms = statistics.median(item.execution_time_ms for item in observations)
         if self.default.median_execution_time_ms is None:
             raise RuntimeError("default plan has no timing measurement")
-        result = Candidate(
-            candidate_id=candidate_id,
-            action=action,
-            action_valid=True,
-            constraints_satisfied=True,
-            compiled_hint=hint,
-            duplicate_of=None,
-            plan_sha256=fingerprint,
-            plain_explain=plain.document,
-            warmup=measured(warmups[-1]) if warmups else None,
-            measured_explain_analyze=executions[-1].document,
-            compact_plan=compact_plan(executions[-1].document["Plan"]),
-            provisional_measurements=observations,
-            provisional_median_execution_time_ms=median_ms,
-            provisional_speedup=score(self.default.median_execution_time_ms, median_ms),
-            execution_timed_out=False,
-            timeout_ms=self.timeout_ms,
-            errors_or_diagnostics=[],
-            pg_hint_plan=pg_hint_plan,
-            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
+        result = candidate.model_copy(
+            update={
+                "warmup": measured(warmups[-1]) if warmups else None,
+                "measured_explain_analyze": executions[-1].document,
+                "compact_plan": compact_plan(executions[-1].document["Plan"]),
+                "provisional_measurements": observations,
+                "provisional_median_execution_time_ms": median_ms,
+                "provisional_speedup": score(
+                    self.default.median_execution_time_ms, median_ms
+                ),
+                "timeout_ms": self.timeout_ms,
+                "measurement_status": MeasurementStatus.MEASURED,
+            }
         )
         self.candidates.append(result)
-        self.by_fingerprint[fingerprint] = PlanTiming(
+        self.by_reuse_key[reuse_key] = PlanTiming(
             candidate_id=candidate_id,
             measurements=observations,
             median_execution_time_ms=median_ms,
@@ -502,7 +433,10 @@ class RolloutEvaluator[ExecutorT: QueryExecutor]:
                 else float("inf")
             ),
         )
-        if winner.plan_sha256 == self.default.plan_sha256:
+        if (
+            winner.timing_reuse_key is not None
+            and winner.timing_reuse_key == self.default.timing_reuse_key
+        ):
             median_ms = self.default.median_execution_time_ms
             return Outcome(
                 measurement_protocol_id=self.measurement_protocol.protocol_id,

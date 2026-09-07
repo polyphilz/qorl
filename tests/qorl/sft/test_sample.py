@@ -7,9 +7,9 @@ from tests.qorl.sft.factories import baseline, sample
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.measure.schemas import Baseline, RunStatus
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.sample import (
-    PlanValidationEvaluator,
     SampleRequest,
     evaluate_request,
     sample_limit,
@@ -38,6 +38,36 @@ def test_sampling_summary_deduplicates_fingerprints_per_task() -> None:
     assert summary.novel_candidates == 2
     assert summary.distinct_novel_fingerprints == 1
     assert summary.distinct_novel_fingerprint_yield == 0.5
+
+
+def test_sampling_yield_uses_structure_not_full_plan_or_execution_identity() -> None:
+    first, estimates, duplicate = sample(), sample(2), sample(3)
+    estimates = estimates.model_copy(
+        update={
+            "candidates": [
+                estimates.candidates[0].model_copy(
+                    update={
+                        "plan_sha256": "different-estimates",
+                        "timing_reuse_key": "different-execution",
+                    }
+                )
+            ]
+        }
+    )
+    duplicate = duplicate.model_copy(
+        update={
+            "candidates": [
+                duplicate.candidates[0].model_copy(
+                    update={"structural_duplicate_of": "default", "duplicate_of": None}
+                )
+            ]
+        }
+    )
+    summary = sampling_summary([first, estimates, duplicate])
+    assert summary.constraint_satisfied_candidates == 3
+    assert summary.default_duplicate_candidates == 1
+    assert summary.novel_candidates == 2
+    assert summary.distinct_novel_fingerprints == 1
 
 
 def test_normal_and_default_best_sampling_caps_are_enforced() -> None:

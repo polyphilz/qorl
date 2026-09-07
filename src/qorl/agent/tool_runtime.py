@@ -3,20 +3,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from qorl.agent.types import InspectionExecutor, ToolName
-from qorl.measure.rollout import RolloutEvaluator
+from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.measure.schemas import ToolResultStatus
 from qorl.plans.catalog import IDENTIFIER
 from qorl.plans.verify import compact_plan
+from qorl.postgres.exceptions import PostgresError
+from qorl.worker_pool.exceptions import ContainerError
 
 
 class AgentEnvironment:
-    def __init__(self, evaluator: RolloutEvaluator[InspectionExecutor]) -> None:
+    def __init__(self, evaluator: AgentEvaluator) -> None:
         self.evaluator = evaluator
         self.worker = evaluator.worker
-        self.tables = {
-            item["alias"]: item["table"] for item in evaluator.task["relations"]
-        }
+        self.tables = {item.alias: item.table for item in evaluator.task.relations}
 
     @staticmethod
     def literal(value: str) -> str:
@@ -158,5 +157,7 @@ class AgentEnvironment:
             if method is None:
                 raise ValueError("unknown tool")
             return method(arguments), False
+        except (PostgresError, ContainerError):
+            raise
         except (ValueError, RuntimeError, json.JSONDecodeError) as error:
             return {"error": str(error)}, False

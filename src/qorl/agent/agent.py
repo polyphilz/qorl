@@ -7,18 +7,22 @@ from typing import Any
 
 from qorl.agent.client import ModelClient, ModelError, OpenAIModelClient
 from qorl.agent.config import QoAgentConfig
-from qorl.agent.interface import AgentInterface
+from qorl.agent.interface import (
+    AGENT_INTERFACE_VERSION,
+    INSPECTION_TURNS_PER_ALIAS,
+    AgentInterface,
+)
 from qorl.agent.prompts import system_prompt
+from qorl.agent.schemas import AgentSettings
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import (
     TERMINAL_STOP_REASON,
     TURN_BUDGET_FIELD,
-    InspectionExecutor,
+    AgentEvaluator,
     PolicyType,
     StopReason,
     ToolName,
 )
-from qorl.measure.rollout import RolloutEvaluator
 from qorl.util.hashing import sha256_json
 
 MIN_COMPLETION_RESERVE_TOKENS = 256
@@ -84,6 +88,7 @@ class QoAgentPolicy:
         prompt = system_prompt(candidate_attempts)
         return {
             "type": PolicyType.QO_AGENT.value,
+            "agent_interface_version": AGENT_INTERFACE_VERSION,
             **asdict(self.config),
             "system_prompt": prompt,
             "system_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
@@ -115,17 +120,27 @@ class QoAgentPolicy:
 
     def search(
         self,
-        evaluator: RolloutEvaluator[InspectionExecutor],
+        evaluator: AgentEvaluator,
+        *,
+        settings: AgentSettings | None = None,
     ) -> dict[str, Any]:
+        settings = settings or AgentSettings(
+            candidate_attempts=evaluator.max_candidates,
+            maximum_model_turns=self.config.maximum_model_turns,
+            inspection_turns_per_alias=INSPECTION_TURNS_PER_ALIAS,
+        )
+        if settings.candidate_attempts != evaluator.max_candidates:
+            raise ValueError("agent and evaluator candidate limits must agree")
         completion_reserve = max(
             MIN_COMPLETION_RESERVE_TOKENS,
             int(self.config.sampling.get("max_tokens", 0)),
         )
         interface = AgentInterface.from_evaluator(
             evaluator,
-            self.config.maximum_model_turns,
+            settings.maximum_model_turns,
             self.config.context_length,
             completion_reserve,
+            inspection_turns_per_alias=settings.inspection_turns_per_alias,
         )
         messages = interface.initial_messages()
         responses: list[dict[str, Any]] = []
@@ -134,11 +149,14 @@ class QoAgentPolicy:
         stop_reason = StopReason.MODEL_TURN_LIMIT
         context_estimate_tokens: int | None = None
 
-        for turn in range(1, self.config.maximum_model_turns + 1):
+        for turn in range(1, settings.maximum_model_turns + 1):
             available_tools = interface.available_tools(turn, len(evaluator.candidates))
+            available_names = interface.available_tool_names(
+                turn, len(evaluator.candidates)
+            )
             response = self.client.chat(
                 self.request_body(
-                    messages, available_tools, evaluator.task["task_id"], turn
+                    messages, available_tools, evaluator.task.task_id, turn
                 )
             )
             responses.append(response)
@@ -177,11 +195,15 @@ class QoAgentPolicy:
                     )
                 except json.JSONDecodeError:
                     arguments = raw_arguments
-                result, finished = (
-                    environment.execute(name, arguments)
-                    if index == 0
-                    else ({"error": "call one tool at a time"}, False)
-                )
+                if index != 0:
+                    result, finished = {"error": "call one tool at a time"}, False
+                elif name not in available_names:
+                    result, finished = (
+                        {"error": "tool is not available for this turn"},
+                        False,
+                    )
+                else:
+                    result, finished = environment.execute(name, arguments)
                 budget = interface.budget(turn)
                 result = (
                     {**result, TURN_BUDGET_FIELD: budget}
@@ -259,6 +281,7 @@ class QoAgentPolicy:
                 if isinstance(value, int):
                     usage[name] = usage.get(name, 0) + value
         return {
+            "agent_interface_version": AGENT_INTERFACE_VERSION,
             "stop_reason": stop_reason.value,
             "initial_observation": interface.observation,
             "tools": interface.tools,

@@ -64,3 +64,49 @@ def test_followup_filter_rejects_a_fingerprint_from_the_initial_pass() -> None:
 
     assert followup[0].rejection_reason == "task_fingerprint_duplicate"
     assert followup[0].syntax_eligible is False
+
+
+def test_filter_deduplicates_structure_not_estimates() -> None:
+    first, second = sample(), sample(2)
+    second = second.model_copy(
+        update={
+            "candidates": [
+                second.candidates[0].model_copy(
+                    update={"plan_sha256": "different-estimates"}
+                )
+            ]
+        }
+    )
+    records = filter_records(
+        [(Path("first.json"), first), (Path("second.json"), second)],
+        context_length=20_480,
+        syntax_examples_per_task=2,
+    )
+    assert records[0].accepted
+    assert records[0].plan_sha256 == first.candidates[0].plan_sha256
+    assert (
+        records[0].structural_plan_sha256 == first.candidates[0].structural_plan_sha256
+    )
+    assert records[1].rejection_reason == "task_fingerprint_duplicate"
+
+
+def test_filter_rejects_estimate_only_default_change_even_without_timing_reuse() -> (
+    None
+):
+    record = sample()
+    record = record.model_copy(
+        update={
+            "candidates": [
+                record.candidates[0].model_copy(
+                    update={"structural_duplicate_of": "default", "duplicate_of": None}
+                )
+            ]
+        }
+    )
+    filtered = filter_records(
+        [(Path("sample.json"), record)],
+        context_length=20_480,
+        syntax_examples_per_task=2,
+    )
+    assert not filtered[0].accepted
+    assert filtered[0].rejection_reason == "default_duplicate"

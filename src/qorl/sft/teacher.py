@@ -22,12 +22,13 @@ from qorl.agent.types import ToolName
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import Candidate, RunStatus
 from qorl.measure.timeouts import CalibratedTimeouts
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import contains_node
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import action_families, canonical_sha256
 from qorl.sft.filter import rejection_reason
-from qorl.sft.sample import PlanValidationEvaluator, selected_tasks
+from qorl.sft.sample import selected_tasks
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     ActionFamily,
@@ -52,6 +53,7 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
@@ -60,7 +62,7 @@ from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
 from qorl.worker_pool.schemas import WorkerSlot
 
-GENERATION_ID = "qorl-protocol-sft-v2-teacher-v1"
+GENERATION_ID = "qorl-protocol-sft-v2-teacher-v2"
 TEACHER_SAMPLE_NUMBER = 5
 INITIAL_MESSAGE_COUNT = 2
 DEFAULT_TEACHER_OUTPUT = Path("experiments/005-protocol-sft-v2/teacher")
@@ -404,8 +406,9 @@ def replay_action(
     evaluator = PlanValidationEvaluator(
         slot.client,
         task_set,
-        task,
-        timeouts.task(task_id),
+        Task.model_validate(task),
+        default_timeout_ms=timeouts.task(task_id).timeout_ms,
+        max_candidates=1,
     )
     baseline = evaluator.start()
     client = ScriptedModelClient(scripted_messages(prefix, decision))
@@ -447,7 +450,7 @@ def replay_action(
 def candidate_feedback(candidate: Candidate, reason: str) -> str:
     if candidate.errors_or_diagnostics:
         return "; ".join(candidate.errors_or_diagnostics)
-    if candidate.duplicate_of is not None:
+    if candidate.structural_duplicate_of is not None:
         return "the action reproduced PostgreSQL's default physical plan"
     return reason.replace("_", " ")
 
@@ -804,6 +807,10 @@ def main() -> None:
     previous_manifest_path = output / "manifest.json"
     if previous_manifest_path.is_file():
         previous = load_record(previous_manifest_path, TeacherManifest)
+        if previous.generation_id != GENERATION_ID:
+            raise RuntimeError(
+                "teacher generation identity changed; use a new output directory"
+            )
         if previous.teacher != identity or previous.source_filter != source_filter:
             raise RuntimeError("teacher output belongs to different experiment inputs")
         started_at = previous.started_at_utc

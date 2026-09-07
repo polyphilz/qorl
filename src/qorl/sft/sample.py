@@ -11,18 +11,13 @@ from pathlib import Path
 
 from qorl.agent import QoAgentConfig, QoAgentPolicy
 from qorl.agent.types import StopReason
-from qorl.measure.rollout import PlanTiming, RolloutEvaluator
 from qorl.measure.run import TaskRun
-from qorl.measure.schemas import Baseline, Candidate, MeasurementStatus, RunStatus
-from qorl.measure.timeouts import CalibratedTimeouts, TaskTimeout
+from qorl.measure.schemas import RunStatus
+from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS, CalibratedTimeouts
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
-from qorl.plans.exceptions import ActionError
-from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION, plan_sha256
-from qorl.plans.schemas import PlanAction
-from qorl.plans.verify import compact_plan, hint_status, verify_action
-from qorl.postgres.client import PostgresClient
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.postgres.config import PostgresConfig
-from qorl.postgres.exceptions import PostgresError
 from qorl.sft.assemble import action_families
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -47,16 +42,16 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.containers import ContainerPool
-from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import WorkerSlot
 
-SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v1"
+SAMPLING_ID = "qorl-protocol-sft-v2-sampling-v2"
 
 
 @dataclass(frozen=True)
@@ -67,100 +62,6 @@ class SampleRequest:
     sample: int
     seed: int
     sampling_mode: SamplingMode
-
-
-class PlanValidationEvaluator(RolloutEvaluator[PostgresClient]):
-    """Validate a plan action without executing the benchmark query."""
-
-    def __init__(
-        self,
-        worker: PostgresClient,
-        task_set: TaskSet,
-        task: JsonObject,
-        calibrated_timeout: TaskTimeout | None = None,
-        max_candidates: int = 1,
-    ) -> None:
-        super().__init__(
-            worker,
-            task_set,
-            task,
-            calibrated_timeout=calibrated_timeout,
-            max_candidates=max_candidates,
-        )
-
-    def start(self) -> Baseline:
-        plain = self.worker.explain(self.sql, self.timeout_ms)
-        fingerprint = plan_sha256(plain.document["Plan"])
-        if (
-            self.calibrated_timeout is not None
-            and fingerprint not in self.calibrated_timeout.plan_sha256s
-        ):
-            raise RuntimeError(
-                f"default plan differs from calibration: {self.task['task_id']}"
-            )
-        self.default = Baseline(
-            plan_sha256=fingerprint,
-            plain_explain=plain.document,
-            median_execution_time_ms=None,
-            compact_plan=compact_plan(plain.document["Plan"]),
-        )
-        self.by_fingerprint[fingerprint] = PlanTiming("default", [], None)
-        return self.default
-
-    def evaluate(self, raw_action: object) -> Candidate:
-        if self.default is None:
-            raise RuntimeError("rollout baseline has not been started")
-        if len(self.candidates) >= self.max_candidates:
-            raise RuntimeError("rollout candidate budget is exhausted")
-        candidate_id = f"candidate-{len(self.candidates) + 1:02d}"
-        try:
-            plan_action = PlanAction.from_raw(raw_action, self.catalog)
-            action = plan_action.to_wire()
-            hint = plan_action.compile()
-        except ActionError as error:
-            return self.invalid_candidate(candidate_id, raw_action, str(error))
-        try:
-            plain = self.worker.explain(self.sql, self.timeout_ms, hint=hint)
-        except (PostgresError, ContainerError) as error:
-            return self.invalid_candidate(
-                candidate_id, action, str(error), hint=hint, action_valid=True
-            )
-        verification = verify_action(
-            action, plain.document["Plan"], plain.hint_diagnostics
-        )
-        diagnostics = hint_status(plain.hint_diagnostics)
-        if not verification.valid:
-            return self.invalid_candidate(
-                candidate_id,
-                action,
-                "; ".join(verification.errors),
-                hint=hint,
-                action_valid=True,
-                pg_hint_plan=diagnostics,
-            )
-        fingerprint = plan_sha256(plain.document["Plan"])
-        duplicate = self.by_fingerprint.get(fingerprint)
-        result = Candidate(
-            candidate_id=candidate_id,
-            action=action,
-            action_valid=True,
-            constraints_satisfied=True,
-            compiled_hint=hint,
-            duplicate_of=duplicate.candidate_id if duplicate else None,
-            plan_sha256=fingerprint,
-            plain_explain=plain.document,
-            compact_plan=compact_plan(plain.document["Plan"]),
-            provisional_measurements=[],
-            provisional_speedup=None,
-            measurement_status=MeasurementStatus.NOT_MEASURED,
-            errors_or_diagnostics=[],
-            pg_hint_plan=diagnostics,
-            attempts_remaining=self.max_candidates - len(self.candidates) - 1,
-        )
-        self.candidates.append(result)
-        if duplicate is None:
-            self.by_fingerprint[fingerprint] = PlanTiming(candidate_id, [], None)
-        return result
 
 
 def sample_seed(dataset_seed: int, task_id: str, sample: int) -> int:
@@ -221,7 +122,11 @@ def evaluate_request(
             else None
         )
         evaluator = PlanValidationEvaluator(
-            slot.client, task_set, request.task, timeout
+            slot.client,
+            task_set,
+            Task.model_validate(request.task),
+            default_timeout_ms=timeout.timeout_ms if timeout else GLOBAL_TIMEOUT_MS,
+            max_candidates=1,
         )
         try:
             baseline = evaluator.start()
@@ -311,13 +216,15 @@ def sampling_summary(records: list[SampleRecord]) -> SamplingSummary:
             if not candidate.constraints_satisfied:
                 continue
             constrained += 1
-            if candidate.duplicate_of is not None:
+            if candidate.structural_duplicate_of is not None:
                 duplicates += 1
                 continue
             novel += 1
-            if candidate.plan_sha256 is None:
+            if candidate.structural_plan_sha256 is None:
                 raise RuntimeError("novel candidate has no plan fingerprint")
-            fingerprints.setdefault(record.task_id, set()).add(candidate.plan_sha256)
+            fingerprints.setdefault(record.task_id, set()).add(
+                candidate.structural_plan_sha256
+            )
     distinct = sum(len(values) for values in fingerprints.values())
     denominator = len(intervened_tasks)
     return SamplingSummary(
@@ -503,6 +410,11 @@ def main() -> None:
         if manifest_path.is_file()
         else None
     )
+    if previous is not None and (
+        previous.sampling_id != SAMPLING_ID
+        or previous.plan_fingerprint_version != PLAN_FINGERPRINT_VERSION
+    ):
+        raise RuntimeError("sampling identity changed; use a new output directory")
     if previous is not None and (
         previous.sampler.model != sampler_identity.model
         or previous.sampler.manifest_sha256 != sampler_identity.manifest_sha256

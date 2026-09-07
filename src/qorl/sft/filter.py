@@ -9,6 +9,7 @@ from qorl.agent import QoAgentConfig
 from qorl.agent.types import StopReason, ToolName
 from qorl.measure.schemas import RunStatus
 from qorl.paths import REPOSITORY_ROOT
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.sft.assemble import action_families, canonical_json
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -33,7 +34,7 @@ from qorl.sft.schemas import (
 from qorl.util.hashing import sha256_file
 from qorl.util.io import write_json
 
-FILTER_ID = "qorl-protocol-sft-v2-filter-v2"
+FILTER_ID = "qorl-protocol-sft-v2-filter-v3"
 
 
 def load_filtered_sample(
@@ -145,9 +146,9 @@ def rejection_reason(record: SampleRecord, context_length: int) -> str | None:
         return "malformed_action"
     if not candidate.constraints_satisfied:
         return "constraints_not_satisfied"
-    if candidate.duplicate_of is not None:
+    if candidate.structural_duplicate_of is not None:
         return "default_duplicate"
-    if candidate.plan_sha256 is None:
+    if candidate.plan_sha256 is None or candidate.structural_plan_sha256 is None:
         return "missing_plan_fingerprint"
 
     responses = trace.get("model_responses")
@@ -175,10 +176,16 @@ def filter_records(
 ) -> list[FilterRecord]:
     results: list[FilterRecord] = []
     existing = existing or []
+    if any(
+        record.accepted and record.structural_plan_sha256 is None for record in existing
+    ):
+        raise RuntimeError(
+            "existing filter records have no structural identity; rebuild the filter"
+        )
     seen = {
-        (record.task_id, record.plan_sha256)
+        (record.task_id, record.structural_plan_sha256)
         for record in existing
-        if record.accepted and record.plan_sha256 is not None
+        if record.accepted and record.structural_plan_sha256 is not None
     }
     accepted_by_task = Counter(record.task_id for record in existing if record.accepted)
     for path, sample in sorted(
@@ -187,10 +194,11 @@ def filter_records(
         reason = rejection_reason(sample, context_length)
         candidate = sample.candidates[0] if len(sample.candidates) == 1 else None
         fingerprint = candidate.plan_sha256 if candidate is not None else None
+        structure = candidate.structural_plan_sha256 if candidate is not None else None
         if reason is None:
-            if fingerprint is None:
+            if fingerprint is None or structure is None:
                 raise RuntimeError("accepted sample has no plan fingerprint")
-            key = (sample.task_id, fingerprint)
+            key = (sample.task_id, structure)
             if key in seen:
                 reason = "task_fingerprint_duplicate"
             else:
@@ -214,6 +222,7 @@ def filter_records(
                 accepted=accepted,
                 rejection_reason=reason,
                 plan_sha256=fingerprint if accepted else None,
+                structural_plan_sha256=structure if accepted else None,
                 action_families=[
                     ActionFamily(value) for value in action_families(action)
                 ]
@@ -352,6 +361,7 @@ def main() -> None:
     )
     manifest = FilterManifest(
         filter_id=FILTER_ID,
+        plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
         split=arguments.split,
         source=source,
         source_manifest=source_manifest,

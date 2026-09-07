@@ -8,11 +8,13 @@ from typing import Any
 
 from qorl.agent.types import ToolName
 from qorl.measure.schemas import RunStatus
+from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.fingerprint import plan_sha256
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.assemble import load_documents
-from qorl.sft.sample import PlanValidationEvaluator
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.util.hashing import sha256_file
 from qorl.worker_pool.config import load_pool_config
@@ -83,7 +85,8 @@ def main() -> None:
             evaluator = PlanValidationEvaluator(
                 worker,
                 task_set,
-                tasks[task_id],
+                Task.model_validate(tasks[task_id]),
+                default_timeout_ms=GLOBAL_TIMEOUT_MS,
                 max_candidates=len(actions),
             )
             baseline = evaluator.start()

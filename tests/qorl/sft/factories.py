@@ -88,6 +88,7 @@ def candidate(plan_sha256: str = "novel-plan") -> Candidate:
         compiled_hint="Set(enable_hashjoin off)",
         duplicate_of=None,
         plan_sha256=plan_sha256,
+        structural_plan_sha256=plan_sha256,
         plain_explain={"Plan": {"Node Type": "Seq Scan"}},
         compact_plan={"Node Type": "Seq Scan"},
         provisional_measurements=[],

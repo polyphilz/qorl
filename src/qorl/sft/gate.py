@@ -13,11 +13,14 @@ from qorl.agent.client import ModelError
 from qorl.agent.types import StopReason
 from qorl.measure.run import TaskRun
 from qorl.measure.schemas import RunStatus
+from qorl.measure.timeouts import GLOBAL_TIMEOUT_MS
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.paths import REPOSITORY_ROOT
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.exceptions import PostgresError
 from qorl.sft.assemble import action_families
-from qorl.sft.sample import PlanValidationEvaluator, file_identity
+from qorl.sft.sample import file_identity
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
     JSON_OBJECT_LIST_ADAPTER,
@@ -34,6 +37,7 @@ from qorl.sft.schemas import (
     require_object,
     require_string,
 )
+from qorl.taskset.schemas import Task
 from qorl.taskset.taskset import TaskSet
 from qorl.util.io import write_json
 from qorl.util.time import utc_now
@@ -65,7 +69,13 @@ def evaluate_request(
     config: QoAgentConfig,
 ) -> tuple[WorkerSlot, GateRollout]:
     with pool.claim_worker() as slot:
-        evaluator = PlanValidationEvaluator(slot.client, task_set, request.task)
+        evaluator = PlanValidationEvaluator(
+            slot.client,
+            task_set,
+            Task.model_validate(request.task),
+            default_timeout_ms=GLOBAL_TIMEOUT_MS,
+            max_candidates=1,
+        )
         try:
             evaluator.start()
             trace = JSON_OBJECT_ADAPTER.validate_python(
@@ -87,13 +97,13 @@ def evaluate_request(
                 candidate.constraints_satisfied if candidate is not None else False
             )
             duplicate = (
-                candidate.duplicate_of is not None
+                candidate.structural_duplicate_of is not None
                 if constrained and candidate is not None
                 else False
             )
             novel_fingerprint = (
-                candidate.plan_sha256
-                if constrained and not duplicate and candidate is not None
+                candidate.structural_plan_sha256
+                if candidate is not None and candidate.structurally_novel
                 else None
             )
             return slot, GateRollout(
@@ -209,6 +219,7 @@ def main() -> None:
     ]
     started = datetime.now(UTC).isoformat()
     provisional = GateReport(
+        plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
         status=RunStatus.RUNNING,
         started_at_utc=started,
         completed_at_utc=None,

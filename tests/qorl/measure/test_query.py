@@ -40,6 +40,15 @@ def test_buffer_stability_requires_same_plan_and_close_counts(
     assert buffers_stable(first, second) is stable
 
 
+def test_warmup_identity_ignores_io_timing_but_retains_estimates() -> None:
+    initial = explain()
+    timed = explain()
+    timed.document["Plan"]["Shared I/O Read Time"] = 3.5
+    assert buffers_stable(observation(initial, 1), observation(timed, 2))
+    timed.document["Plan"]["Plan Rows"] += 1
+    assert not buffers_stable(observation(initial, 1), observation(timed, 2))
+
+
 @pytest.mark.parametrize("num_trials", [1, 2, 20])
 def test_stable_warmups_stop_at_two_and_trials_are_separate(num_trials: int) -> None:
     executions: list[ExplainResult] = []

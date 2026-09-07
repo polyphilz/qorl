@@ -368,6 +368,7 @@ class FilterRecord(SftRecord):
     accepted: bool
     rejection_reason: str | None
     plan_sha256: str | None
+    structural_plan_sha256: str | None = None
     action_families: list[ActionFamily]
     syntax_eligible: bool
     steered: Literal[False]
@@ -386,6 +387,7 @@ class FilterSummary(SftRecord):
 class FilterManifest(SftRecord):
     schema_version: Literal[1] = 1
     filter_id: str
+    plan_fingerprint_version: int
     split: str
     source: ExampleSource
     source_manifest: FileIdentity | None
@@ -772,6 +774,7 @@ class GateSummary(SftRecord):
 
 
 class GateReport(SftRecord):
+    plan_fingerprint_version: int
     schema_version: Literal[1] = 1
     status: RunStatus
     started_at_utc: str

@@ -20,7 +20,6 @@ from qorl.measure.schemas import (
     TIMEOUT_ATTEMPT_PENALTY,
     Baseline,
     Candidate,
-    CandidateOutcome,
     MeasurementProtocolId,
     Outcome,
     OutcomeKind,
@@ -164,6 +163,19 @@ class TimeoutWorker(CountingWorker):
         return super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
 
 
+class SamePlanWorker(CountingWorker):
+    """The settings affect execution without altering the returned planned tree."""
+
+    def explain(
+        self, sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
+        result.document["Plan"] = deepcopy(DEFAULT_PLAN)
+        if analyze:
+            result.document["Execution Time"] = 5.0 if hint else 10.0
+        return result
+
+
 class CalibratedTimeoutWorker(CountingWorker):
     def __init__(self, successful_candidate_executions: int) -> None:
         super().__init__()
@@ -189,6 +201,32 @@ class CalibratedTimeoutWorker(CountingWorker):
 
 
 class TestRollout:
+    def test_same_plan_different_settings_does_not_reuse_default_timings(self) -> None:
+        worker = SamePlanWorker()
+        evaluator = RolloutEvaluator(worker, Fixture(), TASK)
+        baseline = evaluator.start()
+        initial_executions = worker.analyze_calls
+        unchanged = evaluator.evaluate({"version": 1})
+        assert unchanged.duplicate_of == "default"
+        assert worker.analyze_calls == initial_executions
+
+        action = {"version": 1, "settings": {"seq_page_cost": 2}}
+        changed = evaluator.evaluate(action)
+        assert changed.plan_sha256 == baseline.plan_sha256
+        assert changed.structural_duplicate_of == "default"
+        assert changed.timing_reuse_key != baseline.timing_reuse_key
+        assert changed.duplicate_of is None
+        assert worker.analyze_calls == initial_executions + 2
+        repeated = evaluator.evaluate(action)
+        assert repeated.duplicate_of == changed.candidate_id
+        assert worker.analyze_calls == initial_executions + 2
+
+        outcome = evaluator.finish(random.Random(7))
+        assert outcome.winning_plan_sha256 == baseline.plan_sha256
+        assert outcome.kind == OutcomeKind.MEASURED
+        assert outcome.score == 2.0
+        assert worker.analyze_calls == initial_executions + 2 + 12
+
     def test_task_relative_timeout(self) -> None:
         assert task_timeout_ms(10, 120_000) == 5_000
         assert task_timeout_ms(30_000, 120_000) == 90_000
@@ -226,7 +264,6 @@ class TestRollout:
         evaluator.start()
         result = evaluator.evaluate({"version": 2})
         assert not result.action_valid
-        assert result.outcome == CandidateOutcome.MALFORMED
         assert result.errors_or_diagnostics == ["version must equal 1"]
         assert result.attempts_remaining == 4
 
@@ -260,7 +297,6 @@ class TestRollout:
             {"version": 1, "scans": [{"relation": "a", "force": "seq"}]}
         )
         assert result.action_valid
-        assert result.outcome == CandidateOutcome.DUPLICATE
         assert result.duplicate_of == "default"
         assert result.provisional_speedup == 1.0
 
@@ -414,7 +450,6 @@ class TestRollout:
         assert candidate.action_valid
         assert candidate.constraints_satisfied
         assert candidate.execution_timed_out
-        assert candidate.outcome == CandidateOutcome.TIMED_OUT
         assert candidate.provisional_speedup == 0.1
         assert final.status == "no_valid_candidate"
         assert final.kind == OutcomeKind.NO_VALID_CANDIDATE

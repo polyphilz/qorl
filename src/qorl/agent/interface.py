@@ -6,11 +6,11 @@ from typing import Any
 
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
-from qorl.agent.types import InspectionExecutor, ToolName
-from qorl.measure.rollout import MAX_CANDIDATES, RolloutEvaluator
+from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.plans.schemas import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
 
 INSPECTION_TURNS_PER_ALIAS = 3
+AGENT_INTERFACE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -25,17 +25,19 @@ class AgentInterface:
     @classmethod
     def from_evaluator(
         cls,
-        evaluator: RolloutEvaluator[InspectionExecutor],
+        evaluator: AgentEvaluator,
         maximum_model_turns: int,
         context_length: int | None = None,
         completion_reserve: int | None = None,
+        *,
+        inspection_turns_per_alias: int = INSPECTION_TURNS_PER_ALIAS,
     ) -> AgentInterface:
         aliases = sorted(evaluator.catalog.relations)
         tools = agent_tools(aliases)
-        candidate_attempts = getattr(evaluator, "max_candidates", MAX_CANDIDATES)
+        candidate_attempts = evaluator.max_candidates
         reserved_decision_turns = candidate_attempts + 1
         inspection_turn_limit = min(
-            len(aliases) * INSPECTION_TURNS_PER_ALIAS,
+            len(aliases) * inspection_turns_per_alias,
             max(0, maximum_model_turns - reserved_decision_turns),
         )
         settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
@@ -43,11 +45,13 @@ class AgentInterface:
             raise RuntimeError("rollout baseline has not been started")
         postgres_settings = evaluator.worker.settings
         observation = {
-            "task_id": evaluator.task["task_id"],
+            "task_id": evaluator.task.task_id,
             "objective": "minimize measured warm-cache execution time",
             "sql": evaluator.sql,
-            "relations": evaluator.task["relations"],
-            "join_edges": evaluator.task["join_edges"],
+            "relations": [
+                relation.model_dump() for relation in evaluator.task.relations
+            ],
+            "join_edges": evaluator.task.join_edges,
             "indexes": {
                 alias: sorted(indexes)
                 for alias, indexes in sorted(evaluator.catalog.indexes.items())

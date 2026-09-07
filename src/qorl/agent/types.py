@@ -2,6 +2,8 @@ from enum import StrEnum
 from typing import Protocol
 
 from qorl.measure.protocols import QueryExecutor
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.postgres.schemas import PostgresSettings
 
 # This internal-looking key is already model-visible and therefore wire-stable.
@@ -44,3 +46,8 @@ class InspectionExecutor(QueryExecutor, Protocol):
     def settings(self) -> PostgresSettings: ...
 
     def admin_sql(self, sql: str) -> str: ...
+
+
+type AgentEvaluator = (
+    RolloutEvaluator[InspectionExecutor] | PlanValidationEvaluator[InspectionExecutor]
+)

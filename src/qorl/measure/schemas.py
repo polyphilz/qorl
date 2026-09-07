@@ -88,14 +88,6 @@ class ToolResultStatus(StrEnum):
     KEPT_DEFAULT = "kept_default"
 
 
-class CandidateOutcome(StrEnum):
-    MALFORMED = "malformed"
-    REJECTED = "rejected"
-    TIMED_OUT = "timed_out"
-    DUPLICATE = "duplicate"
-    MEASURED = "measured"
-
-
 class OutcomeKind(StrEnum):
     KEPT_DEFAULT = "kept_default"
     DEFAULT_DUPLICATE = "default_duplicate"
@@ -211,6 +203,9 @@ class CandidateTimeout(Record):
 class Baseline(Record):
     measurement_protocol_id: MeasurementProtocolId | None = None
     plan_sha256: str
+    structural_plan_sha256: str | None = None
+    timing_reuse_key: str | None = None
+    plan_fingerprint_version: int | None = None
     plain_explain: dict[str, Any]
     median_execution_time_ms: float | None
     warmup: Measurement | None = None
@@ -220,6 +215,12 @@ class Baseline(Record):
 
 
 class Candidate(Record):
+    """One attempt's evidence; duplicate_of denotes execution reuse, not novelty.
+
+    structural_duplicate_of identifies a matching physical plan. plan_sha256
+    retains estimates; timing_reuse_key also binds the per-query overrides.
+    """
+
     candidate_id: str
     action: Any
     action_valid: bool
@@ -227,6 +228,10 @@ class Candidate(Record):
     compiled_hint: str
     duplicate_of: str | None
     plan_sha256: str | None
+    structural_plan_sha256: str | None = None
+    structural_duplicate_of: str | None = None
+    timing_reuse_key: str | None = None
+    plan_fingerprint_version: int | None = None
     provisional_measurements: list[Measurement] = []
     provisional_speedup: float | None
     errors_or_diagnostics: list[str] = []
@@ -241,18 +246,6 @@ class Candidate(Record):
     timeout_ms: int | None = None
     measurement_status: MeasurementStatus | None = None
 
-    @property
-    def outcome(self) -> CandidateOutcome:
-        if not self.action_valid:
-            return CandidateOutcome.MALFORMED
-        if self.execution_timed_out:
-            return CandidateOutcome.TIMED_OUT
-        if not self.constraints_satisfied:
-            return CandidateOutcome.REJECTED
-        if self.duplicate_of is not None:
-            return CandidateOutcome.DUPLICATE
-        return CandidateOutcome.MEASURED
-
     def feedback(self) -> dict[str, Any]:
         return {
             "candidate_id": self.candidate_id,
@@ -261,6 +254,8 @@ class Candidate(Record):
             "compiled_hint": self.compiled_hint,
             "duplicate_of": self.duplicate_of,
             "plan_sha256": self.plan_sha256,
+            "structural_plan_sha256": self.structural_plan_sha256,
+            "structural_duplicate_of": self.structural_duplicate_of,
             "compact_plan": self.compact_plan,
             "planning_time_ms": [
                 item.planning_time_ms for item in self.provisional_measurements
@@ -274,6 +269,16 @@ class Candidate(Record):
             "errors_or_diagnostics": self.errors_or_diagnostics,
             "attempts_remaining": self.attempts_remaining,
         }
+
+    @property
+    def structurally_novel(self) -> bool:
+        """Novelty requires validated structure, not merely a different full hash."""
+        return (
+            self.action_valid
+            and self.constraints_satisfied
+            and self.structural_plan_sha256 is not None
+            and self.structural_duplicate_of is None
+        )
 
 
 class Outcome(Record):
