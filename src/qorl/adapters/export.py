@@ -9,9 +9,8 @@ from safetensors.torch import save_file
 from torch.distributed.checkpoint import FileSystemReader, load
 
 from qorl.adapters.schemas import AdapterExportManifest
+from qorl.model.files import model_weights_sha256
 from qorl.util.hashing import sha256_file
-
-MODEL_FILE = "model.safetensors"
 
 
 def adapter_name(checkpoint_name: str) -> str:
@@ -34,9 +33,7 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.0)
     arguments = parser.parse_args()
     model = arguments.model.resolve()
-    model_weights = model / MODEL_FILE
-    if not model_weights.is_file():
-        raise RuntimeError(f"base model weights are missing: {model_weights}")
+    base_model_sha256 = model_weights_sha256(model)
 
     metadata = FileSystemReader(arguments.checkpoint).read_metadata()
     checkpoint_keys = sorted(
@@ -103,7 +100,7 @@ def main() -> None:
         tensor_count=len(adapter),
         nonzero_lora_b_values=changed,
         adapter_sha256=sha256_file(weights),
-        base_model_sha256=sha256_file(model_weights),
+        base_model_sha256=base_model_sha256,
     )
     (arguments.output / "qorl-manifest.json").write_text(
         json.dumps(manifest.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"

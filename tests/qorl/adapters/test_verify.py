@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
 from qorl.adapters import verify
+from qorl.adapters.schemas import AdapterExportManifest
 from qorl.adapters.verify import verify_adapter_base, verify_merged_model
+from qorl.model.files import model_weights_sha256
+from qorl.model.schemas import ModelWeightIndex
 from qorl.util.hashing import sha256_file
 
 
@@ -135,3 +139,75 @@ def test_adapter_base_requires_recorded_weights(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="adapter's recorded base model is missing"):
         verify_adapter_base(adapter, base)
+
+
+@pytest.fixture(params=["model.safetensors", "pytorch_model.bin"])
+def sharded_adapter(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> tuple[Path, Path, Path]:
+    filename = str(request.param)
+    base, adapter, _ = merged_fixture(tmp_path)
+    (base / "model.safetensors").unlink()
+    (base / f"first-{filename}").write_bytes(b"first shard")
+    (base / f"second-{filename}").write_bytes(b"second shard")
+    (base / f"{filename}.index.json").write_text(
+        ModelWeightIndex(
+            weight_map={
+                "a": f"first-{filename}",
+                "b": f"second-{filename}",
+            }
+        ).model_dump_json()
+    )
+    (adapter / "qorl-manifest.json").write_text(
+        AdapterExportManifest(
+            tensor_count=1,
+            nonzero_lora_b_values=1,
+            adapter_sha256=sha256_file(adapter / "adapter_model.safetensors"),
+            base_model_sha256=model_weights_sha256(base),
+        ).model_dump_json()
+    )
+    supplied = tmp_path / "supplied"
+    shutil.copytree(base, supplied)
+    return base, adapter, supplied
+
+
+def test_sharded_adapter_accepts_original_or_identical_copied_base(
+    sharded_adapter: tuple[Path, Path, Path],
+) -> None:
+    base, adapter, supplied = sharded_adapter
+    expected = model_weights_sha256(base)
+    assert verify_adapter_base(adapter, base) == expected
+    assert verify_adapter_base(adapter, supplied) == expected
+
+
+@pytest.mark.parametrize("file_index", [0, 1, 2])
+def test_sharded_adapter_rejects_modified_supplied_weights(
+    sharded_adapter: tuple[Path, Path, Path], file_index: int
+) -> None:
+    _, adapter, supplied = sharded_adapter
+    files = sorted(supplied.iterdir())
+    path = files[file_index]
+    path.write_bytes(path.read_bytes() + b" ")
+    with pytest.raises(
+        RuntimeError, match="does not match the adapter's training base"
+    ):
+        verify_adapter_base(adapter, supplied)
+
+
+def test_sharded_adapter_manifest_detects_changes_at_the_recorded_path(
+    sharded_adapter: tuple[Path, Path, Path],
+) -> None:
+    base, adapter, _ = sharded_adapter
+    first = next(path for path in base.iterdir() if path.name.startswith("first-"))
+    first.write_bytes(b"changed after export")
+    with pytest.raises(RuntimeError, match="does not match its recorded base"):
+        verify_adapter_base(adapter, base)
+
+
+def test_sharded_adapter_rejects_incomplete_supplied_base(
+    sharded_adapter: tuple[Path, Path, Path],
+) -> None:
+    _, adapter, supplied = sharded_adapter
+    next(path for path in supplied.iterdir() if path.name.startswith("first-")).unlink()
+    with pytest.raises(RuntimeError, match="missing or invalid"):
+        verify_adapter_base(adapter, supplied)

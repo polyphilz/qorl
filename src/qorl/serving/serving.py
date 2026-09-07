@@ -47,14 +47,14 @@ class ServedModel:
 
     def __enter__(self) -> ServedModel:
         self._log = self.log_path.open("w")
-        self.process = subprocess.Popen(
-            self.command,
-            cwd=self.repository,
-            stdout=self._log,
-            stderr=subprocess.STDOUT,
-            env=self.environment,
-        )
         try:
+            self.process = subprocess.Popen(
+                self.command,
+                cwd=self.repository,
+                stdout=self._log,
+                stderr=subprocess.STDOUT,
+                env=self.environment,
+            )
             wait_for_server(self.health_url, self.process, self.startup_timeout)
         except BaseException:
             self.close()

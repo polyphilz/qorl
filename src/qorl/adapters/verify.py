@@ -11,6 +11,7 @@ from typing import Any
 
 from qorl.adapters.config import adapter_config, adapter_rank
 from qorl.adapters.schemas import AdapterExportManifest
+from qorl.model.files import model_weights_sha256
 from qorl.paths import REPOSITORY_ROOT
 from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
@@ -20,15 +21,18 @@ ADAPTER_MODEL = "qorl-protocol-adapter"
 MINIMUM_LOGPROBABILITY_DELTA = 1e-7
 TOP_LOGPROBS = 20
 ADAPTER_MANIFEST_FILE = "qorl-manifest.json"
-MODEL_FILE = "model.safetensors"
 
 
 def verify_adapter_base(adapter: Path, base: Path) -> str:
+    """Match the recorded and supplied base weights, including complete sharded bases."""
     recorded = Path(adapter_config(adapter).base_model_name_or_path).expanduser()
     recorded = (REPOSITORY_ROOT / recorded).resolve()
-    if not (recorded / MODEL_FILE).is_file():
-        raise RuntimeError(f"adapter's recorded base model is missing: {recorded}")
-    recorded_sha256 = sha256_file(recorded / MODEL_FILE)
+    try:
+        recorded_sha256 = model_weights_sha256(recorded)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            f"adapter's recorded base model is missing or invalid: {recorded}"
+        ) from error
     manifest_path = adapter / ADAPTER_MANIFEST_FILE
     if manifest_path.is_file():
         manifest = AdapterExportManifest.model_validate_json(
@@ -42,12 +46,16 @@ def verify_adapter_base(adapter: Path, base: Path) -> str:
                 "adapter manifest does not match its recorded base model"
             )
     supplied_base = base.resolve()
-    supplied = supplied_base / MODEL_FILE
-    if not supplied.is_file():
-        raise RuntimeError(f"base model weights are missing: {supplied}")
-    supplied_sha256 = (
-        recorded_sha256 if supplied_base == recorded else sha256_file(supplied)
-    )
+    try:
+        supplied_sha256 = (
+            recorded_sha256
+            if supplied_base == recorded
+            else model_weights_sha256(supplied_base)
+        )
+    except (OSError, ValueError) as error:
+        raise RuntimeError(
+            f"base model weights are missing or invalid: {supplied_base}"
+        ) from error
     if supplied_sha256 != recorded_sha256:
         raise RuntimeError(
             "supplied base model does not match the adapter's training base"

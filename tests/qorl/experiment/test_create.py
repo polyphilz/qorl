@@ -18,6 +18,7 @@ from qorl.experiment.schemas import (
     CreateRequest,
     EvaluationExperimentConfig,
     ExperimentMethod,
+    ModelExperimentConfig,
     RlExperimentConfig,
     SftExperimentConfig,
     load_config,
@@ -359,30 +360,6 @@ def test_adapter_only_directory_is_not_a_model(
         )
 
 
-def test_sharded_model_requires_every_shard(tmp_path: Path) -> None:
-    (tmp_path / "config.json").write_text("{}")
-    (tmp_path / "model.safetensors.index.json").write_text(
-        json.dumps({"weight_map": {"weight": "shard.safetensors"}})
-    )
-    with pytest.raises(ValueError, match="model shard"):
-        create.validate_model_directory(tmp_path)
-    (tmp_path / "shard.safetensors").write_bytes(b"shard")
-    create.validate_model_directory(tmp_path)
-
-
-def test_hugging_face_cache_shard_symlinks_are_valid(tmp_path: Path) -> None:
-    snapshot = tmp_path / "snapshot"
-    snapshot.mkdir()
-    blob = tmp_path / "cached-blob"
-    blob.write_bytes(b"cached weights")
-    (snapshot / "config.json").write_text("{}")
-    (snapshot / "model.safetensors.index.json").write_text(
-        json.dumps({"weight_map": {"weight": "shard.safetensors"}})
-    )
-    (snapshot / "shard.safetensors").symlink_to(blob)
-    create.validate_model_directory(snapshot)
-
-
 @pytest.mark.parametrize(
     "provider,model",
     [
@@ -408,10 +385,29 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     config = load_config(directory / "config.toml")
     assert isinstance(config, EvaluationExperimentConfig)
     assert config.model.provider == provider
+    assert config.model.base_url is None
+    assert config.model.request_timeout_seconds is None
+    assert config.model.api_key_env is None
     assert (
         config.serving is None and config.resources is None and config.decoding is None
     )
     assert "model stages is not implemented" in (directory / "README.md").read_text()
+
+
+def test_creation_preserves_model_api_settings(creation_request: CreateRequest) -> None:
+    config = load_config(create.latest_template(creation_request.method))
+    assert isinstance(config, ModelExperimentConfig)
+    template = config.model.model_copy(
+        update={
+            "base_url": "http://127.0.0.1:9000/v1",
+            "request_timeout_seconds": 600,
+            "api_key_env": "QORL_TEST_MODEL_KEY",
+        }
+    )
+    model = create.model_settings(creation_request, template)
+    assert model.base_url == template.base_url
+    assert model.request_timeout_seconds == template.request_timeout_seconds
+    assert model.api_key_env == template.api_key_env
 
 
 def test_failed_file_write_removes_only_its_new_directory(

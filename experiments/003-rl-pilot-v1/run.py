@@ -10,7 +10,7 @@ from pathlib import Path
 
 from qorl.adapters.verify import verify_merged_model
 from qorl.measure.schemas import RunStatus
-from qorl.model.model import model_snapshot
+from qorl.model.files import model_snapshot
 from qorl.util.hashing import sha256_file
 
 CONFIG = Path("experiments/003-rl-pilot-v1/train.toml")

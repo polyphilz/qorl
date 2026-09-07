@@ -31,3 +31,6 @@ def test_serving_defaults_do_not_duplicate_dependency_version(
     assert isinstance(config, ModelExperimentConfig)
     assert config.serving is not None
     assert "vllm_version" not in config.serving.model_dump()
+    assert "request_timeout_seconds" not in config.serving.model_dump()
+    assert config.model.request_timeout_seconds == 300
+    assert config.serving.reasoning_parser == "qwen3"

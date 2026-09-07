@@ -39,6 +39,9 @@ def test_default_templates_roundtrip_without_implicit_identities(
         assert config.model.name_or_path == PLACEHOLDER
         assert config.model.revision == PLACEHOLDER
         assert config.model.context_length == 20_480
+        assert config.model.base_url == "http://127.0.0.1:8000/v1"
+        assert config.model.request_timeout_seconds == 300
+        assert config.model.api_key_env is None
         assert config.agent.candidate_attempts == 1
         assert config.measurement.default_timeout_seconds == 300
         assert config.measurement.default_warmups == 1
@@ -50,6 +53,19 @@ def test_default_templates_roundtrip_without_implicit_identities(
     path = tmp_path / "config.toml"
     path.write_text(tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)))
     assert load_config(path) == config
+
+
+@pytest.mark.parametrize("field", ["base_url", "request_timeout_seconds"])
+def test_local_experiment_requires_model_api_settings(field: str) -> None:
+    config = load_config(latest_template(ExperimentMethod.EVAL))
+    assert isinstance(config, ModelExperimentConfig)
+    with pytest.raises(ValidationError, match="local models require model"):
+        type(config).model_validate(
+            {
+                **config.model_dump(),
+                "model": {**config.model.model_dump(), field: None},
+            }
+        )
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,8 @@ provider = "local"
 name_or_path = "FILL_ME_IN"
 revision = "FILL_ME_IN"
 context_length = 20480
+base_url = "http://127.0.0.1:8000/v1"
+request_timeout_seconds = 300
 
 [data.test]
 file = "test-tasks.json"
@@ -43,12 +45,12 @@ host = "127.0.0.1"
 port = 8000
 dtype = "bfloat16"
 tool_call_parser = "qwen3_coder"
+reasoning_parser = "qwen3"
 max_num_seqs = 4
 gpu_memory_utilization = 0.9
 enable_prefix_caching = true
 use_flashinfer_sampler = false
 startup_timeout_seconds = 600
-request_timeout_seconds = 300
 
 [resources]
 serving_gpu_ids = [0]

@@ -13,7 +13,7 @@ from qorl.adapters.config import adapter_config, adapter_rank
 from qorl.adapters.verify import verify_adapter_base, verify_merged_model
 from qorl.agent import QoAgentConfig
 from qorl.measure.schemas import RunStatus
-from qorl.model.model import model_snapshot
+from qorl.model.files import model_snapshot
 from qorl.paths import REPOSITORY_ROOT
 from qorl.serving.serving import ServedModel
 from qorl.sft.schemas import (

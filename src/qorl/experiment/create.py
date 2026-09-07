@@ -24,7 +24,8 @@ from qorl.experiment.schemas import (
     TrainingData,
     load_config,
 )
-from qorl.model.schemas import ModelProvider, ModelSettings, ModelWeightIndex
+from qorl.model.files import validate_model_directory
+from qorl.model.schemas import ModelProvider, ModelSettings
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.config import PostgresConfig
 from qorl.sft.schemas import ImportedGenerationSeeds, PreparedDatasetManifest
@@ -43,8 +44,6 @@ EXPERIMENTS_DIRECTORY = REPOSITORY_ROOT / "experiments"
 EXPERIMENT_NUMBER_WIDTH = 3
 NAME_PATTERN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 REVISION_PATTERN = re.compile(r"[0-9a-fA-F]{40}")
-MODEL_FILES = ("model.safetensors", "pytorch_model.bin")
-MODEL_INDEX_FILES = ("model.safetensors.index.json", "pytorch_model.bin.index.json")
 TASK_FILES = {
     TaskRole.TRAIN: "training-tasks.json",
     TaskRole.VALIDATION: "validation-tasks.json",
@@ -110,34 +109,6 @@ def artifact_file(directory: Path, relative: Path) -> Path:
     return path
 
 
-def validate_model_directory(path: Path) -> None:
-    """Require model config and complete weight files without loading any tensors."""
-    if not path.is_dir() or not (path / "config.json").is_file():
-        raise ValueError(
-            f"complete model directory requires config.json and weights: {path}"
-        )
-    if any((path / filename).is_file() for filename in MODEL_FILES):
-        return
-    for filename in MODEL_INDEX_FILES:
-        index_path = path / filename
-        if index_path.is_file():
-            index = ModelWeightIndex.model_validate_json(index_path.read_bytes())
-            for shard in set(index.weight_map.values()):
-                relative = Path(shard)
-                if (
-                    relative.is_absolute()
-                    or ".." in relative.parts
-                    or not (path / relative).is_file()
-                ):
-                    raise ValueError(
-                        f"missing or invalid model shard: {shard} in {path}"
-                    )
-            return
-    raise ValueError(
-        f"complete model weights missing (adapter-only directories are not bases): {path}"
-    )
-
-
 def model_settings(request: CreateRequest, template: ModelSettings) -> ModelSettings:
     """Resolve a local model or record a pinned remote identity without downloading."""
     name = request.base_model_name_or_path
@@ -184,6 +155,15 @@ def model_settings(request: CreateRequest, template: ModelSettings) -> ModelSett
         revision=revision,
         adapter_path=adapter,
         context_length=template.context_length,
+        base_url=template.base_url
+        if request.model_provider == template.provider
+        else None,
+        request_timeout_seconds=template.request_timeout_seconds
+        if request.model_provider == template.provider
+        else None,
+        api_key_env=template.api_key_env
+        if request.model_provider == template.provider
+        else None,
     )
 
 

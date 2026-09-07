@@ -216,6 +216,13 @@ class ModelExperimentConfig(BaseExperimentConfig):
                 raise ValueError(
                     "local models require serving, decoding, and resources"
                 )
+            if (
+                self.model.base_url is None
+                or self.model.request_timeout_seconds is None
+            ):
+                raise ValueError(
+                    "local models require model.base_url and model.request_timeout_seconds"
+                )
             if self.resources.serving_gpu_ids is None:
                 raise ValueError("local serving requires resources.serving_gpu_ids")
             if self.decoding.max_tokens > self.model.context_length:

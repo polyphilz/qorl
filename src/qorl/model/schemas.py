@@ -1,11 +1,14 @@
-"""Model identities and local decoding settings owned by an experiment."""
+"""Model identities, API access, and local decoding settings owned by an experiment."""
 
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from prime_rl.configs.trainer import AttnImplementation
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+type JsonObject = dict[str, JsonValue]
 
 
 class ModelProvider(StrEnum):
@@ -15,6 +18,8 @@ class ModelProvider(StrEnum):
 
 
 class ModelSettings(BaseModel):
+    """A model identity, with API access fields required when calling the model."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     provider: ModelProvider
@@ -22,6 +27,31 @@ class ModelSettings(BaseModel):
     context_length: int = Field(gt=0)
     revision: str | None = None
     adapter_path: Path | None = None
+    base_url: str | None = None
+    request_timeout_seconds: int | None = Field(default=None, gt=0)
+    api_key_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+    @model_validator(mode="after")
+    def plain_http_address(self) -> Self:
+        """Keep credentials and query parameters out of saved connection URLs."""
+        if self.base_url is None:
+            return self
+        address = urlsplit(self.base_url)
+        _ = (
+            address.port
+        )  # Reject malformed or out-of-range ports during config loading.
+        if (
+            address.scheme not in ("http", "https")
+            or not address.hostname
+            or address.username is not None
+            or address.password is not None
+            or address.query
+            or address.fragment
+        ):
+            raise ValueError(
+                "model.base_url must be an HTTP(S) URL without credentials, query, or fragment"
+            )
+        return self
 
 
 class LocalDecodingSettings(BaseModel):
@@ -35,6 +65,114 @@ class LocalDecodingSettings(BaseModel):
     presence_penalty: float
     repetition_penalty: float = Field(gt=0)
     thinking: bool
+
+
+class FunctionCall(BaseModel):
+    """A model's function name and original, unmodified JSON arguments string."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    arguments: str
+
+
+class ToolCall(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    type: Literal["function"] = "function"
+    function: FunctionCall
+
+
+class MessageRole(StrEnum):
+    SYSTEM = "system"
+    USER = "user"
+    ASSISTANT = "assistant"
+    TOOL = "tool"
+
+
+class Message(BaseModel):
+    """Text/tool conversation shared with the agent and local chat template."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: MessageRole
+    content: str | None = None
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
+    name: str | None = None
+    reasoning_content: str | None = None
+
+
+class ToolFunction(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    description: str
+    parameters: JsonObject
+
+
+class ToolDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["function"] = "function"
+    function: ToolFunction
+
+
+class GenerationRequest(BaseModel):
+    """One model turn; the agent supplies messages and the tools currently allowed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    messages: list[Message]
+    tools: list[ToolDefinition]
+    seed: int | None = None
+
+
+class TokenUsage(BaseModel):
+    """Normalized usage; missing provider counts remain unknown, not zero."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+    cached_tokens: int | None = Field(default=None, ge=0)
+
+
+class GenerationResponse(BaseModel):
+    """Normalized assistant output plus the complete request/response evidence."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    message: Message
+    usage: TokenUsage
+    finish_reason: str
+    truncated: bool
+    prompt_tokens: int = Field(ge=0)
+    requested_max_tokens: int = Field(gt=0)
+    request: JsonObject
+    raw_response: JsonObject
+
+
+class AdvertisedModel(BaseModel):
+    """Identity fields returned by vLLM's model-list endpoint."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    root: str | None = None
+    parent: str | None = None
+    max_model_len: int | None = None
+
+
+class LocalServerIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str
+    model: AdvertisedModel
+    context_model: AdvertisedModel
+    vllm_version: str
 
 
 class ModelWeightIndex(BaseModel):
