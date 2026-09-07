@@ -5,6 +5,17 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class LoraSettings(BaseModel):
+    """LoRA parameters shared by training and adapter export."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    rank: int = Field(ge=1)
+    alpha: float = Field(ge=0)
+    dropout: float = Field(ge=0, le=1)
+    target_modules: list[str] = Field(min_length=1)
+
+
 class AdapterConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True, strict=True)
 

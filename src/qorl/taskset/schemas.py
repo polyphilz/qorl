@@ -3,6 +3,7 @@
 from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -105,6 +106,16 @@ class TaskSelection(BaseModel):
         if len(self.task_ids) != len(set(self.task_ids)):
             raise ValueError("selection contains duplicate task IDs")
         return self
+
+
+class TaskSelectionInput(BaseModel):
+    """Experiment-owned task file and the seed/expression that selected its IDs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    file: Path
+    selection_seed: int
+    expression: str | None = None
 
 
 @dataclass(frozen=True)

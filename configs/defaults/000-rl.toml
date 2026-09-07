@@ -1,0 +1,114 @@
+[experiment]
+name = "FILL_ME_IN"
+method = "rl"
+seed = 42
+
+[postgres]
+path = "FILL_ME_IN"
+
+[pool]
+path = "FILL_ME_IN"
+
+[model]
+provider = "local"
+name_or_path = "FILL_ME_IN"
+revision = "FILL_ME_IN"
+context_length = 20480
+
+[data.training]
+file = "training-tasks.json"
+selection_seed = 42
+expression = "FILL_ME_IN"
+
+[data.validation]
+file = "validation-tasks.json"
+selection_seed = 42
+expression = "FILL_ME_IN"
+
+[training]
+batch_size = 16
+group_size = 4
+max_steps = 100
+max_off_policy_steps = 2
+max_inflight = 4
+
+[training.model]
+implementation = "custom"
+attention = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+compile = false
+
+[lora]
+rank = 16
+alpha = 32.0
+dropout = 0.0
+target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+[optimizer]
+type = "adamw"
+lr = 0.000001
+weight_decay = 0.0
+max_norm = 1.0
+betas1 = 0.9
+betas2 = 0.999
+
+[optimizer.scheduler]
+type = "constant"
+
+[checkpoints]
+type = "interval"
+interval = 5
+keep_last = 2
+keep_interval = 10
+
+[rl.algorithm]
+type = "qorl_anchored_grpo"
+tau = 0.05
+c = 0.10
+d = 0.02
+t = 0.10
+min_peers = 2
+
+[agent]
+candidate_attempts = 1
+maximum_model_turns = 64
+inspection_turns_per_alias = 3
+
+[evaluation]
+rollouts_per_task = 4
+
+[decoding]
+max_tokens = 2048
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repetition_penalty = 1.0
+thinking = false
+
+[serving]
+host = "127.0.0.1"
+port = 8000
+dtype = "bfloat16"
+tool_call_parser = "qwen3_coder"
+max_num_seqs = 4
+gpu_memory_utilization = 0.9
+enable_prefix_caching = true
+use_flashinfer_sampler = false
+startup_timeout_seconds = 600
+request_timeout_seconds = 300
+
+[resources]
+training_gpu_ids = [0]
+serving_gpu_ids = [1]
+
+[measurement]
+default_warmups = 1
+default_measurements = 1
+paired_warmups = 1
+paired_measurements = 3
+default_timeout_seconds = 300.0
+candidate_timeout_floor_seconds = 5.0
+candidate_timeout_multiplier = 3.0

@@ -2721,6 +2721,7 @@ source = { editable = "." }
 dependencies = [
     { name = "prime-rl", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "tomli-w", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "torch", version = "2.13.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "torch", version = "2.13.0+cu130", source = { registry = "https://download.pytorch.org/whl/cu130" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -2743,6 +2744,7 @@ requires-dist = [
     { name = "prime-rl", git = "https://github.com/polyphilz/prime-rl.git?rev=18f8bfa26b7f49862a94c78ad402bae64299e7f8" },
     { name = "prime-rl", extras = ["gpu", "flash-attn"], marker = "sys_platform == 'linux' and extra == 'gpu'", git = "https://github.com/polyphilz/prime-rl.git?rev=18f8bfa26b7f49862a94c78ad402bae64299e7f8" },
     { name = "pydantic", specifier = ">=2.13.5,<3" },
+    { name = "tomli-w", specifier = ">=1.0.0,<2" },
     { name = "torch", specifier = "==2.13.0" },
     { name = "vllm", marker = "sys_platform == 'linux' and extra == 'gpu'", specifier = "==0.28.0" },
 ]

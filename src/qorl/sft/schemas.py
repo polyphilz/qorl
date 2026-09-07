@@ -2,17 +2,109 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    TypeAdapter,
+    model_validator,
+)
 
 from qorl.measure.schemas import Baseline, Candidate, Outcome, RunStatus
+from qorl.model.schemas import ModelProvider, ModelSettings, TrainerModelSettings
+from qorl.taskset.schemas import TaskSelection
 
 type JsonObject = dict[str, JsonValue]
 
 JSON_OBJECT_ADAPTER: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 JSON_OBJECT_LIST_ADAPTER: TypeAdapter[list[JsonObject]] = TypeAdapter(list[JsonObject])
 STRING_LIST_ADAPTER: TypeAdapter[list[str]] = TypeAdapter(list[str])
+GENERATOR_MODELS = {
+    ModelProvider.OPENAI: "gpt-6-astra",
+    ModelProvider.ANTHROPIC: "claude-fable-5-1",
+}
+
+
+class SftTrainingSettings(BaseModel):
+    """Epochs and packed-row batch sizes, not original conversation counts."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    epochs: int = Field(ge=1)
+    batch_size: int = Field(ge=1)
+    micro_batch_size: int = Field(ge=1)
+    num_workers: int = Field(ge=1)
+    model: TrainerModelSettings
+
+    @model_validator(mode="after")
+    def whole_microbatches(self) -> Self:
+        """An optimizer batch contains whole microbatches of packed rows."""
+        if self.batch_size % self.micro_batch_size:
+            raise ValueError(
+                "training.batch_size must be divisible by micro_batch_size"
+            )
+        return self
+
+
+class GenerationSettings(BaseModel):
+    """Explicit hosted generator; acceptance policy is gated on plan 032."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: ModelSettings | Literal["FILL_ME_IN"]
+    generations_per_task: Annotated[int, Field(ge=1)] | Literal["FILL_ME_IN"]
+
+    @model_validator(mode="after")
+    def hosted_generator(self) -> Self:
+        """Generation uses a hosted model, never the trainee or a local adapter."""
+        if isinstance(self.model, ModelSettings):
+            if self.model.provider == ModelProvider.LOCAL:
+                raise ValueError("SFT generation requires an OpenAI or Anthropic model")
+            if self.model.name_or_path != GENERATOR_MODELS[self.model.provider]:
+                raise ValueError(
+                    "SFT generation supports only GPT-6 Astra or Claude Fable 5.1"
+                )
+            if self.model.revision is not None or self.model.adapter_path is not None:
+                raise ValueError(
+                    "hosted generators do not accept revisions or adapters"
+                )
+        return self
+
+
+class PreparedDatasetSplit(BaseModel):
+    """Frozen task IDs and original seeds accompanying one conversation split."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    selection: TaskSelection
+    selection_seed: int
+    generation_seed: int
+    selection_expression: str | None = None
+    conversations: Path
+
+
+class PreparedDatasetManifest(BaseModel):
+    """manifest.json in a reusable QORL conversation artifact, before token packing."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1]
+    format: Literal["qorl-conversations"]
+    training: PreparedDatasetSplit
+    validation: PreparedDatasetSplit
+    tools: Path
+
+
+class ImportedGenerationSeeds(BaseModel):
+    """Keep source generation seeds distinct from a new experiment's seed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    training: int
+    validation: int
 
 
 class SamplingMode(StrEnum):

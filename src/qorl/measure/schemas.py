@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from qorl.postgres.schemas import ExplainResult
 
@@ -15,6 +15,31 @@ INVALID_ATTEMPT_PENALTY = 0.10
 DUPLICATE_ATTEMPT_PENALTY = 0.05
 TIMEOUT_ATTEMPT_PENALTY = 0.10
 NO_VALID_CANDIDATE_REWARD = -3.0
+MIN_CALIBRATION_RUNS = 2
+
+
+class RolloutMeasurementSettings(BaseModel):
+    """Initial baseline and final paired timings, with per-statement timeouts."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    default_warmups: int = Field(ge=0)
+    default_measurements: int = Field(ge=1)
+    paired_warmups: int = Field(ge=0)
+    paired_measurements: int = Field(ge=1)
+    default_timeout_seconds: float = Field(gt=0)
+    candidate_timeout_floor_seconds: float = Field(gt=0)
+    candidate_timeout_multiplier: float = Field(gt=0)
+
+
+class CalibrationSettings(BaseModel):
+    """Adaptive warmups followed by repeated default-query measurements."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    max_warmup_runs: int = Field(ge=MIN_CALIBRATION_RUNS)
+    num_trials: int = Field(ge=MIN_CALIBRATION_RUNS)
+    default_timeout_seconds: float = Field(gt=0)
 
 
 class RunStatus(StrEnum):

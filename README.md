@@ -47,6 +47,38 @@ uv run qorl calibrate \
 The [worker pool guide](docker/worker_pool/README.md) lists resource allocations.
 Pool selection and PostgreSQL settings are independent.
 
+## Create an experiment
+
+Creation writes configuration and resolved task IDs without starting a model or
+database. For example:
+
+```bash
+uv run qorl experiment create --name buffer-study --method calibrate \
+  --tasksets 'test=job' \
+  --postgres-config docker/postgres/configs/000-pgconf-default \
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
+```
+
+The next `experiments/NNN-buffer-study/` contains `config.toml`, `test-tasks.json`,
+`README.md`, and a thin `run.py`. Defaults come from the highest numeric version
+in [`configs/defaults/`](configs/defaults/README.md). The seed defaults to 42.
+
+SFT/RL require `train=...` and `validation=...`, with optional `test=...`.
+Evaluation/calibration require only `test=...`. Splits must have disjoint query
+topologies. Model-based methods require a complete local model directory or a
+Hugging Face ID plus an immutable `--base-model-revision`. Hosted evaluation selects
+`--model-provider openai` or `anthropic`; local evaluation also accepts a separate
+`--adapter-path` without merging it.
+
+SFT `--dataset-from` imports a QORL conversation artifact's saved train/validation
+selections and original seeds. It accepts only an optional new `test=...` selection.
+Without reuse, generator identity and generation count remain explicit placeholders.
+Creation checks artifact metadata and file presence; rendering is gated on 036 Phase 8.
+Shared experiment execution is gated on 036 Phase 3; the generated entrypoint
+reports that gap instead of claiming success.
+
+## Existing execution commands
+
 `--max-warmup-runs` defaults to 5 and `--num-trials` defaults to 20; both must be
 at least 2. Warmups stop early once consecutive plans and buffer counts stabilize.
 Trials are the measured executions after warmup, used for the median and CV.

@@ -5,6 +5,8 @@ import pytest
 
 from qorl import cli
 from qorl.cli import parser
+from qorl.experiment import create
+from qorl.experiment.schemas import CalibrationExperimentConfig, load_config
 
 
 @pytest.mark.parametrize("command", ["calibrate", "run"])
@@ -105,3 +107,79 @@ def test_calibrate_validates_counts_before_running(
     execute.assert_not_called()
     message = capsys.readouterr().err
     assert "at least 2" in message or "invalid int value" in message
+
+
+def test_experiment_create_cli_writes_files_without_running(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(create, "EXPERIMENTS_DIRECTORY", tmp_path / "experiments")
+    execute = Mock(side_effect=AssertionError("creation executed calibration"))
+    monkeypatch.setattr(cli, "calibrate", execute)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "qorl",
+            "experiment",
+            "create",
+            "--name",
+            "small-calibration",
+            "--method",
+            "calibrate",
+            "--tasksets",
+            "test=ceb[2a:1]",
+            "--seed",
+            "123",
+            "--postgres-config",
+            "docker/postgres/configs/000-pgconf-default",
+            "--pool-config",
+            "docker/worker_pool/configs/002-poolconf-4x8",
+        ],
+    )
+    assert cli.main() == 0
+    directory = tmp_path / "experiments/000-small-calibration"
+    config = load_config(directory / "config.toml")
+    assert isinstance(config, CalibrationExperimentConfig)
+    assert config.experiment.seed == 123
+    assert "experiment created" in capsys.readouterr().out
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "flag", ["--name", "--method", "--postgres-config", "--pool-config"]
+)
+def test_creation_required_flags(flag: str) -> None:
+    options = {
+        "--name": "example",
+        "--method": "calibrate",
+        "--postgres-config": "pg",
+        "--pool-config": "pool",
+    }
+    arguments = ["experiment", "create"]
+    for key, value in options.items():
+        if key != flag:
+            arguments.extend([key, value])
+    with pytest.raises(SystemExit) as error:
+        parser().parse_args(arguments)
+    assert error.value.code == 2
+
+
+def test_creation_seed_defaults_to_42() -> None:
+    arguments = parser().parse_args(
+        [
+            "experiment",
+            "create",
+            "--name",
+            "example",
+            "--method",
+            "calibrate",
+            "--postgres-config",
+            "pg",
+            "--pool-config",
+            "pool",
+            "--tasksets",
+            "test=job",
+        ]
+    )
+    assert arguments.seed == 42

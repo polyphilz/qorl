@@ -8,6 +8,7 @@ dependencies = [
     "pydantic>=2.13.5,<3",
     "prime-rl",
     "torch==2.13.0",
+    "tomli-w>=1.0.0,<2",
 ]
 
 [project.optional-dependencies]
