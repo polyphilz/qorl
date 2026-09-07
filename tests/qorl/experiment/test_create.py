@@ -411,7 +411,7 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     assert (
         config.serving is None and config.resources is None and config.decoding is None
     )
-    assert "Phase 6" in (directory / "README.md").read_text()
+    assert "model stages is not implemented" in (directory / "README.md").read_text()
 
 
 def test_failed_file_write_removes_only_its_new_directory(

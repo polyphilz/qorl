@@ -3,11 +3,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from qorl.postgres.schemas import ExplainResult
+from qorl.taskset.schemas import BenchmarkId
+from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
 
 MIN_SCORE = 0.1
 MAX_SCORE = 10.0
@@ -119,6 +121,77 @@ class Measurement(Record):
 
 class QueryObservation(Measurement):
     run: int
+
+
+class CalibrationSummary(BaseModel):
+    """Timing variation and plan identity across measured trials, excluding warmups."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    measurement_count: int
+    warmup_stable: bool
+    median_execution_time_ms: float
+    mean_execution_time_ms: float
+    sample_standard_deviation_ms: float
+    coefficient_of_variation: float | None
+    minimum_execution_time_ms: float
+    maximum_execution_time_ms: float
+    distinct_plan_count: int
+    plan_sha256s: list[str]
+
+
+class CalibrationTaskRecord(BaseModel):
+    """One task's actual executions, including partial evidence on failure."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    schema_version: Literal[2] = 2
+    task_id: str
+    template_id: str
+    completed_at_utc: str
+    statement_timeout_ms: int
+    worker: WorkerManifest
+    warmups: list[QueryObservation]
+    measurements: list[QueryObservation]
+
+
+class CalibratedTask(CalibrationTaskRecord):
+    status: Literal[RunStatus.COMPLETED] = RunStatus.COMPLETED
+    summary: CalibrationSummary
+    representative_explain_analyze: dict[str, JsonValue]
+
+
+class FailedCalibrationTask(CalibrationTaskRecord):
+    status: Literal[RunStatus.FAILED] = RunStatus.FAILED
+    error_type: str
+    error: str
+
+
+type CalibrationTaskResult = Annotated[
+    CalibratedTask | FailedCalibrationTask, Field(discriminator="status")
+]
+
+
+class CalibrationReport(BaseModel):
+    """Progress and applied configuration for one calibration stage."""
+
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    schema_version: Literal[3] = 3
+    benchmark_id: BenchmarkId
+    status: RunStatus
+    started_at_utc: str
+    completed_at_utc: str | None = None
+    measurement: CalibrationSettings
+    statement_timeout_ms: int
+    minimum_warmup_runs: int
+    buffer_stability_relative_tolerance: float
+    plan_fingerprint_version: int
+    worker_pool: PoolManifest | None = None
+    task_count: int
+    completed_task_count: int = 0
+    failed_task_count: int = 0
+    error: str | None = None
 
 
 @dataclass(frozen=True)

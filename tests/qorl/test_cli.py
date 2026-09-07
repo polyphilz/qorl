@@ -6,17 +6,22 @@ import pytest
 from qorl import cli
 from qorl.cli import parser
 from qorl.experiment import create
-from qorl.experiment.schemas import CalibrationExperimentConfig, load_config
+from qorl.experiment.schemas import (
+    CalibrationExperimentConfig,
+    RunRequest,
+    RunStage,
+    load_config,
+)
+from qorl.taskset.schemas import TaskRole
 
 
-@pytest.mark.parametrize("command", ["calibrate", "run"])
 @pytest.mark.parametrize("omitted", ["--postgres-config", "--pool-config"])
-def test_both_config_paths_are_required(command: str, omitted: str) -> None:
+def test_legacy_benchmark_requires_both_config_paths(omitted: str) -> None:
     options = {
         "--postgres-config": "docker/postgres/configs/000-pgconf-default",
         "--pool-config": "docker/worker_pool/configs/001-poolconf-2x16",
     }
-    arguments = [command]
+    arguments = ["run"]
     for flag, path in options.items():
         if flag != omitted:
             arguments.extend([flag, path])
@@ -25,20 +30,7 @@ def test_both_config_paths_are_required(command: str, omitted: str) -> None:
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize(
-    ("command", "run_flags", "max_warmup_runs", "num_trials"),
-    [
-        ("calibrate", [], 5, 20),
-        ("calibrate", ["--max-warmup-runs", "2", "--num-trials", "2"], 2, 2),
-        ("calibrate", ["--max-warmup-runs", "7", "--num-trials", "30"], 7, 30),
-        ("run", [], None, None),
-    ],
-)
-def test_cli_forwards_both_selections(
-    command: str,
-    run_flags: list[str],
-    max_warmup_runs: int | None,
-    num_trials: int | None,
+def test_cli_forwards_legacy_benchmark_config_paths(
     repository_root: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -47,66 +39,76 @@ def test_cli_forwards_both_selections(
     pool = Path("docker/worker_pool/configs/001-poolconf-2x16")
     execute = Mock(return_value=tmp_path)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("QORL_RL_WORKER_POOL_CONFIG", "must-not-be-used")
-    monkeypatch.setattr(
-        cli, "calibrate" if command == "calibrate" else "run_benchmark", execute
-    )
+    monkeypatch.setattr(cli, "run_benchmark", execute)
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "qorl",
-            command,
-            *run_flags,
-            "--postgres-config",
-            str(postgres),
-            "--pool-config",
-            str(pool),
-        ],
+        ["qorl", "run", "--postgres-config", str(postgres), "--pool-config", str(pool)],
     )
     assert cli.main() == 0
-    if command == "calibrate":
-        execute.assert_called_once_with(
-            repository_root,
-            postgres_config_path=postgres,
-            pool_config_path=pool,
-            max_warmup_runs=max_warmup_runs,
-            num_trials=num_trials,
-        )
-    else:
-        execute.assert_called_once_with(
-            repository_root, postgres_config_path=postgres, pool_config_path=pool
-        )
+    execute.assert_called_once_with(
+        repository_root, postgres_config_path=postgres, pool_config_path=pool
+    )
 
 
-@pytest.mark.parametrize("flag", ["--max-warmup-runs", "--num-trials"])
-@pytest.mark.parametrize("value", ["-1", "0", "1", "2.5", "invalid"])
-def test_calibrate_validates_counts_before_running(
-    flag: str,
-    value: str,
+def test_experiment_run_cli_forwards_the_stage_request(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    execute = Mock()
-    monkeypatch.setattr(cli, "calibrate", execute)
+    execute = Mock(return_value=7)
+    monkeypatch.setattr(cli, "launch_experiment", execute)
+    checkpoint = tmp_path / "adapter"
     monkeypatch.setattr(
         "sys.argv",
         [
             "qorl",
-            "calibrate",
-            "--postgres-config",
-            "docker/postgres/configs/000-pgconf-default",
-            "--pool-config",
-            "docker/worker_pool/configs/002-poolconf-4x8",
-            flag,
-            value,
+            "experiment",
+            "run",
+            str(tmp_path),
+            "--stage",
+            "evaluate",
+            "--run",
+            "003",
+            "--checkpoint",
+            str(checkpoint),
+            "--split",
+            "validation",
+            "--resume",
         ],
     )
+    assert cli.main() == 7
+    execute.assert_called_once_with(
+        tmp_path,
+        RunRequest(
+            RunStage.EVALUATE,
+            number=3,
+            checkpoint=checkpoint,
+            split=TaskRole.VALIDATION,
+            resume=True,
+        ),
+    )
+
+
+@pytest.mark.parametrize("number", ["-1", "1.5", "latest", ""])
+def test_run_numbers_are_explicit_nonnegative_integers(number: str) -> None:
     with pytest.raises(SystemExit) as error:
-        cli.main()
+        parser().parse_args(
+            [
+                "experiment",
+                "run",
+                "experiments/example",
+                "--stage",
+                "calibrate",
+                "--run",
+                number,
+            ]
+        )
     assert error.value.code == 2
-    execute.assert_not_called()
-    message = capsys.readouterr().err
-    assert "at least 2" in message or "invalid int value" in message
+
+
+def test_running_requires_an_explicit_stage() -> None:
+    with pytest.raises(SystemExit) as error:
+        parser().parse_args(["experiment", "run", "experiments/example"])
+    assert error.value.code == 2
 
 
 def test_experiment_create_cli_writes_files_without_running(
@@ -116,7 +118,7 @@ def test_experiment_create_cli_writes_files_without_running(
 ) -> None:
     monkeypatch.setattr(create, "EXPERIMENTS_DIRECTORY", tmp_path / "experiments")
     execute = Mock(side_effect=AssertionError("creation executed calibration"))
-    monkeypatch.setattr(cli, "calibrate", execute)
+    monkeypatch.setattr("qorl.experiment.run.calibrate", execute)
     monkeypatch.setattr(
         "sys.argv",
         [

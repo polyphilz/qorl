@@ -27,23 +27,6 @@ On the Linux GPU host, install with `uv sync --frozen --extra gpu` and use
 `uv run --extra gpu` for training and serving commands. A plain `uv sync` removes
 optional GPU packages, so keep `--extra gpu` when syncing that environment.
 
-```bash
-uv run --extra gpu qorl calibrate \
-  --postgres-config docker/postgres/configs/000-pgconf-default \
-  --pool-config docker/worker_pool/configs/002-poolconf-4x8
-```
-
-`calibrate` always measures all 113 JOB queries. It requires explicit PostgreSQL
-and pool configurations, records results and environment identity under
-`outputs/calibration/`, and removes its workers afterward. Select one, two, or four
-containers with `--pool-config`:
-
-```bash
-uv run qorl calibrate \
-  --pool-config docker/worker_pool/configs/001-poolconf-2x16 \
-  --postgres-config docker/postgres/configs/000-pgconf-default
-```
-
 The [worker pool guide](docker/worker_pool/README.md) lists resource allocations.
 Pool selection and PostgreSQL settings are independent.
 
@@ -73,16 +56,45 @@ Hugging Face ID plus an immutable `--base-model-revision`. Hosted evaluation sel
 SFT `--dataset-from` imports a QORL conversation artifact's saved train/validation
 selections and original seeds. It accepts only an optional new `test=...` selection.
 Without reuse, generator identity and generation count remain explicit placeholders.
-Creation checks artifact metadata and file presence; rendering is gated on 036 Phase 8.
-Shared experiment execution is gated on 036 Phase 3; the generated entrypoint
-reports that gap instead of claiming success.
+Creation checks artifact metadata and file presence. Calibration is executable;
+model-based preparation, training, and evaluation stages report that execution
+is not implemented.
+
+## Run a calibration experiment
+
+On the database host, run the experiment directory printed by creation:
+
+```bash
+uv run qorl experiment run experiments/NNN-buffer-study --stage calibrate
+```
+
+The command executes the experiment's `run.py`, which delegates to the shared
+runner. It allocates `outputs/NNN-buffer-study/000/`, prints that path, and copies
+the configuration and resolved task selections there. Calibration records and
+per-worker environment captures go in its `calibration/` directory. Another
+execution allocates `001`, leaving the earlier results untouched.
+
+Only the IDs in `test-tasks.json` are measured; both JOB and CEB are supported.
+Set counts and the per-statement timeout in the experiment's `config.toml`:
+
+```toml
+[measurement]
+max_warmup_runs = 5
+num_trials = 20
+default_timeout_seconds = 300.0
+```
+
+Both counts must be at least two. Warmups stop early when consecutive plans and
+buffer counts stabilize. Trials exclude warmups and supply the median and sample
+coefficient of variation. Every query runs under the configured timeout. Individual
+query failures retain their completed observations and do not stop other tasks;
+the command exits unsuccessfully if any task fails. Workers are closed on exit.
+
+`--run 000` explicitly selects recorded inputs; changed experiment inputs require
+a new run. Existing calibration outputs cannot be overwritten, and calibration
+does not support `--resume`. Start a new run after an interrupted calibration.
 
 ## Existing execution commands
-
-`--max-warmup-runs` defaults to 5 and `--num-trials` defaults to 20; both must be
-at least 2. Warmups stop early once consecutive plans and buffer counts stabilize.
-Trials are the measured executions after warmup, used for the median and CV.
-The selected counts are recorded in the calibration manifest.
 
 `run` loads `experiments/000-vanilla-baseline/run.json`, which selects the
 shared policy in `model/configs/000-modelconf/modelconf.json`. It runs one JOB task per worker,

@@ -6,16 +6,15 @@ from pathlib import Path
 from qorl import __version__
 from qorl.evaluation.benchmark import run_benchmark
 from qorl.experiment.create import create_experiment
+from qorl.experiment.run import (
+    add_run_arguments,
+    launch_experiment,
+    request_from_arguments,
+)
 from qorl.experiment.schemas import (
     DEFAULT_EXPERIMENT_SEED,
     CreateRequest,
     ExperimentMethod,
-)
-from qorl.measure.calibration import (
-    DEFAULT_MAX_WARMUP_RUNS,
-    DEFAULT_NUM_TRIALS,
-    calibrate,
-    validate_run_counts,
 )
 from qorl.model.schemas import ModelProvider
 from qorl.paths import REPOSITORY_ROOT
@@ -26,7 +25,7 @@ def parser() -> argparse.ArgumentParser:
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
     experiment_parser = commands.add_parser(
-        "experiment", help="create experiment configuration and task selections"
+        "experiment", help="create and run experiments"
     )
     experiment_commands = experiment_parser.add_subparsers(
         dest="experiment_command", required=True
@@ -84,35 +83,24 @@ def parser() -> argparse.ArgumentParser:
         required=True,
         help="existing worker pool config directory or poolconf.json",
     )
-    calibrate_parser = commands.add_parser(
-        "calibrate", help="measure PostgreSQL's default plans on all JOB queries"
+    experiment_run = experiment_commands.add_parser(
+        "run", help="execute an experiment's run.py with an explicit stage"
     )
-    calibrate_parser.add_argument(
-        "--max-warmup-runs",
-        type=int,
-        default=DEFAULT_MAX_WARMUP_RUNS,
-        help="maximum warmups per query (minimum: 2; default: %(default)s)",
-    )
-    calibrate_parser.add_argument(
-        "--num-trials",
-        type=int,
-        default=DEFAULT_NUM_TRIALS,
-        help="measured executions per query, excluding warmups (minimum: 2; default: %(default)s)",
-    )
+    experiment_run.add_argument("experiment_directory", type=Path)
+    add_run_arguments(experiment_run)
     run_parser = commands.add_parser("run", help="run the configured policy on JOB")
-    for command in (calibrate_parser, run_parser):
-        command.add_argument(
-            "--postgres-config",
-            type=Path,
-            required=True,
-            help="PostgreSQL config directory",
-        )
-        command.add_argument(
-            "--pool-config",
-            type=Path,
-            required=True,
-            help="worker pool config directory or poolconf.json",
-        )
+    run_parser.add_argument(
+        "--postgres-config",
+        type=Path,
+        required=True,
+        help="PostgreSQL config directory",
+    )
+    run_parser.add_argument(
+        "--pool-config",
+        type=Path,
+        required=True,
+        help="worker pool config directory or poolconf.json",
+    )
     return root
 
 
@@ -122,13 +110,12 @@ def main() -> int:
     if arguments.command is None:
         root.print_help()
         return 0
-    if arguments.command == "calibrate":
-        try:
-            validate_run_counts(arguments.max_warmup_runs, arguments.num_trials)
-        except ValueError as error:
-            root.error(str(error))
     try:
         if arguments.command == "experiment":
+            if arguments.experiment_command == "run":
+                return launch_experiment(
+                    arguments.experiment_directory, request_from_arguments(arguments)
+                )
             output_dir = create_experiment(
                 CreateRequest(
                     name=arguments.name,
@@ -146,14 +133,6 @@ def main() -> int:
             )
             print(f"QORL experiment created: {output_dir}")
             return 0
-        elif arguments.command == "calibrate":
-            output_dir = calibrate(
-                REPOSITORY_ROOT,
-                postgres_config_path=arguments.postgres_config,
-                pool_config_path=arguments.pool_config,
-                max_warmup_runs=arguments.max_warmup_runs,
-                num_trials=arguments.num_trials,
-            )
         else:
             output_dir = run_benchmark(
                 REPOSITORY_ROOT,

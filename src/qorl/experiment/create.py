@@ -323,13 +323,14 @@ def readme(directory: Path, template_path: Path, config: ExperimentConfig) -> st
         source = (
             f"\nDataset input (read-only): `{config.data.dataset_from}`. Original split assignments and seeds are retained.\n"
             if config.data.dataset_from is not None
-            else "\nFill in `data.generation.model` and `generations_per_task`. Generation policy is gated on 032.\n"
+            else "\nDataset generation requires `data.generation.model` and `generations_per_task`.\n"
         )
-    if (
-        isinstance(config, EvaluationExperimentConfig)
-        and config.model.provider != ModelProvider.LOCAL
-    ):
-        source += "\nHosted connection and decoding presets are gated on 036 Phase 6.\n"
+    execution = (
+        "\nEach execution allocates a numbered run and copies its config and task selections. "
+        "Calibration retains partial results on failure; resumption is not supported.\n"
+        if isinstance(config, CalibrationExperimentConfig)
+        else "\nExecution of these model stages is not implemented.\n"
+    )
     return (
         f"# {directory.name}\n\n"
         f"Method: `{config.experiment.method.value}`. Seed: `{config.experiment.seed}`.\n"
@@ -337,7 +338,8 @@ def readme(directory: Path, template_path: Path, config: ExperimentConfig) -> st
         "Task files contain resolved IDs and are not resampled at execution.\n"
         f"Outputs: `outputs/{directory.name}/<run-number>/`.\n"
         + source
-        + "\nExecution is gated on 036 Phase 3. Stage commands:\n\n```bash\n"
+        + execution
+        + "\nStage commands:\n\n```bash\n"
         + "\n".join(commands)
         + "\n```\n"
     )

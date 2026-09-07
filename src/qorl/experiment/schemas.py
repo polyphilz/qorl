@@ -34,6 +34,24 @@ class ExperimentMethod(StrEnum):
     CALIBRATE = "calibrate"
 
 
+class RunStage(StrEnum):
+    PREPARE = "prepare"
+    TRAIN = "train"
+    EVALUATE = "evaluate"
+    CALIBRATE = "calibrate"
+
+
+@dataclass(frozen=True)
+class RunRequest:
+    """An explicitly selected stage and, when supplied, an existing run."""
+
+    stage: RunStage
+    number: int | None = None
+    checkpoint: Path | None = None
+    split: TaskRole | None = None
+    resume: bool = False
+
+
 @dataclass(frozen=True)
 class CreateRequest:
     """Explicit command inputs; creation resolves them into a saved config."""
@@ -295,6 +313,15 @@ type ExperimentConfig = (
     | EvaluationExperimentConfig
     | CalibrationExperimentConfig
 )
+
+
+@dataclass(frozen=True)
+class RunInputs:
+    """Validated experiment-owned configuration and resolved task selections."""
+
+    config: ExperimentConfig
+    selections: dict[TaskRole, TaskSelection]
+
 
 CONFIG_MODELS: dict[ExperimentMethod, type[ExperimentConfig]] = {
     ExperimentMethod.SFT: SftExperimentConfig,
