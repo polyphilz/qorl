@@ -12,12 +12,23 @@ the prepared archive, and verification reports live in ignored `data/`.
 JOB and CEB SQL and task inventories are checked in under `benchmarks/`.
 Benchmark identifiers are `job` and `ceb`; the database fixture identifier is `imdb`.
 
-QORL runs on Linux x86-64 with Python 3.12. The root project installs the library,
-Prime-RL, PyTorch, and vLLM into one environment from one lockfile:
+QORL uses Python 3.12 and one lockfile for macOS ARM64 development and Linux
+x86-64 training. The normal install includes Prime-RL and PyTorch for CPU tests;
+the `gpu` extra adds vLLM, FlashAttention, and the CUDA training dependencies.
+
+For local development:
 
 ```bash
 uv sync --frozen
-uv run qorl calibrate \
+uv run --frozen pytest
+```
+
+On the Linux GPU host, install with `uv sync --frozen --extra gpu` and use
+`uv run --extra gpu` for training and serving commands. A plain `uv sync` removes
+optional GPU packages, so keep `--extra gpu` when syncing that environment.
+
+```bash
+uv run --extra gpu qorl calibrate \
   --postgres-config docker/postgres/configs/000-pgconf-default \
   --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
@@ -51,13 +62,13 @@ OpenAI-compatible vLLM endpoint.
 
 The SFT gate and live-validation runners manage their model servers. A direct `qorl run`
 requires a server matching its selected policy configuration.
-The locked environment uses PyTorch 2.13.0 and vLLM 0.28.0 with CUDA 13.0,
+The Linux GPU environment uses PyTorch 2.13.0 and vLLM 0.28.0 with CUDA 13.0,
 matching `model/configs/002-modelconf/modelconf.json`. Configs 000 and 001 retain
 their vLLM 0.27.1 requirement; their version check rejects this environment,
 including the frozen config selected by the `qorl run` command below.
 
 ```bash
-uv run qorl run \
+uv run --extra gpu qorl run \
   --postgres-config docker/postgres/configs/000-pgconf-default \
   --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
@@ -77,7 +88,7 @@ in `src/qorl/adapters/`. Prime-RL loads the environment, task set, and harness
 through the `qorl` plugin ID. Run all commands from the repository root:
 
 ```bash
-uv run --frozen rl --help
+uv run --frozen --extra gpu rl --help
 uv run --frozen python -m qorl.adapters.merge --help
 uv run --frozen python -m qorl.training.audit.dataset --help
 uv run --frozen pytest
@@ -86,4 +97,5 @@ uv run --frozen ruff format --check .
 uv run --frozen pyright
 ```
 
-The root test suite includes the training and adapter tests.
+The root test suite includes CPU-side training-plugin and adapter tests. Actual
+training, vLLM serving, and benchmark-host integration checks run on Linux.

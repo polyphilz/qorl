@@ -38,6 +38,7 @@ def test_current_model_config_matches_vllm_dependency(repository_root: Path) -> 
     project = tomllib.loads((repository_root / "pyproject.toml").read_text())
 
     config = QoAgentConfig.from_dict(current["policy"])
-    assert f"vllm=={config.vllm_version}" in project["project"]["dependencies"]
+    gpu_dependencies = project["project"]["optional-dependencies"]["gpu"]
+    assert f"vllm=={config.vllm_version} ; sys_platform == 'linux'" in gpu_dependencies
     previous["policy"]["vllm_version"] = config.vllm_version
     assert previous == current
