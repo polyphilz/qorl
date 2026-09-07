@@ -105,7 +105,7 @@ def test_task_run_owns_pool_capture_manifest_and_loop(
     ]
 
 
-def test_task_run_can_leave_capture_to_each_policy(
+def test_task_run_skips_post_capture_and_closes_pool_on_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     postgres_config: PostgresConfig,
@@ -129,13 +129,15 @@ def test_task_run_can_leave_capture_to_each_policy(
         pool_field="database_pool",
         postgres_config=postgres_config,
         pool_config=pool_config,
-        capture_environment=False,
     )
 
-    with task_run:
-        pass
+    with pytest.raises(ValueError, match="task failed"), task_run:
+        raise ValueError("task failed")
 
-    assert not pool.captures
+    assert [(index, phase) for index, _, phase in pool.captures] == [
+        (0, "pre"),
+        (1, "pre"),
+    ]
     assert pool.closed
 
 
@@ -165,7 +167,6 @@ def test_task_run_cancels_pending_tasks_after_an_unhandled_error(
         pool_field="database_pool",
         postgres_config=postgres_config,
         pool_config=pool_config,
-        capture_environment=False,
     )
 
     with task_run, pytest.raises(ValueError, match="unexpected task failure"):

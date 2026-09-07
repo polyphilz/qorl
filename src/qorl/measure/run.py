@@ -34,18 +34,15 @@ class TaskRun:
         *,
         pool_field: str,
         environment_dir: Path | None = None,
-        capture_environment: bool = True,
         postgres_config: PostgresConfig,
         pool_config: PoolConfig,
     ) -> None:
         self.repository = repository
         self.compose_project_name = compose_project_name
-        self.output_dir = output_dir
         self.manifest_path = manifest_path
         self.manifest = manifest
         self.pool_field = pool_field
         self.environment_dir = environment_dir or output_dir
-        self.capture_environment = capture_environment
         self.postgres_config = postgres_config
         self.pool_config = pool_config
         self.pool: ContainerPool | None = None
@@ -66,8 +63,7 @@ class TaskRun:
             )
             self.manifest[self.pool_field] = self.pool.manifest().model_dump()
             self.write()
-            if self.capture_environment:
-                self.capture("pre")
+            self.capture("pre")
         except BaseException:
             self.close()
             raise
@@ -75,7 +71,7 @@ class TaskRun:
 
     def __exit__(self, error_type: object, *_: object) -> None:
         try:
-            if error_type is None and self.capture_environment:
+            if error_type is None:
                 self.capture("post")
         finally:
             self.close()
@@ -90,11 +86,6 @@ class TaskRun:
                 self.environment_dir / f"worker-{slot.resources.index}",
                 phase,
             )
-
-    def finish(self) -> None:
-        if self.capture_environment:
-            self.capture("post")
-        self.close()
 
     def write(self) -> None:
         write_json(self.manifest_path, self.manifest)
