@@ -4,24 +4,21 @@ import tomllib
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Annotated, ClassVar, Literal, Self
+from typing import Annotated, ClassVar, Self
 
-from prime_rl.configs.trainer import AdamWConfig, SchedulerConfig, validate_scheduler
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from qorl.adapters.schemas import LoraSettings
 from qorl.agent.schemas import AgentSettings
 from qorl.evaluation.schemas import EvaluationSettings
 from qorl.measure.schemas import CalibrationSettings, RolloutMeasurementSettings
 from qorl.model.schemas import (
-    AstraDecodingSettings,
-    DecodingSettings,
-    LocalDecodingSettings,
+    AstraInferenceSettings,
+    InferenceSettings,
+    LocalInferenceSettings,
     ModelProvider,
     ModelSettings,
 )
 from qorl.rl.schemas import RlSettings, RlTrainingSettings
-from qorl.serving.schemas import ServingSettings
 from qorl.sft.schemas import (
     GenerationSettings,
     ImportedGenerationSeeds,
@@ -134,40 +131,6 @@ class SftData(TrainingData):
         return self
 
 
-class OptimizerSettings(AdamWConfig):
-    """Use the pinned trainer's AdamW fields and supported scheduler variants."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
-
-    max_norm: float | None = Field(default=None, ge=0)
-    scheduler: SchedulerConfig
-
-
-class CheckpointSettings(BaseModel):
-    """An absent interval means final-only saving, not automatic evaluation."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    type: Literal["final", "interval"]
-    interval: int | None = Field(default=None, ge=1)
-    keep_last: int | None = Field(default=None, ge=1)
-    keep_interval: int | None = Field(default=None, ge=1)
-
-    @model_validator(mode="after")
-    def applicable_schedule(self) -> Self:
-        """Final-only saving has no interval or retention policy."""
-        if self.type == "final" and any(
-            value is not None
-            for value in (self.interval, self.keep_last, self.keep_interval)
-        ):
-            raise ValueError(
-                "final-only checkpoints do not use interval or retention settings"
-            )
-        if self.type == "interval" and self.interval is None:
-            raise ValueError("interval checkpoints require an interval")
-        return self
-
-
 class ResourceSettings(BaseModel):
     """GPU IDs for training and local serving, not database-worker resources."""
 
@@ -210,21 +173,19 @@ class ModelExperimentConfig(BaseExperimentConfig):
     agent: AgentSettings
     evaluation: EvaluationSettings
     measurement: RolloutMeasurementSettings
-    decoding: DecodingSettings
-    serving: ServingSettings | None = None
+    inference: InferenceSettings
     resources: ResourceSettings | None = None
 
     @model_validator(mode="after")
     def applicable_model_settings(self) -> Self:
-        """Require the selected provider's decoding and access settings."""
+        """Require the selected provider's inference and access settings."""
         if self.model.provider == ModelProvider.LOCAL:
             if (
-                self.serving is None
-                or not isinstance(self.decoding, LocalDecodingSettings)
+                not isinstance(self.inference, LocalInferenceSettings)
                 or self.resources is None
             ):
                 raise ValueError(
-                    "local models require serving, decoding, and resources"
+                    "local models require local inference, serving, and resources"
                 )
             if (
                 self.model.base_url is None
@@ -236,13 +197,11 @@ class ModelExperimentConfig(BaseExperimentConfig):
             if self.resources.serving_gpu_ids is None:
                 raise ValueError("local serving requires resources.serving_gpu_ids")
         else:
-            if (
-                self.serving is not None
-                or self.resources is not None
-                or not isinstance(self.decoding, AstraDecodingSettings)
+            if self.resources is not None or not isinstance(
+                self.inference, AstraInferenceSettings
             ):
                 raise ValueError(
-                    "hosted evaluation requires Astra decoding without local serving or GPUs"
+                    "hosted evaluation requires Astra inference without local serving or GPUs"
                 )
             if self.model.name_or_path != "gpt-6-astra":
                 raise ValueError("hosted evaluation supports only gpt-6-astra")
@@ -254,8 +213,8 @@ class ModelExperimentConfig(BaseExperimentConfig):
                 raise ValueError("hosted evaluation requires model API access settings")
             if self.model.revision is not None or self.model.adapter_path is not None:
                 raise ValueError("hosted models do not accept revisions or adapters")
-        if self.decoding.max_tokens > self.model.context_length:
-            raise ValueError("decoding.max_tokens exceeds model.context_length")
+        if self.inference.max_tokens > self.model.context_length:
+            raise ValueError("inference.max_tokens exceeds model.context_length")
         if self.method != ExperimentMethod.EVAL:
             if (
                 self.model.provider != ModelProvider.LOCAL
@@ -276,9 +235,6 @@ class SftExperimentConfig(ModelExperimentConfig):
 
     data: SftData
     training: SftTrainingSettings
-    lora: LoraSettings
-    optimizer: OptimizerSettings
-    checkpoints: CheckpointSettings
 
     @model_validator(mode="after")
     def distributed_microbatches(self) -> Self:
@@ -300,16 +256,7 @@ class RlExperimentConfig(ModelExperimentConfig):
 
     data: TrainingData
     training: RlTrainingSettings
-    lora: LoraSettings
-    optimizer: OptimizerSettings
-    checkpoints: CheckpointSettings
     rl: RlSettings
-
-    @model_validator(mode="after")
-    def learning_rate_schedule(self) -> Self:
-        """Check scheduler phases against the configured optimizer step count."""
-        validate_scheduler(self.optimizer.scheduler, self.training.max_steps)
-        return self
 
     @model_validator(mode="after")
     def separate_training_and_serving(self) -> Self:

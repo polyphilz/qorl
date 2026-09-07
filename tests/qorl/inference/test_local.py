@@ -20,24 +20,24 @@ from qorl.experiment.schemas import (
     ExperimentMethod,
     load_config,
 )
+from qorl.inference import local
+from qorl.inference.local import (
+    ADAPTER_MODEL_NAME,
+    BASE_MODEL_NAME,
+    serve_local_model,
+    server_command,
+)
 from qorl.model.exceptions import ModelError
 from qorl.model.schemas import (
     AdvertisedModel,
     GenerationRequest,
-    LocalDecodingSettings,
+    LocalInferenceSettings,
     LocalServerIdentity,
     Message,
     MessageRole,
     ModelProvider,
     ModelWeightIndex,
     ToolDefinition,
-)
-from qorl.serving import local
-from qorl.serving.local import (
-    ADAPTER_MODEL_NAME,
-    BASE_MODEL_NAME,
-    serve_local_model,
-    server_command,
 )
 
 ADAPTER_RANK = 16
@@ -82,12 +82,9 @@ def adapter(config: EvaluationExperimentConfig, tmp_path: Path) -> Path:
 def test_command_uses_selected_weights_context_gpu_count_and_parsers(
     config: EvaluationExperimentConfig, thinking: bool
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
-    decoding = config.decoding.model_copy(update={"thinking": thinking})
-    command = server_command(config.model, decoding, config.serving, [0, 1])
+    assert isinstance(config.inference, LocalInferenceSettings)
+    inference = config.inference.model_copy(update={"thinking": thinking})
+    command = server_command(config.model, inference, [0, 1])
     assert command[:3] == [sys.executable, "-m", "vllm.entrypoints.openai.api_server"]
     assert command[command.index("--model") + 1] == config.model.name_or_path
     assert command[command.index("--max-model-len") + 1] == str(
@@ -107,10 +104,7 @@ def test_adapter_is_applied_to_its_verified_training_base(
     filename: str,
     sharded: bool,
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     model = config.model.model_copy(update={"adapter_path": adapter})
     base = Path(model.name_or_path)
     (base / "model.safetensors").unlink()
@@ -127,7 +121,7 @@ def test_adapter_is_applied_to_its_verified_training_base(
         )
     else:
         (base / filename).write_bytes(b"base weights")
-    command = server_command(model, config.decoding, config.serving, [0])
+    command = server_command(model, config.inference, [0])
     assert command[command.index("--max-lora-rank") + 1] == str(ADAPTER_RANK)
     assert json.loads(command[command.index("--lora-modules") + 1]) == {
         "name": ADAPTER_MODEL_NAME,
@@ -139,14 +133,17 @@ def test_adapter_is_applied_to_its_verified_training_base(
 def test_unconfigured_parser_is_omitted_when_thinking_is_off(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     command = server_command(
         config.model,
-        config.decoding.model_copy(update={"thinking": False}),
-        config.serving.model_copy(update={"reasoning_parser": None}),
+        config.inference.model_copy(
+            update={
+                "thinking": False,
+                "serving": config.inference.serving.model_copy(
+                    update={"reasoning_parser": None}
+                ),
+            }
+        ),
         [0],
     )
     assert "--reasoning-parser" not in command
@@ -155,10 +152,7 @@ def test_unconfigured_parser_is_omitted_when_thinking_is_off(
 def test_wrong_base_is_rejected_before_any_server_starts(
     config: EvaluationExperimentConfig, adapter: Path, tmp_path: Path
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     other = tmp_path / "wrong-base"
     other.mkdir()
     (other / "config.json").write_text("{}")
@@ -169,16 +163,13 @@ def test_wrong_base_is_rejected_before_any_server_starts(
     with pytest.raises(
         RuntimeError, match="does not match the adapter's training base"
     ):
-        server_command(model, config.decoding, config.serving, [0])
+        server_command(model, config.inference, [0])
 
 
 def test_command_resolves_only_the_pinned_hf_cache_revision(
     config: EvaluationExperimentConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     cache = tmp_path / "cache"
     snapshot = cache / "models--organization--model/snapshots/pinned-revision"
     snapshot.mkdir(parents=True)
@@ -188,13 +179,12 @@ def test_command_resolves_only_the_pinned_hf_cache_revision(
     model = config.model.model_copy(
         update={"name_or_path": "organization/model", "revision": "pinned-revision"}
     )
-    command = server_command(model, config.decoding, config.serving, [0])
+    command = server_command(model, config.inference, [0])
     assert command[command.index("--model") + 1] == str(snapshot)
     with pytest.raises(RuntimeError, match="pinned model snapshot is missing"):
         server_command(
             model.model_copy(update={"revision": "missing"}),
-            config.decoding,
-            config.serving,
+            config.inference,
             [0],
         )
 
@@ -203,26 +193,26 @@ def test_command_resolves_only_the_pinned_hf_cache_revision(
 def test_invalid_gpu_allocation_is_rejected(
     config: EvaluationExperimentConfig, gpu_ids: list[int]
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     with pytest.raises(ValueError, match="GPU IDs"):
-        server_command(config.model, config.decoding, config.serving, gpu_ids)
+        server_command(config.model, config.inference, gpu_ids)
 
 
 def test_thinking_requires_an_explicit_parser(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     with pytest.raises(ValueError, match="reasoning_parser"):
         server_command(
             config.model,
-            config.decoding.model_copy(update={"thinking": True}),
-            config.serving.model_copy(update={"reasoning_parser": None}),
+            config.inference.model_copy(
+                update={
+                    "thinking": True,
+                    "serving": config.inference.serving.model_copy(
+                        update={"reasoning_parser": None}
+                    ),
+                }
+            ),
             [0],
         )
 
@@ -230,15 +220,11 @@ def test_thinking_requires_an_explicit_parser(
 def test_hosted_model_cannot_launch_a_local_server(
     config: EvaluationExperimentConfig,
 ) -> None:
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     with pytest.raises(ValueError, match="hosted models"):
         server_command(
             config.model.model_copy(update={"provider": ModelProvider.OPENAI}),
-            config.decoding,
-            config.serving,
+            config.inference,
             [0],
         )
 
@@ -258,8 +244,7 @@ def test_server_scope_cleans_up_and_checks_real_advertised_paths(
             update={"model": config.model.model_copy(update={"adapter_path": adapter})}
         )
     assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
+        isinstance(config.inference, LocalInferenceSettings)
         and config.model.base_url is not None
     )
     process = MagicMock()
@@ -292,8 +277,7 @@ def test_server_scope_cleans_up_and_checks_real_advertised_paths(
         pytest.raises((ModelError, RuntimeError)) if failure else nullcontext(),
         serve_local_model(
             config.model,
-            config.decoding,
-            config.serving,
+            config.inference,
             [1],
             tmp_path / "logs/server.log",
         ) as model,
@@ -321,16 +305,14 @@ def test_connection_cannot_point_to_another_server(
     config: EvaluationExperimentConfig, tmp_path: Path, endpoint: str
 ) -> None:
     assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
+        isinstance(config.inference, LocalInferenceSettings)
         and config.model.base_url is not None
     )
     with (
         pytest.raises(ValueError, match=r"model\.base_url"),
         serve_local_model(
             config.model.model_copy(update={"base_url": endpoint}),
-            config.decoding,
-            config.serving,
+            config.inference,
             [0],
             tmp_path / "server.log",
         ),
@@ -355,10 +337,7 @@ def test_live_thinking_modes_complete_and_preserve_terminal_tools(
         )
     config = load_config(latest_template(ExperimentMethod.EVAL))
     assert isinstance(config, EvaluationExperimentConfig)
-    assert (
-        isinstance(config.decoding, LocalDecodingSettings)
-        and config.serving is not None
-    )
+    assert isinstance(config.inference, LocalInferenceSettings)
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
@@ -370,19 +349,21 @@ def test_live_thinking_modes_complete_and_preserve_terminal_tools(
             "base_url": f"http://127.0.0.1:{port}/v1",
         }
     )
-    decoding = config.decoding.model_copy(
+    inference = config.inference.model_copy(
         update={
             "thinking": thinking,
             "temperature": 0,
             "max_tokens": LIVE_REASONING_OUTPUT_TOKENS
             if thinking
-            else config.decoding.max_tokens,
+            else config.inference.max_tokens,
+            "serving": config.inference.serving.model_copy(
+                update={"host": "127.0.0.1", "port": port}
+            ),
         }
     )
-    serving = config.serving.model_copy(update={"host": "127.0.0.1", "port": port})
     gpu_ids = [int(os.environ.get("QORL_TEST_GPU_ID", "0"))]
     with serve_local_model(
-        model, decoding, serving, gpu_ids, tmp_path / "server.log"
+        model, inference, gpu_ids, tmp_path / "server.log"
     ) as client:
         assert client.identity is not None
         record_property("server_identity", client.identity.model_dump_json())

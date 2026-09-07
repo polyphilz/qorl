@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 import tomli_w
+from prime_rl.configs.trainer import CosineSchedulerConfig
 
 from qorl.experiment import create
 from qorl.experiment.schemas import (
@@ -24,12 +25,26 @@ from qorl.experiment.schemas import (
     SftExperimentConfig,
     load_config,
 )
-from qorl.model.schemas import ModelPreset, ModelProvider
+from qorl.model.schemas import (
+    AstraInferenceSettings,
+    LocalInferenceSettings,
+    ModelPreset,
+    ModelProvider,
+    ReasoningEffort,
+)
 from qorl.sft.schemas import PreparedDatasetManifest
 from qorl.taskset.schemas import TaskSelection
 from qorl.taskset.taskset import TaskSet
+from qorl.training.schemas import CheckpointSettings
 
 CUSTOM_MODEL_CONCURRENCY = 2
+CUSTOM_RETRY_ATTEMPTS = 5
+CUSTOM_TEMPERATURE = 0.7
+CUSTOM_MAX_NUM_SEQS = 2
+CUSTOM_LORA_RANK = 8
+CUSTOM_LEARNING_RATE = 3e-5
+CUSTOM_CHECKPOINT_INTERVAL = 7
+CUSTOM_ASTRA_MAX_TOKENS = 16_384
 
 
 @pytest.mark.parametrize("method", list(ExperimentMethod))
@@ -72,7 +87,7 @@ def test_creates_each_method(
         assert config.training.epochs == 1
     if isinstance(config, CalibrationExperimentConfig):
         assert (
-            not {"model", "training", "agent", "serving", "resources"}
+            not {"model", "training", "agent", "inference", "resources"}
             & config.model_dump().keys()
         )
     execution.assert_not_called()
@@ -390,8 +405,8 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     assert config.model.base_url == "https://api.openai.com/v1"
     assert config.model.request_timeout_seconds == 600
     assert config.model.api_key_env == "OPENAI_API_KEY"
-    assert config.serving is None and config.resources is None
-    assert config.decoding.model_dump() == {
+    assert config.resources is None
+    assert config.inference.model_dump() == {
         "max_tokens": 32768,
         "reasoning_effort": "medium",
     }
@@ -453,6 +468,143 @@ def test_creation_preserves_custom_model_concurrency(
     config = load_config(directory / "config.toml")
     assert isinstance(config, ModelExperimentConfig)
     assert config.model.max_concurrent_requests == changed.model.max_concurrent_requests
+
+
+@pytest.mark.parametrize(
+    "method", [ExperimentMethod.SFT, ExperimentMethod.RL, ExperimentMethod.EVAL]
+)
+def test_creation_preserves_custom_nested_settings(
+    method: ExperimentMethod,
+    creation_request: CreateRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrency, retries, inference/serving, and nested training values are copied."""
+    defaults = tmp_path / "defaults"
+    shutil.copytree(create.DEFAULTS_DIRECTORY, defaults)
+    monkeypatch.setattr(create, "DEFAULTS_DIRECTORY", defaults)
+    if method == ExperimentMethod.EVAL:
+        creation_request = replace(creation_request, tasksets=("test=job[01:2]",))
+    source = create.latest_template(method)
+    template = load_config(source)
+    assert isinstance(template, ModelExperimentConfig)
+    assert isinstance(template.inference, LocalInferenceSettings)
+    updates: dict[str, object] = {
+        "model": template.model.model_copy(
+            update={
+                "max_concurrent_requests": CUSTOM_MODEL_CONCURRENCY,
+                "retry": template.model.retry.model_copy(
+                    update={"max_attempts": CUSTOM_RETRY_ATTEMPTS}
+                ),
+            }
+        ),
+        "inference": template.inference.model_copy(
+            update={
+                "temperature": CUSTOM_TEMPERATURE,
+                "thinking": True,
+                "serving": template.inference.serving.model_copy(
+                    update={"max_num_seqs": CUSTOM_MAX_NUM_SEQS}
+                ),
+            }
+        ),
+    }
+    if isinstance(template, (SftExperimentConfig, RlExperimentConfig)):
+        updates["training"] = template.training.model_copy(
+            update={
+                "runtime": template.training.runtime.model_copy(
+                    update={"compile": True}
+                ),
+                "lora": template.training.lora.model_copy(
+                    update={"rank": CUSTOM_LORA_RANK}
+                ),
+                "optimizer": template.training.optimizer.model_copy(
+                    update={
+                        "lr": CUSTOM_LEARNING_RATE,
+                        "scheduler": CosineSchedulerConfig.model_validate(
+                            {"type": "cosine", "warmup_steps": 0}
+                        ),
+                    }
+                ),
+                "checkpoints": CheckpointSettings(
+                    type="interval", interval=CUSTOM_CHECKPOINT_INTERVAL
+                ),
+            }
+        )
+    changed = template.model_copy(update=updates)
+    changed = type(changed).model_validate(changed.model_dump())
+    source.write_text(tomli_w.dumps(changed.model_dump(mode="json", exclude_none=True)))
+    directory = create.create_experiment(replace(creation_request, method=method))
+    config = load_config(directory / "config.toml")
+    assert isinstance(config, ModelExperimentConfig)
+    assert config.model.max_concurrent_requests == CUSTOM_MODEL_CONCURRENCY
+    assert config.model.retry == changed.model.retry
+    assert config.inference == changed.inference
+    assert isinstance(config.inference, LocalInferenceSettings)
+    assert config.inference.serving.max_num_seqs == CUSTOM_MAX_NUM_SEQS
+    document = tomllib.loads((directory / "config.toml").read_text())
+    assert document["inference"]["serving"]["max_num_seqs"] == CUSTOM_MAX_NUM_SEQS
+    assert not {"decoding", "serving", "lora", "optimizer", "checkpoints"} & set(
+        document
+    )
+    if isinstance(config, (SftExperimentConfig, RlExperimentConfig)):
+        assert isinstance(changed, (SftExperimentConfig, RlExperimentConfig))
+        assert config.training.runtime == changed.training.runtime
+        assert config.training.lora == changed.training.lora
+        assert config.training.optimizer == changed.training.optimizer
+        assert config.training.checkpoints == changed.training.checkpoints
+        assert document["training"]["optimizer"]["scheduler"]["type"] == "cosine"
+        assert "model" not in document["training"]
+
+
+def test_astra_creation_preserves_preset_inference_without_serving(
+    creation_request: CreateRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    defaults = tmp_path / "defaults"
+    shutil.copytree(create.DEFAULTS_DIRECTORY, defaults)
+    monkeypatch.setattr(create, "DEFAULTS_DIRECTORY", defaults)
+    source = create.latest_config(defaults / "models", "gpt-6-astra")
+    preset = ModelPreset.model_validate(tomllib.loads(source.read_text()))
+    assert isinstance(preset.inference, AstraInferenceSettings)
+    changed = preset.model_copy(
+        update={
+            "model": preset.model.model_copy(
+                update={
+                    "retry": preset.model.retry.model_copy(
+                        update={"max_attempts": CUSTOM_RETRY_ATTEMPTS}
+                    )
+                }
+            ),
+            "inference": preset.inference.model_copy(
+                update={
+                    "max_tokens": CUSTOM_ASTRA_MAX_TOKENS,
+                    "reasoning_effort": ReasoningEffort.HIGH,
+                }
+            ),
+        }
+    )
+    source.write_text(tomli_w.dumps(changed.model_dump(mode="json", exclude_none=True)))
+    directory = create.create_experiment(
+        replace(
+            creation_request,
+            method=ExperimentMethod.EVAL,
+            tasksets=("test=job[01:1]",),
+            model_provider=ModelProvider.OPENAI,
+            base_model_name_or_path="gpt-6-astra",
+            base_model_revision=None,
+        )
+    )
+    config = load_config(directory / "config.toml")
+    assert isinstance(config, EvaluationExperimentConfig)
+    assert config.model.retry == changed.model.retry
+    assert config.inference == changed.inference
+    document = tomllib.loads((directory / "config.toml").read_text())
+    assert document["inference"] == {
+        "max_tokens": CUSTOM_ASTRA_MAX_TOKENS,
+        "reasoning_effort": "high",
+    }
+    assert "resources" not in document
 
 
 def test_failed_file_write_removes_only_its_new_directory(

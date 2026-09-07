@@ -294,8 +294,7 @@ def configure(
             config = config.model_copy(
                 update={
                     "model": preset.model,
-                    "decoding": preset.decoding,
-                    "serving": None,
+                    "inference": preset.inference,
                     "resources": None,
                 }
             )

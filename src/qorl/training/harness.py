@@ -12,7 +12,7 @@ from qorl.agent.schemas import AgentSettings
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
 from qorl.model.client import HttpTransport, LocalModelClient
-from qorl.model.schemas import LocalDecodingSettings, ModelSettings
+from qorl.model.schemas import LocalInferenceSettings, ModelSettings
 from qorl.rl.reward import scalar_reward
 from qorl.rl.schemas import AnchoredGrpoSettings, RlRolloutRecord, RlSettings
 from qorl.training import runtime as shared_runtime
@@ -24,7 +24,7 @@ class QorlHarnessConfig(vf.HarnessConfig):
 
     id: str = "qorl"
     model: ModelSettings | None = None
-    decoding: LocalDecodingSettings | None = None
+    inference: LocalInferenceSettings | None = None
     agent: AgentSettings = AgentSettings(
         candidate_attempts=1,
         maximum_model_turns=64,
@@ -94,10 +94,10 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         data: vf.TaskData,
         cancel: Event,
     ) -> None:
-        model, decoding = self.config.model, self.config.decoding
-        if model is None or decoding is None:
+        model, inference = self.config.model, self.config.inference
+        if model is None or inference is None:
             raise ValueError(
-                "RL execution requires resolved model and decoding settings"
+                "RL execution requires resolved model and inference settings"
             )
         active = shared_runtime.current()
         task_data = QorlTaskData.model_validate(data.model_dump())
@@ -106,7 +106,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         )
         client = LocalModelClient(
             model,
-            decoding,
+            inference,
             served_model_name=ctx.model,
             transport=HttpTransport(
                 model.model_copy(update={"base_url": endpoint.rstrip("/")}),
@@ -118,7 +118,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             client,
             self.config.agent,
             context_length=model.context_length,
-            max_tokens=decoding.max_tokens,
+            max_tokens=inference.max_tokens,
             seed=None,
         )
 

@@ -23,13 +23,14 @@ from qorl.experiment.schemas import (
     ExperimentMethod,
     load_config,
 )
+from qorl.inference.schemas import ServingSettings
 from qorl.model import client
 from qorl.model.client import HttpTransport, LocalModelClient
 from qorl.model.exceptions import ContextBudgetError, ModelError, ModelRequestError
 from qorl.model.schemas import (
     GenerationRequest,
     JsonObject,
-    LocalDecodingSettings,
+    LocalInferenceSettings,
     Message,
     MessageRole,
     ModelProvider,
@@ -129,8 +130,8 @@ def completion(*, truncated: bool = False) -> JsonObject:
 def local_client(
     config: EvaluationExperimentConfig, transport: ScriptedTransport
 ) -> LocalModelClient:
-    assert isinstance(config.decoding, LocalDecodingSettings)
-    return LocalModelClient(config.model, config.decoding, transport=transport)
+    assert isinstance(config.inference, LocalInferenceSettings)
+    return LocalModelClient(config.model, config.inference, transport=transport)
 
 
 def proxy_completion() -> JsonObject:
@@ -165,14 +166,14 @@ def test_proxy_completions_use_the_real_server_for_token_counts(
     config: EvaluationExperimentConfig,
     request_turn: GenerationRequest,
 ) -> None:
-    assert isinstance(config.decoding, LocalDecodingSettings)
+    assert isinstance(config.inference, LocalInferenceSettings)
     proxy = ScriptedTransport([completion()])
     tokenizer = ScriptedTransport(
         [{"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}]
     )
     model = LocalModelClient(
         config.model,
-        config.decoding,
+        config.inference,
         transport=proxy,
         token_transport=tokenizer,
         served_model_name="intercepted-model",
@@ -185,6 +186,25 @@ def test_proxy_completions_use_the_real_server_for_token_counts(
     assert counted["messages"] == result.request["messages"]
     assert counted["model"] == result.request["model"] == "intercepted-model"
     assert "seed" not in result.request
+
+
+def test_server_settings_never_enter_api_payloads(
+    config: EvaluationExperimentConfig, request_turn: GenerationRequest
+) -> None:
+    """inference.serving configures the vLLM process, not generation or counting."""
+    assert isinstance(config.inference, LocalInferenceSettings)
+    count: JsonObject = {"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}
+    transport = ScriptedTransport([count, completion()])
+    local_client(config, transport).generate(request_turn)
+    assert [path for path, _ in transport.calls] == ["../tokenize", "chat/completions"]
+    server_fields = set(ServingSettings.model_fields) | {"serving"}
+    for _, body in transport.calls:
+        assert body is not None
+        assert not server_fields & body.keys()
+    generation = transport.calls[1][1]
+    assert generation is not None
+    assert generation["temperature"] == config.inference.temperature
+    assert generation["max_tokens"] == config.inference.max_tokens
 
 
 def test_real_agent_tools_and_prompt_are_not_rewritten(
@@ -209,9 +229,9 @@ def test_reasoning_and_raw_arguments_survive_tool_continuation(
     thinking: bool,
     reply: Callable[[], JsonObject],
 ) -> None:
-    assert isinstance(config.decoding, LocalDecodingSettings)
+    assert isinstance(config.inference, LocalInferenceSettings)
     config = config.model_copy(
-        update={"decoding": config.decoding.model_copy(update={"thinking": thinking})}
+        update={"inference": config.inference.model_copy(update={"thinking": thinking})}
     )
     count: JsonObject = {"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}
     transport = ScriptedTransport([count, reply(), count, reply()])
@@ -403,12 +423,12 @@ def test_model_rejects_unsafe_or_malformed_addresses(
 def test_clients_require_model_api_settings(
     config: EvaluationExperimentConfig, field: str
 ) -> None:
-    assert isinstance(config.decoding, LocalDecodingSettings)
+    assert isinstance(config.inference, LocalInferenceSettings)
     model = config.model.model_copy(update={field: None})
     with pytest.raises(ValueError, match=field):
         HttpTransport(model)
     with pytest.raises(ValueError, match=field):
-        LocalModelClient(model, config.decoding, transport=ScriptedTransport([]))
+        LocalModelClient(model, config.inference, transport=ScriptedTransport([]))
 
 
 def test_transport_resolves_credentials_only_at_request_time(

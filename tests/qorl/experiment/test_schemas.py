@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -12,11 +13,12 @@ from prime_rl.configs.trainer import (
 )
 from pydantic import ValidationError
 
+from qorl.experiment import create
 from qorl.experiment.create import latest_template
 from qorl.experiment.schemas import (
     PLACEHOLDER,
     CalibrationExperimentConfig,
-    CheckpointSettings,
+    CreateRequest,
     ExperimentMethod,
     ModelExperimentConfig,
     ResourceSettings,
@@ -24,6 +26,7 @@ from qorl.experiment.schemas import (
     SftExperimentConfig,
     load_config,
 )
+from qorl.training.schemas import CheckpointSettings, OptimizerSettings
 
 
 @pytest.mark.parametrize("method", list(ExperimentMethod))
@@ -77,16 +80,16 @@ def test_training_defaults_match_pinned_trainer(
     config = load_config(latest_template(method))
     assert isinstance(config, (SftExperimentConfig, RlExperimentConfig))
     inherited = AdamWConfig()
-    assert config.optimizer.lr == learning_rate
-    assert config.optimizer.weight_decay == 0
-    assert config.optimizer.max_norm == inherited.max_norm
-    assert config.optimizer.betas1 == inherited.betas1
-    assert config.optimizer.betas2 == inherited.betas2
-    assert config.optimizer.scheduler == ConstantSchedulerConfig()
-    assert config.lora.rank == 16
-    assert config.lora.alpha == 32
-    assert config.lora.dropout == 0
-    assert config.lora.target_modules == [
+    assert config.training.optimizer.lr == learning_rate
+    assert config.training.optimizer.weight_decay == 0
+    assert config.training.max_grad_norm == inherited.max_norm
+    assert config.training.optimizer.betas1 == inherited.betas1
+    assert config.training.optimizer.betas2 == inherited.betas2
+    assert config.training.optimizer.scheduler == ConstantSchedulerConfig()
+    assert config.training.lora.rank == 16
+    assert config.training.lora.alpha == 32
+    assert config.training.lora.dropout == 0
+    assert config.training.lora.target_modules == [
         "q_proj",
         "k_proj",
         "v_proj",
@@ -96,21 +99,56 @@ def test_training_defaults_match_pinned_trainer(
         "down_proj",
     ]
     if isinstance(config, SftExperimentConfig):
-        assert config.checkpoints.type == "final"
+        assert config.training.checkpoints.type == "final"
         assert config.training.batch_size == 1
     else:
         assert config.training.batch_size == 16
         assert config.training.group_size == 4
         assert config.training.max_steps == 100
-        assert config.checkpoints.interval == 5
-        assert config.checkpoints.keep_last == 2
-        assert config.checkpoints.keep_interval == 10
+        assert config.training.checkpoints.interval == 5
+        assert config.training.checkpoints.keep_last == 2
+        assert config.training.checkpoints.keep_interval == 10
         inherited_algorithm = QorlAnchoredGRPOAlgoConfig()
         assert config.rl.algorithm.model_dump() == inherited_algorithm.model_dump(
             exclude={"sampling", "expected_group_size"}
         )
         assert config.rl.reward is None
         assert "expected_group_size" not in config.rl.algorithm.model_dump()
+
+
+@pytest.mark.parametrize(
+    "method", [ExperimentMethod.SFT, ExperimentMethod.RL, ExperimentMethod.EVAL]
+)
+@pytest.mark.parametrize(
+    "section", ["decoding", "serving", "lora", "optimizer", "checkpoints"]
+)
+def test_relocated_sections_have_no_top_level_aliases(
+    method: ExperimentMethod, section: str
+) -> None:
+    config = load_config(latest_template(method))
+    assert isinstance(config, ModelExperimentConfig)
+    document = config.model_dump()
+    if section == "decoding":
+        moved = document["inference"]
+    elif section == "serving":
+        moved = document["inference"]["serving"]
+    elif "training" in document:
+        moved = document["training"][section]
+    else:
+        pytest.skip(f"{method.value} templates have no {section} settings")
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        type(config).model_validate({**document, section: moved})
+
+
+@pytest.mark.parametrize("method", [ExperimentMethod.SFT, ExperimentMethod.RL])
+def test_training_runtime_section_replaces_training_model(
+    method: ExperimentMethod,
+) -> None:
+    config = load_config(latest_template(method))
+    assert isinstance(config, (SftExperimentConfig, RlExperimentConfig))
+    training = config.training.model_dump()
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        type(config.training).model_validate({**training, "model": training["runtime"]})
 
 
 def test_unknown_or_irrelevant_sections_are_rejected() -> None:
@@ -122,15 +160,73 @@ def test_unknown_or_irrelevant_sections_are_rejected() -> None:
         )
 
 
-def test_disabling_gradient_clipping_survives_toml_roundtrip(tmp_path: Path) -> None:
-    config = load_config(latest_template(ExperimentMethod.RL))
-    assert isinstance(config, RlExperimentConfig)
+@pytest.mark.parametrize("method", [ExperimentMethod.SFT, ExperimentMethod.RL])
+@pytest.mark.parametrize("limit", [None, 0.0, 1.0, 2.5])
+def test_gradient_clipping_survives_toml_roundtrip(
+    method: ExperimentMethod, limit: float | None, tmp_path: Path
+) -> None:
+    config = load_config(latest_template(method))
+    assert isinstance(config, (SftExperimentConfig, RlExperimentConfig))
     config = config.model_copy(
-        update={"optimizer": config.optimizer.model_copy(update={"max_norm": None})}
+        update={"training": config.training.model_copy(update={"max_grad_norm": limit})}
     )
     path = tmp_path / "config.toml"
     path.write_text(tomli_w.dumps(config.model_dump(mode="json", exclude_none=True)))
     assert load_config(path) == config
+
+
+@pytest.mark.parametrize("method", [ExperimentMethod.SFT, ExperimentMethod.RL])
+@pytest.mark.parametrize("limit", [-1.0, float("nan"), float("inf"), -float("inf")])
+def test_gradient_clipping_rejects_negative_or_nonfinite_limits(
+    method: ExperimentMethod, limit: float
+) -> None:
+    config = load_config(latest_template(method))
+    assert isinstance(config, (SftExperimentConfig, RlExperimentConfig))
+    with pytest.raises(ValidationError, match="max_grad_norm"):
+        type(config.training).model_validate(
+            {**config.training.model_dump(), "max_grad_norm": limit}
+        )
+
+
+def test_optimizer_defaults_match_native_hyperparameters() -> None:
+    optimizer = OptimizerSettings(scheduler=ConstantSchedulerConfig())
+    assert optimizer.model_dump(exclude={"scheduler"}) == AdamWConfig.model_validate(
+        {}
+    ).model_dump(exclude={"max_norm"})
+
+
+@pytest.mark.parametrize("field", ["max_norm", "max_grad_norm"])
+def test_optimizer_does_not_own_gradient_clipping(field: str) -> None:
+    optimizer = OptimizerSettings(scheduler=ConstantSchedulerConfig())
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        OptimizerSettings.model_validate({**optimizer.model_dump(), field: 1.0})
+
+
+@pytest.mark.parametrize("method", [ExperimentMethod.SFT, ExperimentMethod.RL])
+@pytest.mark.parametrize("limit", [None, 2.5])
+def test_creation_preserves_configured_gradient_clipping(
+    method: ExperimentMethod,
+    limit: float | None,
+    creation_request: CreateRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = latest_template(method)
+    config = load_config(source)
+    assert isinstance(config, (SftExperimentConfig, RlExperimentConfig))
+    config = config.model_copy(
+        update={"training": config.training.model_copy(update={"max_grad_norm": limit})}
+    )
+    defaults = tmp_path / "defaults"
+    defaults.mkdir()
+    (defaults / source.name).write_text(
+        tomli_w.dumps(config.model_dump(mode="json", exclude_none=True))
+    )
+    monkeypatch.setattr(create, "DEFAULTS_DIRECTORY", defaults)
+    directory = create.create_experiment(replace(creation_request, method=method))
+    actual = load_config(directory / "config.toml")
+    assert isinstance(actual, (SftExperimentConfig, RlExperimentConfig))
+    assert actual.training.max_grad_norm == limit
 
 
 @pytest.mark.parametrize(
@@ -228,7 +324,13 @@ def test_rl_rejects_scheduler_phases_that_do_not_fit_training(
     assert isinstance(config, RlExperimentConfig)
     config = config.model_copy(
         update={
-            "optimizer": config.optimizer.model_copy(update={"scheduler": scheduler})
+            "training": config.training.model_copy(
+                update={
+                    "optimizer": config.training.optimizer.model_copy(
+                        update={"scheduler": scheduler}
+                    )
+                }
+            )
         }
     )
     path = tmp_path / "config.toml"
@@ -254,7 +356,13 @@ def test_rl_accepts_scheduler_phases_that_fit_training(
     validated = RlExperimentConfig.model_validate(
         {
             **config.model_dump(),
-            "optimizer": config.optimizer.model_copy(update={"scheduler": scheduler}),
+            "training": config.training.model_copy(
+                update={
+                    "optimizer": config.training.optimizer.model_copy(
+                        update={"scheduler": scheduler}
+                    )
+                }
+            ),
         }
     )
-    assert validated.optimizer.scheduler == scheduler
+    assert validated.training.optimizer.scheduler == scheduler

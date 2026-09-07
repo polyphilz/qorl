@@ -32,13 +32,13 @@ from qorl.model.exceptions import (
 )
 from qorl.model.schemas import (
     AdvertisedModel,
-    AstraDecodingSettings,
-    DecodingSettings,
+    AstraInferenceSettings,
     FunctionCall,
     GenerationRequest,
     GenerationResponse,
+    InferenceSettings,
     JsonObject,
-    LocalDecodingSettings,
+    LocalInferenceSettings,
     LocalServerIdentity,
     Message,
     MessageRole,
@@ -240,7 +240,7 @@ class LocalModelClient:
     def __init__(
         self,
         model: ModelSettings,
-        decoding: LocalDecodingSettings,
+        inference: LocalInferenceSettings,
         *,
         transport: ModelTransport | None = None,
         served_model_name: str | None = None,
@@ -252,10 +252,10 @@ class LocalModelClient:
             raise ValueError(
                 "model API calls require model.base_url and model.request_timeout_seconds"
             )
-        if decoding.max_tokens > model.context_length:
-            raise ValueError("decoding.max_tokens exceeds model.context_length")
+        if inference.max_tokens > model.context_length:
+            raise ValueError("inference.max_tokens exceeds model.context_length")
         self.model = model
-        self.decoding = decoding
+        self.inference = inference
         self.base_url = model.base_url
         self.served_model_name = served_model_name or model.name_or_path
         self.transport = transport or HttpTransport(model)
@@ -340,10 +340,11 @@ class LocalModelClient:
             ],
             "tool_choice": "required" if request.tools else "none",
             "parallel_tool_calls": False,
+            # Server settings configure vLLM's process; only sampling fields are sent.
             **JSON_OBJECT.validate_python(
-                self.decoding.model_dump(exclude={"thinking"})
+                self.inference.model_dump(exclude={"thinking", "serving"})
             ),
-            "chat_template_kwargs": {"enable_thinking": self.decoding.thinking},
+            "chat_template_kwargs": {"enable_thinking": self.inference.thinking},
         }
         if request.seed is not None:
             body["seed"] = request.seed
@@ -366,9 +367,9 @@ class LocalModelClient:
             raise ModelError(
                 "tokenizer context length differs from model.context_length"
             )
-        if counted.count + self.decoding.max_tokens > self.model.context_length:
+        if counted.count + self.inference.max_tokens > self.model.context_length:
             raise ContextBudgetError(
-                counted.count, self.decoding.max_tokens, self.model.context_length
+                counted.count, self.inference.max_tokens, self.model.context_length
             )
         raw = self.transport.request("chat/completions", body)
         try:
@@ -400,7 +401,7 @@ class LocalModelClient:
             finish_reason=choice.finish_reason,
             truncated=choice.finish_reason == "length",
             prompt_tokens=counted.count,
-            requested_max_tokens=self.decoding.max_tokens,
+            requested_max_tokens=self.inference.max_tokens,
             request=body,
             raw_response=raw,
         )
@@ -451,7 +452,7 @@ class AstraModelClient:
     def __init__(
         self,
         model: ModelSettings,
-        decoding: AstraDecodingSettings,
+        inference: AstraInferenceSettings,
         *,
         transport: ModelTransport | None = None,
     ) -> None:
@@ -472,12 +473,12 @@ class AstraModelClient:
             )
         if model.context_length > ASTRA_CONTEXT_LIMIT:
             raise ValueError("model.context_length exceeds Astra's context capacity")
-        if decoding.max_tokens > min(model.context_length, ASTRA_OUTPUT_LIMIT):
+        if inference.max_tokens > min(model.context_length, ASTRA_OUTPUT_LIMIT):
             raise ValueError(
-                "decoding.max_tokens exceeds the context or output capacity"
+                "inference.max_tokens exceeds the context or output capacity"
             )
         self.model = model
-        self.decoding = decoding
+        self.inference = inference
         self.transport = transport or HttpTransport(model)
 
     def request_body(self, request: GenerationRequest) -> JsonObject:
@@ -526,8 +527,8 @@ class AstraModelClient:
             ],
             "tool_choice": "required" if request.tools else "none",
             "parallel_tool_calls": False,
-            "reasoning": {"effort": self.decoding.reasoning_effort.value},
-            "max_output_tokens": self.decoding.max_tokens,
+            "reasoning": {"effort": self.inference.reasoning_effort.value},
+            "max_output_tokens": self.inference.max_tokens,
             "store": False,
             "truncation": "disabled",
         }
@@ -548,12 +549,12 @@ class AstraModelClient:
             raise ModelError("OpenAI returned an invalid input token count") from error
         if (
             counted.input_tokens > ASTRA_INPUT_LIMIT
-            or counted.input_tokens + self.decoding.max_tokens
+            or counted.input_tokens + self.inference.max_tokens
             > self.model.context_length
         ):
             raise ContextBudgetError(
                 counted.input_tokens,
-                self.decoding.max_tokens,
+                self.inference.max_tokens,
                 self.model.context_length,
             )
         raw = self.transport.request("responses", body)
@@ -622,20 +623,20 @@ class AstraModelClient:
             finish_reason=finish_reason,
             truncated=reply.status == "incomplete" and reason == "max_output_tokens",
             prompt_tokens=counted.input_tokens,
-            requested_max_tokens=self.decoding.max_tokens,
+            requested_max_tokens=self.inference.max_tokens,
             request=body,
             raw_response=raw,
         )
 
 
-def model_client(model: ModelSettings, decoding: DecodingSettings) -> ModelClient:
+def model_client(model: ModelSettings, inference: InferenceSettings) -> ModelClient:
     """Select a supported connection without starting a server or making an API call."""
     if model.provider == ModelProvider.LOCAL and isinstance(
-        decoding, LocalDecodingSettings
+        inference, LocalInferenceSettings
     ):
-        return LocalModelClient(model, decoding)
+        return LocalModelClient(model, inference)
     if model.provider == ModelProvider.OPENAI and isinstance(
-        decoding, AstraDecodingSettings
+        inference, AstraInferenceSettings
     ):
-        return AstraModelClient(model, decoding)
-    raise ValueError("decoding settings do not match the model provider")
+        return AstraModelClient(model, inference)
+    raise ValueError("inference settings do not match the model provider")

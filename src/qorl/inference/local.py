@@ -10,13 +10,12 @@ from urllib.parse import urlsplit
 
 from qorl.adapters.config import adapter_rank
 from qorl.adapters.verify import verify_adapter_base
+from qorl.inference.serving import ServedModel
 from qorl.model.client import LocalModelClient
 from qorl.model.exceptions import ModelError
 from qorl.model.files import resolve_model
-from qorl.model.schemas import LocalDecodingSettings, ModelSettings
+from qorl.model.schemas import LocalInferenceSettings, ModelSettings
 from qorl.paths import REPOSITORY_ROOT
-from qorl.serving.schemas import ServingSettings
-from qorl.serving.serving import ServedModel
 
 BASE_MODEL_NAME = "qorl-base"
 ADAPTER_MODEL_NAME = "qorl-adapter"
@@ -24,18 +23,18 @@ ADAPTER_MODEL_NAME = "qorl-adapter"
 
 def server_command(
     model: ModelSettings,
-    decoding: LocalDecodingSettings,
-    serving: ServingSettings,
+    inference: LocalInferenceSettings,
     gpu_ids: list[int],
 ) -> list[str]:
     """Resolve weights and validate adapter provenance before launching vLLM."""
+    serving = inference.serving
     base = resolve_model(model)
     if not gpu_ids or len(gpu_ids) != len(set(gpu_ids)) or min(gpu_ids) < 0:
         raise ValueError("serving requires distinct, nonnegative GPU IDs")
-    if decoding.max_tokens > model.context_length:
-        raise ValueError("decoding.max_tokens exceeds model.context_length")
-    if decoding.thinking and serving.reasoning_parser is None:
-        raise ValueError("thinking requires serving.reasoning_parser")
+    if inference.max_tokens > model.context_length:
+        raise ValueError("inference.max_tokens exceeds model.context_length")
+    if inference.thinking and serving.reasoning_parser is None:
+        raise ValueError("thinking requires inference.serving.reasoning_parser")
     command = [
         sys.executable,
         "-m",
@@ -97,12 +96,12 @@ def server_command(
 @contextmanager
 def serve_local_model(
     model: ModelSettings,
-    decoding: LocalDecodingSettings,
-    serving: ServingSettings,
+    inference: LocalInferenceSettings,
     gpu_ids: list[int],
     log_path: Path,
 ) -> Generator[LocalModelClient]:
     """Own server startup/cleanup and yield a preflight-checked connection."""
+    serving = inference.serving
     if model.base_url is None or model.request_timeout_seconds is None:
         raise ValueError(
             "local serving requires model.base_url and model.request_timeout_seconds"
@@ -120,7 +119,7 @@ def serve_local_model(
         )
     if model.api_key_env is not None:
         raise ValueError("managed local serving does not use an API credential")
-    command = server_command(model, decoding, serving, gpu_ids)
+    command = server_command(model, inference, gpu_ids)
     environment = {
         **os.environ,
         "CUDA_VISIBLE_DEVICES": ",".join(map(str, gpu_ids)),
@@ -128,7 +127,7 @@ def serve_local_model(
     }
     client = LocalModelClient(
         model,
-        decoding,
+        inference,
         served_model_name=ADAPTER_MODEL_NAME if model.adapter_path else BASE_MODEL_NAME,
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -14,7 +14,7 @@ from qorl.agent.tools import agent_tools
 from qorl.model.client import AstraModelClient
 from qorl.model.exceptions import ContextBudgetError, ModelError
 from qorl.model.schemas import (
-    AstraDecodingSettings,
+    AstraInferenceSettings,
     GenerationRequest,
     JsonObject,
     Message,
@@ -100,8 +100,8 @@ def reply() -> JsonObject:
 
 
 def astra(preset: ModelPreset, transport: ScriptedTransport) -> AstraModelClient:
-    assert isinstance(preset.decoding, AstraDecodingSettings)
-    return AstraModelClient(preset.model, preset.decoding, transport=transport)
+    assert isinstance(preset.inference, AstraInferenceSettings)
+    return AstraModelClient(preset.model, preset.inference, transport=transport)
 
 
 def test_preserves_full_responses_output_and_argument_bytes(
@@ -179,7 +179,7 @@ def test_preserves_full_responses_output_and_argument_bytes(
 def test_counts_before_generation_and_never_trims(
     preset: ModelPreset, turn: GenerationRequest, excess: int
 ) -> None:
-    count = preset.model.context_length - preset.decoding.max_tokens + excess
+    count = preset.model.context_length - preset.inference.max_tokens + excess
     transport = ScriptedTransport([{"input_tokens": count}, reply()])
     if excess:
         with pytest.raises(ContextBudgetError):
@@ -248,12 +248,12 @@ def test_provider_failures_are_not_policy_decisions(
     "field,value",
     [("temperature", 1), ("thinking", False), ("reasoning_effort", "none")],
 )
-def test_unsupported_decoding_is_rejected(
+def test_unsupported_inference_settings_are_rejected(
     preset: ModelPreset, field: str, value: str | int | bool
 ) -> None:
     with pytest.raises(ValidationError):
-        AstraDecodingSettings.model_validate(
-            {**preset.decoding.model_dump(), field: value}
+        AstraInferenceSettings.model_validate(
+            {**preset.inference.model_dump(), field: value}
         )
 
 
@@ -277,8 +277,8 @@ def test_live_tool_continuation(
     record_property: Callable[[str, str], None],
 ) -> None:
     """Opt-in paid API check: inspect a synthetic plan, then keep it unchanged."""
-    assert isinstance(preset.decoding, AstraDecodingSettings)
-    client = AstraModelClient(preset.model, preset.decoding)
+    assert isinstance(preset.inference, AstraInferenceSettings)
+    client = AstraModelClient(preset.model, preset.inference)
     tools = [ToolDefinition.model_validate(tool) for tool in agent_tools(["a", "b"])]
     initial = GenerationRequest(
         messages=[

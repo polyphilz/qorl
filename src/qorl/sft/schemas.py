@@ -13,9 +13,15 @@ from pydantic import (
     model_validator,
 )
 
+from qorl.adapters.schemas import LoraSettings
 from qorl.measure.schemas import Baseline, Candidate, RunStatus
-from qorl.model.schemas import ModelProvider, ModelSettings, TrainerModelSettings
+from qorl.model.schemas import ModelProvider, ModelSettings
 from qorl.taskset.schemas import TaskSelection
+from qorl.training.schemas import (
+    CheckpointSettings,
+    OptimizerSettings,
+    TrainingRuntimeSettings,
+)
 
 type JsonObject = dict[str, JsonValue]
 
@@ -36,7 +42,16 @@ class SftTrainingSettings(BaseModel):
     batch_size: int = Field(ge=1)
     micro_batch_size: int = Field(ge=1)
     num_workers: int = Field(ge=1)
-    model: TrainerModelSettings
+    max_grad_norm: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Maximum gradient norm; omission disables clipping, zero does not.",
+    )
+    runtime: TrainingRuntimeSettings
+    lora: LoraSettings
+    optimizer: OptimizerSettings
+    checkpoints: CheckpointSettings
 
     @model_validator(mode="after")
     def whole_microbatches(self) -> Self:

@@ -2,10 +2,16 @@
 
 from typing import Annotated, Literal, Self
 
+from prime_rl.configs.trainer import validate_scheduler
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from qorl.adapters.schemas import LoraSettings
 from qorl.measure.schemas import RolloutRecord
-from qorl.model.schemas import TrainerModelSettings
+from qorl.training.schemas import (
+    CheckpointSettings,
+    OptimizerSettings,
+    TrainingRuntimeSettings,
+)
 from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
 
 
@@ -17,7 +23,16 @@ class RlTrainingSettings(BaseModel):
     max_steps: int = Field(ge=1)
     max_off_policy_steps: int = Field(ge=0)
     max_inflight: int = Field(ge=1)
-    model: TrainerModelSettings
+    max_grad_norm: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="Maximum gradient norm; omission disables clipping, zero does not.",
+    )
+    runtime: TrainingRuntimeSettings
+    lora: LoraSettings
+    optimizer: OptimizerSettings
+    checkpoints: CheckpointSettings
 
     @model_validator(mode="after")
     def whole_groups(self) -> Self:
@@ -26,6 +41,12 @@ class RlTrainingSettings(BaseModel):
             raise ValueError("training.batch_size must be divisible by group_size")
         if self.max_inflight < self.group_size:
             raise ValueError("training.max_inflight must be at least group_size")
+        return self
+
+    @model_validator(mode="after")
+    def learning_rate_schedule(self) -> Self:
+        """Check scheduler phases against the configured optimizer step count."""
+        validate_scheduler(self.optimizer.scheduler, self.max_steps)
         return self
 
 

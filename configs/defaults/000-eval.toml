@@ -36,7 +36,7 @@ inspection_turns_per_alias = 3
 [evaluation]
 rollouts_per_task = 4
 
-[decoding]
+[inference]
 max_tokens = 2048
 temperature = 1.0
 top_p = 1.0
@@ -46,7 +46,7 @@ presence_penalty = 0.0
 repetition_penalty = 1.0
 thinking = false
 
-[serving]
+[inference.serving]
 host = "127.0.0.1"
 port = 8000
 dtype = "bfloat16"

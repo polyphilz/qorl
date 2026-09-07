@@ -55,7 +55,7 @@ Hugging Face ID plus an immutable `--base-model-revision`. Hosted evaluation sel
 
 Local models and Astra use the same agent tools and budgets. Astra uses the
 Responses API and the `OPENAI_API_KEY` environment variable; credentials do not
-belong in experiment files. Creation copies its connection and decoding preset
+belong in experiment files. Creation copies its connection and inference preset
 from `configs/defaults/models/` into the experiment's `config.toml`.
 
 SFT `--dataset-from` imports a QORL conversation artifact's saved train/validation

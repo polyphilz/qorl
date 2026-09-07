@@ -42,32 +42,32 @@ epochs = 1
 batch_size = 1
 micro_batch_size = 1
 num_workers = 1
+max_grad_norm = 1.0
 
-[training.model]
+[training.runtime]
 implementation = "custom"
 attention = "flash_attention_2"
 optimization_dtype = "bfloat16"
 reduce_dtype = "bfloat16"
 compile = false
 
-[lora]
+[training.lora]
 rank = 16
 alpha = 32.0
 dropout = 0.0
 target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
-[optimizer]
+[training.optimizer]
 type = "adamw"
 lr = 0.0001
 weight_decay = 0.0
-max_norm = 1.0
 betas1 = 0.9
 betas2 = 0.999
 
-[optimizer.scheduler]
+[training.optimizer.scheduler]
 type = "constant"
 
-[checkpoints]
+[training.checkpoints]
 type = "final"
 
 [agent]
@@ -78,7 +78,7 @@ inspection_turns_per_alias = 3
 [evaluation]
 rollouts_per_task = 4
 
-[decoding]
+[inference]
 max_tokens = 2048
 temperature = 1.0
 top_p = 1.0
@@ -88,7 +88,7 @@ presence_penalty = 0.0
 repetition_penalty = 1.0
 thinking = false
 
-[serving]
+[inference.serving]
 host = "127.0.0.1"
 port = 8000
 dtype = "bfloat16"

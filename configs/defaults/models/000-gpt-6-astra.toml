@@ -12,6 +12,6 @@ max_attempts = 3
 initial_delay_seconds = 2.0
 maximum_delay_seconds = 30.0
 
-[decoding]
+[inference]
 max_tokens = 32768
 reasoning_effort = "medium"

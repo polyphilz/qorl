@@ -1,12 +1,13 @@
-"""Model identities, API access, and local decoding settings owned by an experiment."""
+"""Model identities, API access, and inference settings owned by an experiment."""
 
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
-from prime_rl.configs.trainer import AttnImplementation
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+from qorl.inference.schemas import ServingSettings
 
 type JsonObject = dict[str, JsonValue]
 
@@ -71,7 +72,9 @@ class ModelSettings(BaseModel):
         return self
 
 
-class LocalDecodingSettings(BaseModel):
+class LocalInferenceSettings(BaseModel):
+    """Generation settings sent to the local server, plus that server's own settings."""
+
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     max_tokens: int = Field(gt=0)
@@ -82,6 +85,7 @@ class LocalDecodingSettings(BaseModel):
     presence_penalty: float
     repetition_penalty: float = Field(gt=0)
     thinking: bool
+    serving: ServingSettings
 
 
 class ReasoningEffort(StrEnum):
@@ -92,7 +96,7 @@ class ReasoningEffort(StrEnum):
     MAX = "max"
 
 
-class AstraDecodingSettings(BaseModel):
+class AstraInferenceSettings(BaseModel):
     """Astra supports reasoning effort, not custom sampling or thinking-off knobs."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -101,16 +105,16 @@ class AstraDecodingSettings(BaseModel):
     reasoning_effort: ReasoningEffort
 
 
-type DecodingSettings = LocalDecodingSettings | AstraDecodingSettings
+type InferenceSettings = LocalInferenceSettings | AstraInferenceSettings
 
 
 class ModelPreset(BaseModel):
-    """Connection and decoding values copied into an experiment at creation."""
+    """Connection and inference values copied into an experiment at creation."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: ModelSettings
-    decoding: DecodingSettings
+    inference: InferenceSettings
 
 
 class FunctionCall(BaseModel):
@@ -237,27 +241,3 @@ class ModelWeightIndex(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     weight_map: dict[str, str] = Field(min_length=1)
-
-
-class TrainerModelSettings(BaseModel):
-    """Weight-update implementation settings, separate from model identity."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    implementation: Literal["hf", "custom", "auto"]
-    attention: AttnImplementation
-    optimization_dtype: Literal["bfloat16", "float32"]
-    reduce_dtype: Literal["bfloat16", "float32"]
-    compile: bool
-
-    @model_validator(mode="after")
-    def supported_attention(self) -> Self:
-        """FA4, including automatic selection, requires Prime-RL's implementation."""
-        if (
-            self.attention in ("auto", "flash_attention_4")
-            and self.implementation == "hf"
-        ):
-            raise ValueError(
-                "training.model.attention requires implementation='custom' or 'auto'"
-            )
-        return self

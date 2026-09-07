@@ -7,8 +7,8 @@ from unittest.mock import Mock
 import pytest
 from pytest import MonkeyPatch
 
-from qorl.serving import serving
-from qorl.serving.serving import ServedModel
+from qorl.inference import serving
+from qorl.inference.serving import ServedModel
 
 
 class FakeProcess:

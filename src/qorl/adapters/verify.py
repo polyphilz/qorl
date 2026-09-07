@@ -11,9 +11,9 @@ from typing import Any
 
 from qorl.adapters.config import adapter_config, adapter_rank
 from qorl.adapters.schemas import AdapterExportManifest
+from qorl.inference.serving import ServedModel
 from qorl.model.files import model_weights_sha256
 from qorl.paths import REPOSITORY_ROOT
-from qorl.serving.serving import ServedModel
 from qorl.util.hashing import sha256_file
 
 BASE_MODEL = "qorl-base"

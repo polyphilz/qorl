@@ -15,13 +15,14 @@ from qorl.agent.interface import AGENT_INTERFACE_VERSION, AgentInterface
 from qorl.agent.schemas import AgentSettings, AgentTrace
 from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import InspectionExecutor, StopReason
+from qorl.inference.schemas import ServingSettings
 from qorl.measure.schemas import MeasurementStatus
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.model.client import JSON_OBJECT, AstraModelClient, LocalModelClient
 from qorl.model.exceptions import ModelError
 from qorl.model.schemas import (
     JsonObject,
-    LocalDecodingSettings,
+    LocalInferenceSettings,
     MessageRole,
     ModelPreset,
     ModelProvider,
@@ -33,6 +34,18 @@ from qorl.taskset.schemas import Task
 from qorl.worker_pool.exceptions import ContainerError
 
 CONTEXT_LENGTH = 20_480
+SERVING = ServingSettings(
+    host="127.0.0.1",
+    port=8000,
+    dtype="bfloat16",
+    tool_call_parser="qwen3_coder",
+    reasoning_parser="qwen3",
+    max_num_seqs=4,
+    gpu_memory_utilization=0.9,
+    enable_prefix_caching=True,
+    use_flashinfer_sampler=False,
+    startup_timeout_seconds=600,
+)
 OUTPUT_TOKENS = 2_048
 PROMPT_TOKENS = 100
 MODEL_TURNS = 64
@@ -169,7 +182,7 @@ def policy(
         base_url="http://example.test/v1",
         request_timeout_seconds=1,
     )
-    decoding = LocalDecodingSettings(
+    inference = LocalInferenceSettings(
         max_tokens=OUTPUT_TOKENS,
         temperature=1,
         top_p=1,
@@ -178,9 +191,10 @@ def policy(
         presence_penalty=0,
         repetition_penalty=1,
         thinking=False,
+        serving=SERVING,
     )
     return QoAgentPolicy(
-        LocalModelClient(model, decoding, transport=transport),
+        LocalModelClient(model, inference, transport=transport),
         AgentSettings(
             candidate_attempts=attempts,
             maximum_model_turns=turns,
@@ -199,7 +213,7 @@ def test_request_goldens(
         [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
     )
     policy(transport).search(evaluator)
-    # Interface v5: explicit decoding and preserved reasoning in the transport envelope.
+    # Interface v5: explicit inference settings and preserved reasoning in the envelope.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
@@ -505,7 +519,7 @@ def test_astra_continuation_survives_real_tool_loop(
     repository_root: Path,
     evaluator: PlanValidationEvaluator[InspectionExecutor],
 ) -> None:
-    from qorl.model.schemas import AstraDecodingSettings
+    from qorl.model.schemas import AstraInferenceSettings
 
     preset = ModelPreset.model_validate(
         tomllib.loads(
@@ -514,7 +528,7 @@ def test_astra_continuation_survives_real_tool_loop(
             ).read_text()
         )
     )
-    assert isinstance(preset.decoding, AstraDecodingSettings)
+    assert isinstance(preset.inference, AstraInferenceSettings)
     output: list[JsonObject] = [
         {
             "type": "reasoning",
@@ -555,14 +569,14 @@ def test_astra_continuation_survives_real_tool_loop(
     }
     transport = ScriptedTransport([first, second])
     agent = QoAgentPolicy(
-        AstraModelClient(preset.model, preset.decoding, transport=transport),
+        AstraModelClient(preset.model, preset.inference, transport=transport),
         AgentSettings(
             candidate_attempts=1,
             maximum_model_turns=MODEL_TURNS,
             inspection_turns_per_alias=3,
         ),
         context_length=preset.model.context_length,
-        max_tokens=preset.decoding.max_tokens,
+        max_tokens=preset.inference.max_tokens,
         seed=SEED,
     )
     trace = agent.search(evaluator)

@@ -42,7 +42,7 @@ def test_actual_harness_uses_proxy_and_retains_records(
     config = QorlHarnessConfig.model_validate(
         {
             key: defaults[key]
-            for key in ("agent", "measurement", "rl", "model", "decoding")
+            for key in ("agent", "measurement", "rl", "model", "inference")
         }
     )
     assert config.model is not None

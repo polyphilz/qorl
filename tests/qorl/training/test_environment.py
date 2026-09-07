@@ -26,13 +26,13 @@ def test_training_configs_construct_qorl_environment(
     supplied = QorlHarnessConfig.model_validate(
         {
             key: defaults[key]
-            for key in ("agent", "measurement", "rl", "model", "decoding")
+            for key in ("agent", "measurement", "rl", "model", "inference")
         }
     )
     if override_defaults:
         supplied = QorlHarnessConfig(
             model=supplied.model,
-            decoding=supplied.decoding,
+            inference=supplied.inference,
             agent=supplied.agent.model_copy(
                 update={"candidate_attempts": supplied.agent.candidate_attempts + 1}
             ),
