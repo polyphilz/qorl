@@ -9,6 +9,7 @@ import pytest
 
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
+from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.config import load_pool_config
 from qorl.worker_pool.schemas import PoolConfig
 
@@ -18,6 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="session")
 def repository_root() -> Path:
     return ROOT
+
+
+@pytest.fixture(scope="session")
+def benchmark_task_sets(repository_root: Path) -> dict[str, TaskSet]:
+    return {
+        benchmark: TaskSet.load(repository_root, benchmark)
+        for benchmark in ("job", "ceb")
+    }
 
 
 @pytest.fixture

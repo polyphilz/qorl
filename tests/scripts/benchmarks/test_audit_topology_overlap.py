@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from qorl.taskset.taskset import TaskSet
 from scripts.benchmarks import audit_topology_overlap as audit
 from scripts.benchmarks.schemas import (
     JoinEdge,
@@ -124,6 +125,19 @@ def test_reads_job_sql_without_an_inventory(repository_root: Path) -> None:
     topologies = audit.read_topologies(repository_root / "benchmarks/job/queries")
     assert sum(map(len, topologies.values())) == 113
     assert all(path.suffix == ".sql" for paths in topologies.values() for path in paths)
+
+
+@pytest.mark.parametrize("benchmark", ["job", "ceb"])
+def test_catalog_template_topologies_match_every_task(
+    benchmark_task_sets: dict[str, TaskSet], benchmark: str
+) -> None:
+    task_set = benchmark_task_sets[benchmark]
+    for task in task_set.tasks:
+        topology = audit.extract_topology(task_set.load_sql(task), task.sql_path)
+        assert (
+            audit.topology_sha256(topology)
+            == task_set.tasks_metadata[task.template_id].topology_sha256
+        ), task.task_id
 
 
 def test_groups_sql_files_with_matching_topologies(tmp_path: Path) -> None:

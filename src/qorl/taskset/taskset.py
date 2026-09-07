@@ -7,7 +7,13 @@ from pathlib import Path, PurePosixPath
 from pydantic import ValidationError
 
 from qorl.taskset.exceptions import TaskSetError
-from qorl.taskset.schemas import TASKS_ADAPTER, BenchmarkManifest, Task
+from qorl.taskset.schemas import (
+    BenchmarkCatalog,
+    BenchmarkManifest,
+    Task,
+    TaskSelection,
+    TemplateMetadata,
+)
 
 TASK_SET_PATHS = {
     "job": Path("benchmarks/job/tasks.json"),
@@ -23,6 +29,7 @@ class TaskSet:
     inventory_path: Path
     fixture_id: str
     tasks: list[Task]
+    tasks_metadata: dict[str, TemplateMetadata]
 
     @classmethod
     def load(
@@ -30,6 +37,7 @@ class TaskSet:
         repository: Path,
         task_set_id: str,
     ) -> TaskSet:
+        """Load a typed benchmark catalog and check its manifest identity."""
         repository = repository.resolve()
         try:
             relative_path = TASK_SET_PATHS[task_set_id]
@@ -40,7 +48,7 @@ class TaskSet:
             raise TaskSetError(f"required task inventory is missing: {inventory_path}")
 
         try:
-            tasks = TASKS_ADAPTER.validate_json(inventory_path.read_bytes())
+            catalog = BenchmarkCatalog.model_validate_json(inventory_path.read_bytes())
             manifest = BenchmarkManifest.model_validate_json(
                 inventory_path.with_name("manifest.json").read_bytes()
             )
@@ -48,18 +56,29 @@ class TaskSet:
             raise TaskSetError(
                 f"invalid benchmark inventory or manifest: {error}"
             ) from error
-        if manifest.benchmark_id != task_set_id:
-            raise TaskSetError("benchmark manifest references a different benchmark")
-        task_ids = [task.task_id for task in tasks]
-        if len(task_ids) != len(set(task_ids)):
-            raise TaskSetError("task inventory contains duplicate task IDs")
+        if (
+            manifest.benchmark_id != task_set_id
+            or catalog.benchmark_id.value != task_set_id
+        ):
+            raise TaskSetError("catalog or manifest references a different benchmark")
 
         return cls(
             task_set_id=task_set_id,
             inventory_path=inventory_path,
             fixture_id=manifest.fixture_id,
-            tasks=tasks,
+            tasks=catalog.tasks,
+            tasks_metadata=catalog.tasks_metadata,
         )
+
+    def resolve(self, selection: TaskSelection) -> list[Task]:
+        """Resolve saved IDs to catalog records without resampling or reordering."""
+        if selection.benchmark_id.value != self.task_set_id:
+            raise TaskSetError("selection references a different benchmark")
+        tasks_by_id = {task.task_id: task for task in self.tasks}
+        try:
+            return [tasks_by_id[task_id] for task_id in selection.task_ids]
+        except KeyError as error:
+            raise TaskSetError(f"unknown selected task: {error.args[0]}") from error
 
     def load_sql(self, task: Task) -> str:
         """Read a task's SQL and verify it against the recorded checksum."""

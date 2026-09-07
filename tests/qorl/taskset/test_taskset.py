@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from qorl.taskset.exceptions import TaskSetError
+from qorl.taskset.schemas import BenchmarkCatalog, BenchmarkId, TaskSelection
 from qorl.taskset.taskset import TaskSet
 
 
@@ -70,16 +71,19 @@ def test_inventory_requires_a_logical_fixture_id(
 
 
 @pytest.mark.parametrize("benchmark", ["job", "ceb"])
-def test_checked_in_inventory_is_a_plain_task_list(
+def test_checked_in_catalog_metadata_matches_tasks(
     repository_root: Path, benchmark: str
 ) -> None:
     directory = repository_root / "benchmarks" / benchmark
-    records = json.loads((directory / "tasks.json").read_text())
+    catalog = BenchmarkCatalog.model_validate_json(
+        (directory / "tasks.json").read_bytes()
+    )
     manifest = json.loads((directory / "manifest.json").read_text())
     task_set = TaskSet.load(repository_root, benchmark)
 
-    assert isinstance(records, list)
-    assert records == [task.model_dump() for task in task_set.tasks]
+    assert catalog.benchmark_id.value == benchmark
+    assert catalog.tasks == task_set.tasks
+    assert catalog.tasks_metadata == task_set.tasks_metadata
     assert manifest["schema_version"] == 3
     assert set(manifest) == {
         "schema_version",
@@ -100,7 +104,7 @@ def test_checked_in_inventory_is_a_plain_task_list(
         "relation_count",
         "join_predicate_count",
     }
-    assert all(set(record) == expected_fields for record in records)
+    assert all(set(task.model_dump()) == expected_fields for task in catalog.tasks)
     for task in task_set.tasks:
         assert task.table_count == len(task.tables)
         assert task.relation_count == len(task.relations)
@@ -110,7 +114,6 @@ def test_checked_in_inventory_is_a_plain_task_list(
 @pytest.mark.parametrize(
     ("change", "error"),
     [
-        ("wrapper", "valid array"),
         ("duplicate", "duplicate task IDs"),
         ("missing_id", "task_id"),
         ("invalid_relation", "alias"),
@@ -123,7 +126,8 @@ def test_rejects_invalid_inventory(
     source = repository_root / "benchmarks/job"
     target = tmp_path / "benchmarks/job"
     target.mkdir(parents=True)
-    records = json.loads((source / "tasks.json").read_text())[:1]
+    payload = json.loads((source / "tasks.json").read_text())
+    records = payload["tasks"]
     manifest = json.loads((source / "manifest.json").read_text())
     if change == "duplicate":
         records.append(records[0])
@@ -133,9 +137,43 @@ def test_rejects_invalid_inventory(
         records[0]["relations"][0]["alias"] = 1
     elif change == "wrong_benchmark":
         manifest["benchmark_id"] = "ceb"
-    payload = {"tasks": records} if change == "wrapper" else records
     (target / "tasks.json").write_text(json.dumps(payload))
     (target / "manifest.json").write_text(json.dumps(manifest))
 
     with pytest.raises(TaskSetError, match=error):
         TaskSet.load(tmp_path, "job")
+
+
+def test_saved_selection_resolves_in_its_recorded_order(
+    benchmark_task_sets: dict[str, TaskSet], tmp_path: Path
+) -> None:
+    task_set = benchmark_task_sets["job"]
+    expected = list(reversed(task_set.tasks[:3]))
+    selection = TaskSelection(
+        benchmark_id=BenchmarkId.JOB, task_ids=[task.task_id for task in expected]
+    )
+    path = tmp_path / "test-tasks.json"
+    path.write_text(selection.model_dump_json(indent=2))
+
+    loaded = TaskSelection.model_validate_json(path.read_bytes())
+
+    assert task_set.resolve(loaded) == expected
+    assert task_set.load_sql(task_set.resolve(loaded)[0]).lstrip().startswith("SELECT")
+
+
+@pytest.mark.parametrize(
+    ("benchmark_id", "task_id", "error"),
+    [
+        (BenchmarkId.CEB, "ceb-1a-unknown", "different benchmark"),
+        (BenchmarkId.JOB, "job-unknown", "unknown selected task: job-unknown"),
+    ],
+)
+def test_resolve_rejects_invalid_selection(
+    benchmark_task_sets: dict[str, TaskSet],
+    benchmark_id: BenchmarkId,
+    task_id: str,
+    error: str,
+) -> None:
+    selection = TaskSelection(benchmark_id=benchmark_id, task_ids=[task_id])
+    with pytest.raises(TaskSetError, match=error):
+        benchmark_task_sets["job"].resolve(selection)
