@@ -89,8 +89,8 @@ def saved_rollouts(output: Path) -> list[EvaluationRollout]:
 @pytest.mark.parametrize(
     "mode,kind,executions,valid,novel",
     [
-        ("measured", OutcomeKind.MEASURED, 10, 1, 1),
-        ("non_novel", OutcomeKind.MEASURED, 10, 1, 0),
+        ("measured", OutcomeKind.MEASURED, 12, 1, 1),
+        ("non_novel", OutcomeKind.MEASURED, 12, 1, 0),
         ("duplicate", OutcomeKind.DEFAULT_DUPLICATE, 2, 1, 0),
         ("keep", OutcomeKind.KEPT_DEFAULT, 2, 0, 0),
         ("invalid", OutcomeKind.NO_VALID_CANDIDATE, 2, 0, 0),

@@ -17,17 +17,27 @@ ROLLOUT_SCHEMA_VERSION = 2
 
 
 class RolloutMeasurementSettings(BaseModel):
-    """Initial baseline and final paired timings, with per-statement timeouts."""
+    """Initial, optional feedback, and final paired timings with statement timeouts."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     default_warmups: int = Field(ge=0)
     default_measurements: int = Field(ge=1)
+    candidate_feedback_warmups: int = Field(default=0, ge=0)
+    candidate_feedback_measurements: int = Field(default=0, ge=0)
     paired_warmups: int = Field(ge=0)
     paired_measurements: int = Field(ge=1)
     default_timeout_seconds: float = Field(gt=0)
     candidate_timeout_floor_seconds: float = Field(gt=0)
     candidate_timeout_multiplier: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def coherent_feedback(self) -> Self:
+        if self.candidate_feedback_warmups and not self.candidate_feedback_measurements:
+            raise ValueError(
+                "candidate feedback warmups require feedback measurements; use 0+0 to disable"
+            )
+        return self
 
 
 class CalibrationSettings(BaseModel):
@@ -89,6 +99,46 @@ class Measurement(Record):
     plan_sha256: str
     shared_hit_blocks: int = 0
     shared_read_blocks: int = 0
+    analyzed_document: dict[str, JsonValue] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    hint_diagnostics: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+
+class ExecutionFeedback(Record):
+    """Probe evidence; a source reference means these lists contain no new work."""
+
+    status: Literal["collecting", "completed", "timed_out"] = "collecting"
+    source_id: str | None = None
+    warmups: list[Measurement] = Field(default_factory=list[Measurement])
+    measurements: list[Measurement] = Field(default_factory=list[Measurement])
+    timeout_ms: int | None = None
+
+    @model_validator(mode="after")
+    def coherent_evidence(self) -> Self:
+        if self.source_id is not None and (self.warmups or self.measurements):
+            raise ValueError(
+                "reused feedback references its source instead of copying executions"
+            )
+        if self.status == "timed_out" and self.timeout_ms is None:
+            raise ValueError("timed-out feedback requires its cutoff")
+        if (
+            self.status == "completed"
+            and self.source_id is None
+            and not self.measurements
+        ):
+            raise ValueError("completed feedback requires measurements or a source")
+        return self
+
+
+class ExecutionCounts(BaseModel):
+    """Attempted timed SQL statements, including timeouts and infrastructure failures."""
+
+    initial_default: int = Field(default=0, ge=0)
+    candidate_feedback: int = Field(default=0, ge=0)
+    final_paired: int = Field(default=0, ge=0)
 
 
 class QueryObservation(Measurement):
@@ -217,6 +267,9 @@ class Candidate(Record):
     execution_timed_out: bool = False
     timeout_ms: int | None = None
     measurement_status: MeasurementStatus | None = None
+    execution_feedback: ExecutionFeedback | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def feedback(self) -> dict[str, JsonValue]:
         """Expose actionable validation results, not stored hashes or invented timing."""
@@ -391,6 +444,9 @@ class RolloutRecord(Record):
     candidates: list[Candidate]
     final: Outcome | None
     failure: RolloutFailure | None = None
+    execution_counts: ExecutionCounts | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def evidence_matches_outcome(self) -> Self:

@@ -3,7 +3,10 @@
 import json
 from pathlib import Path
 
+import pytest
 from prime_rl.monitors.file.traces import get_annotations_dir, get_trace_stream
+from tests.qorl.measure.test_feedback import ENABLED
+from tests.qorl.measure.test_rollout import ACTION, Worker, evaluator
 from verifiers.v1.configs.agent import AgentConfig
 from verifiers.v1.episode import (
     Episode,
@@ -15,6 +18,8 @@ from verifiers.v1.episode import (
 from verifiers.v1.state import State
 from verifiers.v1.trace import Error, TraceTask
 
+from qorl.postgres.exceptions import PostgresError
+from qorl.postgres.schemas import ExplainResult
 from qorl.rl.report import (
     AnchoredCredit,
     Annotation,
@@ -135,3 +140,67 @@ def test_report_keeps_credit_for_unshipped_groups_and_raw_speedups(
     assert row.assigned_advantage == 0.643
     assert final.optimizer_steps == [2]
     assert final.scalar_reward_hook == "unused for anchored credit (0.0)"
+
+
+def test_report_counts_probe_work_on_unscored_failure(
+    tmp_path: Path, rl_rollout_record: RlRolloutRecord
+) -> None:
+    class FailedProbeWorker(Worker):
+        def explain(
+            self, sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+        ) -> ExplainResult:
+            if (
+                analyze
+                and hint
+                and any(call.analyze and call.candidate for call in self.calls)
+            ):
+                raise PostgresError("connection lost after feedback warmup")
+            return super().explain(sql, timeout_ms, analyze=analyze, hint=hint)
+
+    run = evaluator(FailedProbeWorker(), settings=ENABLED)
+    run.start()
+    with pytest.raises(PostgresError) as caught:
+        run.evaluate(ACTION)
+    failed_record = RlRolloutRecord.model_validate(
+        rl_rollout_record.model_dump()
+        | run.record(caught.value).model_dump()
+        | {"scalar_reward": None}
+    )
+    stream = get_trace_stream(tmp_path)
+    stream.mkdir(parents=True)
+    episodes: list[EpisodeEvidence] = []
+    for index, record in enumerate((rl_rollout_record, failed_record)):
+        episodes.append(
+            EpisodeEvidence(
+                id=f"episode-{index}",
+                ok=record.failure is None,
+                task=TraceTask(
+                    type="QorlTask",
+                    data=QorlTaskData(
+                        task_id=record.task_id, template_id=record.template_id
+                    ),
+                ),
+                group=GroupInfo(id=f"group-{index}"),
+                run=TrainRunInfo(id="native-run", work=TrainWorkInfo(step=1)),
+                traces=[
+                    TraceEvidence(id=f"trace-{index}", info=TraceInfo(qorl=record))
+                ],
+                errors=[]
+                if record.failure is None
+                else [Error(type="PostgresError", message=record.failure.error)],
+            )
+        )
+    (stream / "00000.jsonl").write_text(
+        "\n".join(episode.model_dump_json() for episode in episodes) + "\n"
+    )
+    result = write_report(tmp_path, completed=False, anchored=True)
+    assert result.episode_failure_count == 1
+    assert result.performance.failure_count == 1
+    assert result.performance.execution_counts.candidate_feedback == 2
+    assert (
+        sum(rate for rate in result.outcome_rates.values() if rate is not None) == 1.0
+    )
+    assert result.performance.geometric_mean_speedup == 2.0
+    feedback = failed_record.candidates[0].execution_feedback
+    assert feedback is not None and len(feedback.warmups) == 1
+    assert feedback.warmups[0].analyzed_document is not None

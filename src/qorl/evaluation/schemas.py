@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from qorl.agent.schemas import AgentTrace
 from qorl.agent.types import StopReason
-from qorl.measure.schemas import OutcomeKind, RolloutRecord, RunStatus
+from qorl.measure.schemas import ExecutionCounts, OutcomeKind, RolloutRecord, RunStatus
 from qorl.model.schemas import LocalServerIdentity, ModelSettings, TokenUsage
 from qorl.taskset.schemas import Task, TaskRole, TaskSelection
 from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
@@ -34,6 +34,8 @@ class PerformanceSummary(BaseModel):
     default_workload_time_ms: float
     total_workload_speedup: float | None
     regression_count: int
+    execution_counts: ExecutionCounts = Field(default_factory=ExecutionCounts)
+    execution_accounting_missing: int = 0
 
 
 @dataclass(frozen=True)

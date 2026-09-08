@@ -33,6 +33,7 @@ from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import (
     DefaultDuplicateOutcome,
+    ExecutionCounts,
     KeptDefaultOutcome,
     MeasuredOutcome,
     OutcomeKind,
@@ -80,6 +81,11 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
             ):
                 candidate_time += record.default.median_execution_time_ms
                 default_time += record.default.median_execution_time_ms
+    counts = [
+        record.execution_counts
+        for record in records
+        if record.execution_counts is not None
+    ]
     return PerformanceSummary(
         rollout_count=len(records),
         scored_rollout_count=len(speedups),
@@ -101,6 +107,12 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
         if candidate_time
         else None,
         regression_count=sum(value < 1 for value in speedups),
+        execution_counts=ExecutionCounts(
+            initial_default=sum(item.initial_default for item in counts),
+            candidate_feedback=sum(item.candidate_feedback for item in counts),
+            final_paired=sum(item.final_paired for item in counts),
+        ),
+        execution_accounting_missing=len(records) - len(counts),
     )
 
 

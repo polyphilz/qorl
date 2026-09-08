@@ -4,11 +4,15 @@ import random
 import statistics
 from threading import Event
 
+from pydantic import JsonValue
+
 from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
     Baseline,
     Candidate,
     DefaultDuplicateOutcome,
+    ExecutionCounts,
+    ExecutionFeedback,
     KeptDefaultOutcome,
     MeasuredOutcome,
     MeasuredPlan,
@@ -42,11 +46,13 @@ def measured(result: ExplainResult) -> Measurement:
         plan_sha256=plan_sha256(plan),
         shared_hit_blocks=plan.get("Shared Hit Blocks", 0),
         shared_read_blocks=plan.get("Shared Read Blocks", 0),
+        analyzed_document=result.document,
+        hint_diagnostics=result.hint_diagnostics,
     )
 
 
 class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[ExecutorT]):
-    """Extend plan validation with initial and final timing, never provisional timing."""
+    """Own initial timing, optional candidate probes, and fresh selected final pairs."""
 
     def __init__(
         self,
@@ -72,6 +78,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         self.final: Outcome | None = None
         self.operation = "initial_default_explain"
         self.finalization_started = False
+        self.execution_counts = ExecutionCounts()
 
     def start(self) -> Baseline:
         """Keep every initial execution and derive the uncapped candidate deadline."""
@@ -85,6 +92,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         self.operation = "initial_default_warmup"
         for _ in range(self.measurement.default_warmups):
             self.check_cancelled()
+            self.execution_counts.initial_default += 1
             warmups.append(
                 measured(
                     self.worker.explain(self.sql, self.default_timeout_ms, analyze=True)
@@ -95,6 +103,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         self.operation = "initial_default_measurement"
         for _ in range(self.measurement.default_measurements):
             self.check_cancelled()
+            self.execution_counts.initial_default += 1
             measurements.append(
                 measured(
                     self.worker.explain(self.sql, self.default_timeout_ms, analyze=True)
@@ -125,6 +134,123 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         if self.default is None or self.default.median_execution_time_ms is None:
             raise RuntimeError("rollout baseline has not been measured")
         super().check_attempt()
+
+    def evaluate(self, raw_action: JsonValue) -> Candidate:
+        candidate = super().evaluate(raw_action)
+        if (
+            not candidate.constraints_satisfied
+            or not self.measurement.candidate_feedback_measurements
+        ):
+            return candidate
+        baseline = self.default
+        if baseline is None:
+            raise RuntimeError("rollout baseline has not been measured")
+        feedback = ExecutionFeedback()
+        if candidate.timing_reuse_key == baseline.timing_reuse_key:
+            feedback = ExecutionFeedback(status="completed", source_id="default")
+        else:
+            source = next(
+                (
+                    item
+                    for item in self.candidates[:-1]
+                    if item.timing_reuse_key == candidate.timing_reuse_key
+                    and item.execution_feedback is not None
+                    and item.execution_feedback.status in ("completed", "timed_out")
+                ),
+                None,
+            )
+            if source is not None and source.execution_feedback is not None:
+                feedback = ExecutionFeedback(
+                    status=source.execution_feedback.status,
+                    source_id=source.execution_feedback.source_id
+                    or source.candidate_id,
+                    timeout_ms=source.execution_feedback.timeout_ms,
+                )
+                candidate = candidate.model_copy(
+                    update={
+                        "execution_timed_out": source.execution_timed_out,
+                        "timeout_ms": source.timeout_ms,
+                    }
+                )
+        candidate = candidate.model_copy(update={"execution_feedback": feedback})
+        self.candidates[-1] = candidate
+        if feedback.source_id is not None:
+            return candidate
+        for phase, count, samples in (
+            ("warmup", self.measurement.candidate_feedback_warmups, feedback.warmups),
+            (
+                "measurement",
+                self.measurement.candidate_feedback_measurements,
+                feedback.measurements,
+            ),
+        ):
+            self.operation = f"candidate_feedback_{phase}"
+            for _ in range(count):
+                self.check_cancelled()
+                self.execution_counts.candidate_feedback += 1
+                try:
+                    result = self.worker.explain(
+                        self.sql,
+                        self.timeout_ms,
+                        analyze=True,
+                        hint=candidate.compiled_hint,
+                    )
+                except QueryTimeoutError as error:
+                    candidate = candidate.model_copy(
+                        update={
+                            "execution_feedback": feedback.model_copy(
+                                update={
+                                    "status": "timed_out",
+                                    "timeout_ms": error.timeout_ms,
+                                }
+                            )
+                        }
+                    )
+                    self.candidates[-1] = candidate
+                    self.mark_timeout(candidate, error)
+                    self.check_cancelled()
+                    self.operation = "agent"
+                    return self.candidates[-1]
+                # Lists belong to the already-recorded attempt: cancellation and drift
+                # must not erase the execution that just completed.
+                samples.append(measured(result))
+                self.check_cancelled()
+                self.verify_execution(candidate, result, samples[-1])
+        if (
+            statistics.median(
+                sample.execution_time_ms for sample in feedback.measurements
+            )
+            <= 0
+        ):
+            raise PostgresError(
+                "candidate feedback median execution time must be positive"
+            )
+        candidate = candidate.model_copy(
+            update={
+                "execution_feedback": feedback.model_copy(
+                    update={"status": "completed"}
+                )
+            }
+        )
+        self.candidates[-1] = candidate
+        self.operation = "agent"
+        return candidate
+
+    def verify_execution(
+        self, candidate: Candidate, result: ExplainResult, observation: Measurement
+    ) -> None:
+        verification = verify_action(
+            PlanAction.from_raw(candidate.action, self.catalog).to_wire(),
+            result.document["Plan"],
+            result.hint_diagnostics,
+        )
+        if not verification.valid:
+            raise PostgresError(
+                "candidate hints changed during measurement: "
+                + "; ".join(verification.errors)
+            )
+        if observation.plan_sha256 != candidate.plan_sha256:
+            raise PostgresError("candidate plan changed during measurement")
 
     def select(self, candidate_id: str | None) -> Candidate | None:
         """Auto-select a sole usable attempt; multiple choices require an explicit ID."""
@@ -200,6 +326,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             self.operation = (
                 f"paired_{'warmup' if warmup else 'measurement'}_{role.value}"
             )
+            self.execution_counts.final_paired += 1
             if role == MeasuredPlan.DEFAULT:
                 result = self.worker.explain(
                     self.sql, self.default_timeout_ms, analyze=True
@@ -213,23 +340,14 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
                         hint=candidate.compiled_hint,
                     )
                 except QueryTimeoutError as error:
-                    self.check_cancelled()
                     self.mark_timeout(candidate, error)
+                    self.check_cancelled()
                     return False
             observation = measured(result)
             pairs[-1] = pairs[-1].model_copy(update={role.value: observation})
             self.check_cancelled()
             if role == MeasuredPlan.CANDIDATE:
-                verification = verify_action(
-                    PlanAction.from_raw(candidate.action, self.catalog).to_wire(),
-                    result.document["Plan"],
-                    result.hint_diagnostics,
-                )
-                if not verification.valid:
-                    raise PostgresError(
-                        "candidate hints changed during measurement: "
-                        + "; ".join(verification.errors)
-                    )
+                self.verify_execution(candidate, result, observation)
             expected = (
                 self.default.plan_sha256
                 if role == MeasuredPlan.DEFAULT and self.default is not None
@@ -311,6 +429,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             task_id=self.task.task_id,
             template_id=self.task.template_id,
             measurement=self.measurement,
+            execution_counts=self.execution_counts,
             default=self.default,
             candidates=self.candidates,
             final=self.final if error is None else None,

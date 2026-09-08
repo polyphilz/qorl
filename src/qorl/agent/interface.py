@@ -15,6 +15,7 @@ from qorl.agent.presentation import plan_view
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import AgentEvaluator, ToolName
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.model.schemas import Message, MessageRole, ToolDefinition
 from qorl.postgres.schemas import PlannerSettings, PostgresResourceLimits
 
@@ -52,6 +53,9 @@ class AgentInterface:
         if evaluator.default is None:
             raise RuntimeError("rollout baseline has not been started")
         postgres_settings = evaluator.worker.settings
+        measurement = (
+            evaluator.measurement if isinstance(evaluator, RolloutEvaluator) else None
+        )
         observation = AgentObservation(
             task_id=evaluator.task.task_id,
             sql=evaluator.sql,
@@ -83,6 +87,19 @@ class AgentInterface:
             ),
             candidate_attempts=candidate_attempts,
             candidate_timeout_ms=evaluator.timeout_ms,
+            candidate_feedback_warmups=measurement.candidate_feedback_warmups
+            if measurement is not None
+            else 0,
+            candidate_feedback_measurements=measurement.candidate_feedback_measurements
+            if measurement is not None
+            else 0,
+            execution_mode=(
+                "execution_feedback"
+                if measurement.candidate_feedback_measurements
+                else "final_only"
+            )
+            if measurement is not None
+            else "plan_only",
             turn_budget=TurnBudget(
                 total_model_turns=maximum_model_turns,
                 maximum_inspection_turns=inspection_turn_limit,

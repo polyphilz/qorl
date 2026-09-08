@@ -140,6 +140,9 @@ def test_complete_translation(
     harness = source.env.agent.harness
     assert isinstance(harness, QorlHarnessConfig)
     assert harness.agent == config.agent
+    assert harness.measurement == config.measurement
+    assert harness.measurement.candidate_feedback_warmups == 1
+    assert harness.measurement.candidate_feedback_measurements == 1
     assert harness.model is not None and harness.model.max_concurrent_requests == 8
     assert source.env.timeout.episode is source.env.agent.timeout.rollout is None
 

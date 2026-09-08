@@ -75,7 +75,25 @@
     },
     "measurements": [
       {
+        "analyzed_document": {
+          "Execution Time": 10.0,
+          "Plan": {
+            "Node Type": "Hash Join",
+            "Plans": [
+              {
+                "Alias": "a",
+                "Node Type": "Seq Scan"
+              },
+              {
+                "Alias": "b",
+                "Node Type": "Seq Scan"
+              }
+            ]
+          },
+          "Planning Time": 1.0
+        },
         "execution_time_ms": 10.0,
+        "hint_diagnostics": "",
         "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
         "planning_time_ms": 1.0,
         "shared_hit_blocks": 0,
@@ -104,13 +122,36 @@
     "timing_reuse_key": "96049fe4eb577871b4e2558011f7a401ed999df477888ffbfa109c0f15b8ec71",
     "warmups": [
       {
+        "analyzed_document": {
+          "Execution Time": 10.0,
+          "Plan": {
+            "Node Type": "Hash Join",
+            "Plans": [
+              {
+                "Alias": "a",
+                "Node Type": "Seq Scan"
+              },
+              {
+                "Alias": "b",
+                "Node Type": "Seq Scan"
+              }
+            ]
+          },
+          "Planning Time": 1.0
+        },
         "execution_time_ms": 10.0,
+        "hint_diagnostics": "",
         "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
         "planning_time_ms": 1.0,
         "shared_hit_blocks": 0,
         "shared_read_blocks": 0
       }
     ]
+  },
+  "execution_counts": {
+    "candidate_feedback": 0,
+    "final_paired": 8,
+    "initial_default": 2
   },
   "failure": null,
   "final": {
@@ -121,14 +162,50 @@
       "measurements": [
         {
           "candidate": {
+            "analyzed_document": {
+              "Execution Time": 5.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 5.0,
+            "hint_diagnostics": "HintStateDump: {used hints:Set(seq_page_cost)}, {not used hints:(none)}, {duplicate hints:(none)}, {error hints:(none)}",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
             "shared_read_blocks": 0
           },
           "default": {
+            "analyzed_document": {
+              "Execution Time": 10.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 10.0,
+            "hint_diagnostics": "",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
@@ -141,14 +218,50 @@
         },
         {
           "candidate": {
+            "analyzed_document": {
+              "Execution Time": 5.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 5.0,
+            "hint_diagnostics": "HintStateDump: {used hints:Set(seq_page_cost)}, {not used hints:(none)}, {duplicate hints:(none)}, {error hints:(none)}",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
             "shared_read_blocks": 0
           },
           "default": {
+            "analyzed_document": {
+              "Execution Time": 10.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 10.0,
+            "hint_diagnostics": "",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
@@ -161,14 +274,50 @@
         },
         {
           "candidate": {
+            "analyzed_document": {
+              "Execution Time": 5.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 5.0,
+            "hint_diagnostics": "HintStateDump: {used hints:Set(seq_page_cost)}, {not used hints:(none)}, {duplicate hints:(none)}, {error hints:(none)}",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
             "shared_read_blocks": 0
           },
           "default": {
+            "analyzed_document": {
+              "Execution Time": 10.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 10.0,
+            "hint_diagnostics": "",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
@@ -183,14 +332,50 @@
       "warmups": [
         {
           "candidate": {
+            "analyzed_document": {
+              "Execution Time": 5.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 5.0,
+            "hint_diagnostics": "HintStateDump: {used hints:Set(seq_page_cost)}, {not used hints:(none)}, {duplicate hints:(none)}, {error hints:(none)}",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
             "shared_read_blocks": 0
           },
           "default": {
+            "analyzed_document": {
+              "Execution Time": 10.0,
+              "Plan": {
+                "Node Type": "Hash Join",
+                "Plans": [
+                  {
+                    "Alias": "a",
+                    "Node Type": "Seq Scan"
+                  },
+                  {
+                    "Alias": "b",
+                    "Node Type": "Seq Scan"
+                  }
+                ]
+              },
+              "Planning Time": 1.0
+            },
             "execution_time_ms": 10.0,
+            "hint_diagnostics": "",
             "plan_sha256": "a3eab6673ba79e8b94343b164243ceb7c443f695bba7edba3584d26bc1caba40",
             "planning_time_ms": 1.0,
             "shared_hit_blocks": 0,
@@ -209,6 +394,8 @@
     "timing_reuse_key": "c6f5aaf031d56b9cc43ebea241c7e5195957a22c580ee2f2e66a90d5c6e80022"
   },
   "measurement": {
+    "candidate_feedback_measurements": 0,
+    "candidate_feedback_warmups": 0,
     "candidate_timeout_floor_seconds": 5.0,
     "candidate_timeout_multiplier": 3.0,
     "default_measurements": 1,

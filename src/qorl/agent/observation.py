@@ -59,6 +59,11 @@ class AgentObservation(BaseModel):
     default_median_execution_time_ms: float | None
     candidate_attempts: int
     candidate_timeout_ms: int
+    candidate_feedback_warmups: int = 0
+    candidate_feedback_measurements: int = 0
+    execution_mode: Literal["plan_only", "final_only", "execution_feedback"] = (
+        "plan_only"
+    )
     turn_budget: TurnBudget
     context_budget: ContextBudget | None = Field(
         default=None, exclude_if=lambda value: value is None

@@ -1,4 +1,4 @@
-"""Bounded estimate-only views; source plans and fingerprints remain untouched."""
+"""Bounded plan views distinguish estimates from retained execution observations."""
 
 import json
 
@@ -39,6 +39,38 @@ DETAIL_FIELDS = (
     "Subplan Name",
     "Inner Unique",
 )
+OBSERVED_FIELDS = (
+    "Actual Rows",
+    "Actual Loops",
+    "Shared Hit Blocks",
+    "Shared Read Blocks",
+    "Shared Dirtied Blocks",
+    "Shared Written Blocks",
+    "Local Hit Blocks",
+    "Local Read Blocks",
+    "Local Dirtied Blocks",
+    "Local Written Blocks",
+    "Temp Read Blocks",
+    "Temp Written Blocks",
+    "Sort Method",
+    "Sort Space Used",
+    "Sort Space Type",
+    "Full-sort Groups",
+    "Pre-sorted Groups",
+    "Cache Hits",
+    "Cache Misses",
+    "Cache Evictions",
+    "Cache Overflows",
+    "HashAgg Batches",
+    "Hash Buckets",
+    "Original Hash Buckets",
+    "Hash Batches",
+    "Original Hash Batches",
+    "Peak Memory Usage",
+    "Disk Usage",
+    "Workers Launched",
+    "Workers",
+)
 
 
 class PlanNode(BaseModel):
@@ -47,6 +79,9 @@ class PlanNode(BaseModel):
     child_ids: list[str]
     leaf_aliases: list[str]
     estimates: JsonObject
+    observed: JsonObject | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     omitted_fields: list[str] = Field(default_factory=list)
 
 
@@ -60,7 +95,11 @@ class PlanView(BaseModel):
 
 
 def plan_view(
-    document: object, *, node_id: str = "0", summary: bool = False
+    document: object,
+    *,
+    node_id: str = "0",
+    summary: bool = False,
+    observed: bool = False,
 ) -> PlanView:
     try:
         root = OBJECT.validate_python(document)
@@ -91,6 +130,9 @@ def plan_view(
         row for row in ordered if row[0] == node_id or row[0].startswith(node_id + ".")
     ]
     view = PlanView(root_node_id=node_id, nodes=[], omitted_nodes=len(selected))
+    if observed:
+        view.source = "explain_analyze_timing_off"
+        view.row_kind = "estimated_and_observed"
     for key, parent, plan, children in selected[
         : SUMMARY_NODES if summary else DETAIL_NODES
     ]:
@@ -111,6 +153,16 @@ def plan_view(
             estimates=values,
             omitted_fields=omitted,
         )
+        if observed:
+            actual: JsonObject = {}
+            for field in OBSERVED_FIELDS:
+                if field not in plan:
+                    continue
+                if len(json.dumps(plan[field]).encode()) > FIELD_BYTES:
+                    node.omitted_fields.append(field)
+                else:
+                    actual[field] = plan[field]
+            node.observed = actual
         view.nodes.append(node)
         view.omitted_nodes -= 1
         if len(json.dumps(view.model_dump(mode="json")).encode()) > PLAN_BYTES:

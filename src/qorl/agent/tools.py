@@ -46,12 +46,12 @@ def agent_tools(relations: list[str]) -> list[ToolDefinition]:
         ),
         function(
             ToolName.GET_PLAN,
-            "Inspect estimates for default or an issued candidate. Costs are planner units, not milliseconds. Returns at most 32 nodes with complete leaf aliases, conditions, widths, sort and parallel details. Use a returned node_id for a subtree when nodes are omitted. No query execution.",
+            "Inspect default estimates or an issued candidate's stored plan. If candidate execution evidence exists, show its last measured sample (or last warmup), including sourced reuse, estimated versus observed rows, loops, buffers, spills and workers where present. Costs are planner units, not milliseconds. At most 32 nodes with complete leaf aliases; use node_id for omitted subtrees. Never reruns SQL; default inspection stays estimate-only.",
             OBJECT.validate_python(PlanArguments.model_json_schema()),
         ),
         function(
             ToolName.EVALUATE_CANDIDATE,
-            "Submit one self-contained PlanAction for plain-EXPLAIN validation. Candidate execution latency is measured after the conversation in the current final-only workflow.",
+            "Submit one self-contained PlanAction for plain-EXPLAIN validation. Invalid or unsatisfied actions do not execute. Valid candidates receive configured execution feedback before the next turn in measured mode; exact timing-identity reuse is explicitly sourced. Preliminary feedback is not final paired speedup. Plan-only callers never execute; 0+0 feedback defers timing until finalization.",
             OBJECT.validate_python(
                 {
                     "type": "object",

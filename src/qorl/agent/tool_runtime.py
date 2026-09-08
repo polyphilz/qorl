@@ -2,6 +2,7 @@
 
 from pydantic import TypeAdapter, ValidationError
 
+from qorl.agent.feedback import execution_observation
 from qorl.agent.presentation import plan_view
 from qorl.agent.tool_schemas import (
     CandidateArguments,
@@ -63,6 +64,17 @@ class AgentEnvironment:
             if candidate is None:
                 raise ValueError("candidate_id was not issued by the server")
             plan = candidate.plain_explain
+            execution = execution_observation(
+                candidate,
+                self.evaluator.default,
+                self.evaluator.candidates,
+                node_id=arguments.node_id,
+                summary=False,
+            )
+            if execution is not None:
+                if execution.plan is None and plan is not None:
+                    execution.plan = plan_view(plan["Plan"], node_id=arguments.node_id)
+                return OBJECT.validate_python(execution.model_dump(mode="json"))
         if plan is None:
             raise ValueError("candidate has no PostgreSQL plan")
         return OBJECT.validate_python(
@@ -83,9 +95,16 @@ class AgentEnvironment:
                     arguments, argument_errors(error)
                 )
                 return OBJECT.validate_python(rejected.feedback()), False
-            return OBJECT.validate_python(
-                self.evaluator.evaluate(action).feedback()
-            ), False
+            candidate = self.evaluator.evaluate(action)
+            result = OBJECT.validate_python(candidate.feedback())
+            execution = execution_observation(
+                candidate, self.evaluator.default, self.evaluator.candidates
+            )
+            if execution is not None:
+                result["execution_feedback"] = OBJECT.validate_python(
+                    execution.model_dump(mode="json")
+                )
+            return result, False
         try:
             if name == ToolName.KEEP_DEFAULT:
                 ToolArguments.model_validate(arguments)

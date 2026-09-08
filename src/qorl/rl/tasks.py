@@ -76,6 +76,16 @@ class QorlTask(vf.Task[QorlTaskData]):
         }
         if final is not None and final.speedup is not None:
             metrics["final_speedup"] = final.speedup
+        if record.execution_counts is not None:
+            metrics["executions/initial_default"] = float(
+                record.execution_counts.initial_default
+            )
+            metrics["executions/candidate_feedback"] = float(
+                record.execution_counts.candidate_feedback
+            )
+            metrics["executions/final_paired"] = float(
+                record.execution_counts.final_paired
+            )
         for kind in OutcomeKind:
             metrics[f"outcome/{kind.value}"] = float(
                 final is not None and final.kind == kind

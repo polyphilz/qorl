@@ -172,11 +172,7 @@ def write_report(
                 policy = episode.run.work.policy
                 for trace in episode.traces:
                     record = trace.info.qorl
-                    if (
-                        record is not None
-                        and record.final is not None
-                        and record.failure is None
-                    ):
+                    if record is not None:
                         records.append(record)
                     learning.append(
                         LearningEvidence(
@@ -217,7 +213,7 @@ def write_report(
         episode_failures=failures,
         outcome_counts={kind: counts[kind] for kind in OutcomeKind},
         outcome_rates={
-            kind: counts[kind] / len(records) if records else None
+            kind: counts[kind] / sum(counts.values()) if counts else None
             for kind in OutcomeKind
         },
         performance=summarize_performance(records),

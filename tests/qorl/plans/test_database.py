@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import subprocess
 import time
 from collections.abc import Callable, Iterator
@@ -15,7 +16,8 @@ from pydantic import JsonValue, TypeAdapter
 
 from qorl.agent.interface import AgentInterface
 from qorl.agent.tool_runtime import AgentEnvironment
-from qorl.measure.schemas import Candidate
+from qorl.measure.rollout import RolloutEvaluator
+from qorl.measure.schemas import Candidate, RolloutMeasurementSettings
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.plans.verify import matching_join, memoized_inner
 from qorl.postgres.client import PostgresClient
@@ -303,6 +305,58 @@ def test_live_inspection_contract(
     assert not inspect_relation(database.admin_sql, "absent").exists
 
 
+@pytest.mark.parametrize(
+    ("feedback", "attempts", "expected"), [(0, 1, 10), (1, 1, 12), (1, 5, 20)]
+)
+def test_live_candidate_feedback_and_fresh_pairs(
+    database: PostgresClient,
+    record_property: Callable[[str, str], None],
+    feedback: int,
+    attempts: int,
+    expected: int,
+) -> None:
+    task = evaluator(database).task
+    settings = RolloutMeasurementSettings(
+        default_warmups=1,
+        default_measurements=1,
+        candidate_feedback_warmups=feedback,
+        candidate_feedback_measurements=feedback,
+        paired_warmups=1,
+        paired_measurements=3,
+        default_timeout_seconds=300.0,
+        candidate_timeout_floor_seconds=5.0,
+        candidate_timeout_multiplier=3.0,
+    )
+    run = RolloutEvaluator(
+        database, Query(SQL), task, measurement=settings, max_candidates=attempts
+    )
+    before = database.explain_analyze_calls
+    run.start()
+    for index in range(attempts):
+        candidate = run.evaluate(
+            {"version": 1, "settings": {"seq_page_cost": index + 2.0}}
+        )
+        assert candidate.constraints_satisfied
+        if feedback:
+            assert candidate.execution_feedback is not None
+            assert candidate.execution_feedback.status == "completed"
+            assert (
+                candidate.execution_feedback.measurements[0].analyzed_document
+                is not None
+            )
+    chosen = "candidate-03" if attempts == 5 else "candidate-01"
+    if feedback:
+        calls = database.explain_analyze_calls
+        detail, _ = AgentEnvironment(run).execute("get_plan", {"candidate_id": chosen})
+        assert calls == database.explain_analyze_calls
+        record_property("candidate_detail", json.dumps(detail))
+    final = run.finish(random.Random(42), selected_candidate_id=chosen)
+    assert final.kind == "measured" and final.selected_candidate_id == chosen
+    assert database.explain_analyze_calls - before == expected
+    record_property("timed_executions", str(expected))
+    record_property("rollout", run.record().model_dump_json())
+
+
 @pytest.mark.parametrize("alias_count", [3, 40])
 def test_live_small_and_many_alias_tool_views(
     database: PostgresClient,
@@ -396,6 +450,7 @@ def test_join_compilation_to_live_candidate_feedback(
     record_property: Callable[[str, str], None],
     constraint: dict[str, JsonValue],
 ) -> None:
+    before = database.explain_analyze_calls
     run = evaluator(database)
     candidate = run.evaluate(
         {
@@ -412,7 +467,7 @@ def test_join_compilation_to_live_candidate_feedback(
         candidate.pg_hint_plan is not None
         and candidate.pg_hint_plan["duplicate"] == "(none)"
     )
-    assert database.explain_analyze_calls == 0
+    assert database.explain_analyze_calls == before
 
 
 @pytest.mark.parametrize(

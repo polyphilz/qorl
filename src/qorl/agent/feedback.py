@@ -1,0 +1,90 @@
+"""Present retained probe evidence."""
+
+import statistics
+from typing import Literal
+
+from pydantic import BaseModel
+
+from qorl.agent.presentation import PlanView, plan_view
+from qorl.measure.schemas import Baseline, Candidate
+
+
+class ExecutionObservation(BaseModel):
+    status: Literal["collecting", "completed", "timed_out"]
+    source_id: str
+    reused: bool
+    new_executions: int
+    warmup_count: int
+    measurement_count: int
+    median_execution_time_ms: float | None
+    preliminary_ratio_to_initial_default: float | None
+    ratio_meaning: str = "Preliminary initial-default median / feedback median; not final paired speedup or reward. Warmups excluded."
+    timeout_ms: int | None
+    displayed_sample_phase: Literal["warmup", "measurement"] | None
+    displayed_sample_index: int | None
+    displayed_sample_execution_time_ms: float | None
+    plan: PlanView | None
+
+
+def execution_observation(
+    candidate: Candidate,
+    baseline: Baseline | None,
+    candidates: list[Candidate],
+    *,
+    node_id: str = "0",
+    summary: bool = True,
+) -> ExecutionObservation | None:
+    feedback = candidate.execution_feedback
+    if feedback is None:
+        return None
+    source_id = feedback.source_id or candidate.candidate_id
+    warmups, samples = feedback.warmups, feedback.measurements
+    if source_id == "default":
+        if baseline is None:
+            raise RuntimeError("reused default feedback has no baseline")
+        warmups, samples = baseline.warmups, baseline.measurements
+    elif feedback.source_id is not None:
+        source = next(item for item in candidates if item.candidate_id == source_id)
+        if source.execution_feedback is None:
+            raise RuntimeError("reused candidate feedback has no evidence")
+        warmups, samples = (
+            source.execution_feedback.warmups,
+            source.execution_feedback.measurements,
+        )
+    median = (
+        statistics.median(item.execution_time_ms for item in samples)
+        if samples and feedback.status == "completed"
+        else None
+    )
+    displayed = samples or warmups
+    document = displayed[-1].analyzed_document if displayed else None
+    return ExecutionObservation(
+        status=feedback.status,
+        source_id=source_id,
+        reused=feedback.source_id is not None,
+        new_executions=0
+        if feedback.source_id is not None
+        else len(warmups) + len(samples) + (feedback.status == "timed_out"),
+        warmup_count=len(warmups),
+        measurement_count=len(samples),
+        median_execution_time_ms=median,
+        preliminary_ratio_to_initial_default=baseline.median_execution_time_ms / median
+        if median is not None
+        and median > 0
+        and baseline is not None
+        and baseline.median_execution_time_ms is not None
+        else None,
+        timeout_ms=feedback.timeout_ms,
+        displayed_sample_phase=("measurement" if samples else "warmup")
+        if displayed
+        else None,
+        displayed_sample_index=len(displayed) - 1 if displayed else None,
+        displayed_sample_execution_time_ms=displayed[-1].execution_time_ms
+        if displayed
+        else None,
+        plan=plan_view(
+            document["Plan"], node_id=node_id, summary=summary, observed=True
+        )
+        if document is not None
+        else None,
+    )
