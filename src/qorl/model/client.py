@@ -73,7 +73,13 @@ class ModelTransport(Protocol):
 class HttpTransport:
     """Bound concurrent requests and retry transient failures without regenerating content."""
 
-    def __init__(self, settings: ModelSettings, *, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        settings: ModelSettings,
+        *,
+        api_key: str | None = None,
+        semaphore: BoundedSemaphore | None = None,
+    ) -> None:
         if settings.base_url is None or settings.request_timeout_seconds is None:
             raise ValueError(
                 "model API calls require model.base_url and model.request_timeout_seconds"
@@ -83,7 +89,9 @@ class HttpTransport:
         self.api_key_env = settings.api_key_env
         self._api_key = api_key
         self.retry = settings.retry
-        self._semaphore = BoundedSemaphore(settings.max_concurrent_requests)
+        self._semaphore = semaphore or BoundedSemaphore(
+            settings.max_concurrent_requests
+        )
 
     def request(self, path: str, body: JsonObject | None = None) -> JsonObject:
         """Retry only transport failures; never retry a completed model response."""
@@ -244,7 +252,6 @@ class LocalModelClient:
         *,
         transport: ModelTransport | None = None,
         served_model_name: str | None = None,
-        token_transport: ModelTransport | None = None,
     ) -> None:
         if model.provider != ModelProvider.LOCAL:
             raise ValueError("local client requires model.provider=local")
@@ -259,8 +266,6 @@ class LocalModelClient:
         self.base_url = model.base_url
         self.served_model_name = served_model_name or model.name_or_path
         self.transport = transport or HttpTransport(model)
-        # RL intercepts completions through a proxy; token counting stays on vLLM.
-        self.token_transport = token_transport or self.transport
         self.identity: LocalServerIdentity | None = None
 
     def preflight(self) -> LocalServerIdentity:
@@ -338,8 +343,8 @@ class LocalModelClient:
                 JSON_OBJECT.validate_python(tool.model_dump(mode="json"))
                 for tool in request.tools
             ],
-            "tool_choice": "required" if request.tools else "none",
-            "parallel_tool_calls": False,
+            "tool_choice": "auto" if request.tools else "none",
+            "parallel_tool_calls": True,
             # Server settings configure vLLM's process; only sampling fields are sent.
             **JSON_OBJECT.validate_python(
                 self.inference.model_dump(exclude={"thinking", "serving"})
@@ -359,7 +364,7 @@ class LocalModelClient:
         }
         try:
             counted = TokenCount.model_validate(
-                self.token_transport.request("../tokenize", token_request)
+                self.transport.request("../tokenize", token_request)
             )
         except ValidationError as error:
             raise ModelError("model server returned an invalid token count") from error

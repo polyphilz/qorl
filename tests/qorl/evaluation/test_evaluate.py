@@ -476,7 +476,8 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
     # Standalone evaluation uses the configured adapter; training evaluation uses
     # the explicit stage checkpoint. The serving boundary records what it receives.
     adapter = tmp_path / "explicit-adapter"
-    if method == ExperimentMethod.SFT:
+    if training:
+        from qorl.rl import train as rl_training
         from qorl.sft import train as sft_training
 
         def exported_model(
@@ -488,7 +489,11 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
             )
             return model.model_copy(update={"adapter_path": checkpoint})
 
-        monkeypatch.setattr(sft_training, "checkpoint_model", exported_model)
+        monkeypatch.setattr(
+            rl_training if method == ExperimentMethod.RL else sft_training,
+            "checkpoint_model",
+            exported_model,
+        )
     changed = config.model_copy(
         update={
             "evaluation": EvaluationSettings(rollouts_per_task=1),

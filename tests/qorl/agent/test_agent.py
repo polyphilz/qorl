@@ -213,13 +213,13 @@ def test_request_goldens(
         [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
     )
     policy(transport).search(evaluator)
-    # Interface v5: explicit inference settings and preserved reasoning in the envelope.
+    # Interface v5 with unconstrained local decoding and preserved reasoning.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
     ] == [
-        "2037e940c7182a39fb786385cac8642afa7dbcd868bfa34f781cc9181f500830",
-        "1e65a354460c3085787eef8ec473a3129c2928945721d4c6f296f9a6f8478205",
+        "ead00e656795c436f8863765aceafadcf95bca2b85950a3b886a2f89cf5c8aba",
+        "3d02f8dc999272d0cb730ac72ed2a7cd5587a4b02cec2e6bbc1e8f1f7766ae2e",
     ]
 
 

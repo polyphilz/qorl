@@ -2,7 +2,6 @@ import tomllib
 from pathlib import Path
 
 import pytest
-from verifiers.v1.envs.single_agent import SingleAgentEnvConfig
 from verifiers.v1.utils.loaders import (
     environment_class,
     harness_class,
@@ -10,10 +9,10 @@ from verifiers.v1.utils.loaders import (
     taskset_class,
 )
 
+from qorl.rl.environment import QorlEnvironment, QorlEnvironmentConfig
+from qorl.rl.harness import QorlHarness, QorlHarnessConfig
 from qorl.rl.schemas import GrpoSettings, RlSettings, ScalarRewardSettings
-from qorl.training.environment import QorlEnvironment
-from qorl.training.harness import QorlHarness, QorlHarnessConfig
-from qorl.training.taskset import QorlTaskset, QorlTasksetConfig
+from qorl.rl.tasks import QorlTaskset, QorlTasksetConfig
 
 
 @pytest.mark.parametrize("override_defaults", [False, True])
@@ -64,7 +63,7 @@ def test_training_configs_construct_qorl_environment(
         }
     )
 
-    assert isinstance(environment, SingleAgentEnvConfig)
+    assert isinstance(environment, QorlEnvironmentConfig)
     assert environment.id == "qorl"
     assert environment.taskset.id == "qorl"
     assert environment.agent.harness.id == "qorl"

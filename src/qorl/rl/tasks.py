@@ -1,41 +1,29 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Literal
 
 import verifiers.v1 as vf
 
 from qorl.measure.schemas import OutcomeKind
 from qorl.paths import REPOSITORY_ROOT
 from qorl.rl.schemas import RlRolloutRecord
+from qorl.taskset.schemas import TaskSelection
 from qorl.taskset.taskset import TaskSet
-
-SELECTION_SPLITS = {
-    "qorl-rl-pilot-v1": {"spike", "train", "validation"},
-    "qorl-rl-run-v2": {"train"},
-}
-
-
-def selected_items(selection: dict, split: str) -> list[dict[str, str]]:
-    inventory_id = selection.get("inventory_id")
-    if inventory_id not in SELECTION_SPLITS:
-        raise ValueError(f"unexpected QORL RL inventory: {inventory_id}")
-    if split not in SELECTION_SPLITS[inventory_id]:
-        raise ValueError(f"split {split!r} is not allowed by {inventory_id}")
-    return selection["splits"][split]
 
 
 class QorlTasksetConfig(vf.TasksetConfig):
     repository: Path = REPOSITORY_ROOT
-    selection: Path = Path("experiments/003-rl-pilot-v1/selection.json")
-    split: Literal["spike", "train", "validation"] = "spike"
+    selection: Path | None = None
+    shuffle_seed: int | None = None
 
 
 class QorlTaskData(vf.TaskData):
     task_id: str
     template_id: str
+    rollout_index: int = 0
 
 
 class QorlTask(vf.Task[QorlTaskData]):
@@ -88,35 +76,33 @@ class QorlTask(vf.Task[QorlTaskData]):
         }
         if final is not None and final.speedup is not None:
             metrics["final_speedup"] = final.speedup
+        for kind in OutcomeKind:
+            metrics[f"outcome/{kind.value}"] = float(
+                final is not None and final.kind == kind
+            )
         return metrics
 
 
 class QorlTaskset(vf.Taskset[QorlTask, QorlTasksetConfig]):
     def load(self) -> Iterator[QorlTask]:
         repository = self.config.repository.resolve()
-        task_set = TaskSet.load(repository, "ceb")
-        selection_path = (
-            self.config.selection
-            if self.config.selection.is_absolute()
-            else repository / self.config.selection
+        if self.config.selection is None:
+            raise ValueError("RL task loading requires the run's saved selection")
+        selection = TaskSelection.model_validate_json(
+            (repository / self.config.selection).read_bytes()
         )
-        selection = json.loads(selection_path.read_text(encoding="utf-8"))
-        selected = selected_items(selection, self.config.split)
-        tasks = {task.task_id: task.model_dump() for task in task_set.tasks}
-        for index, item in enumerate(selected):
-            task = tasks[item["task_id"]]
-            expected_partition = (
-                "validation" if self.config.split == "validation" else "train"
-            )
-            if task["partition"] != expected_partition:
-                raise ValueError(f"task in wrong partition: {task['task_id']}")
+        task_set = TaskSet.load(repository, selection.benchmark_id.value)
+        tasks = task_set.resolve(selection)
+        if self.config.shuffle_seed is not None:
+            random.Random(self.config.shuffle_seed).shuffle(tasks)
+        for index, task in enumerate(tasks):
             yield QorlTask(
                 QorlTaskData(
                     idx=index,
-                    name=task["task_id"],
-                    prompt=task["task_id"],
-                    task_id=task["task_id"],
-                    template_id=task["template_id"],
+                    name=task.task_id,
+                    prompt=task.task_id,
+                    task_id=task.task_id,
+                    template_id=task.template_id,
                 ),
                 self.config.task,
             )

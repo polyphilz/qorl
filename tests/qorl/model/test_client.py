@@ -162,30 +162,29 @@ def proxy_completion() -> JsonObject:
     )
 
 
-def test_proxy_completions_use_the_real_server_for_token_counts(
+def test_proxy_counts_and_generates_on_the_same_transport(
     config: EvaluationExperimentConfig,
     request_turn: GenerationRequest,
 ) -> None:
     assert isinstance(config.inference, LocalInferenceSettings)
-    proxy = ScriptedTransport([completion()])
-    tokenizer = ScriptedTransport(
-        [{"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}]
+    proxy = ScriptedTransport(
+        [{"count": PROMPT_TOKENS, "max_model_len": CONTEXT_LENGTH}, completion()]
     )
     model = LocalModelClient(
         config.model,
         config.inference,
         transport=proxy,
-        token_transport=tokenizer,
         served_model_name="intercepted-model",
     )
     result = model.generate(request_turn.model_copy(update={"seed": None}))
-    assert [path for path, _ in proxy.calls] == ["chat/completions"]
-    assert [path for path, _ in tokenizer.calls] == ["../tokenize"]
-    counted = tokenizer.calls[0][1]
+    assert [path for path, _ in proxy.calls] == ["../tokenize", "chat/completions"]
+    counted = proxy.calls[0][1]
     assert counted is not None
     assert counted["messages"] == result.request["messages"]
     assert counted["model"] == result.request["model"] == "intercepted-model"
     assert "seed" not in result.request
+    assert result.request["tool_choice"] == "auto"
+    assert result.request["parallel_tool_calls"] is True
 
 
 def test_server_settings_never_enter_api_payloads(

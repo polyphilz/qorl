@@ -123,6 +123,7 @@ def serve_local_model(
     environment = {
         **os.environ,
         "CUDA_VISIBLE_DEVICES": ",".join(map(str, gpu_ids)),
+        "VLLM_ENFORCE_STRICT_TOOL_CALLING": "0",
         "VLLM_USE_FLASHINFER_SAMPLER": "1" if serving.use_flashinfer_sampler else "0",
     }
     client = LocalModelClient(

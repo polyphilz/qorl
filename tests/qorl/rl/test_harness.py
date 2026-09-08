@@ -17,12 +17,12 @@ from qorl.model.exceptions import ModelError
 from qorl.model.schemas import JsonObject
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
+from qorl.rl import runtime as shared_runtime
+from qorl.rl.harness import QorlHarness, QorlHarnessConfig
+from qorl.rl.runtime import QorlRuntime
 from qorl.rl.schemas import RlRolloutRecord
+from qorl.rl.tasks import QorlTaskData
 from qorl.taskset.taskset import TaskSet
-from qorl.training import runtime as shared_runtime
-from qorl.training.harness import QorlHarness, QorlHarnessConfig
-from qorl.training.runtime import QorlRuntime
-from qorl.training.taskset import QorlTaskData
 from qorl.worker_pool.schemas import PoolConfig
 
 WAIT_SECONDS = 2.0
@@ -120,7 +120,7 @@ def test_actual_harness_uses_proxy_and_retains_records(
     else:
         assert asyncio.run(harness.launch(*arguments)).exit_code == 0
     assert [(url, path) for url, path, _ in requests] == [
-        (config.model.base_url, "../tokenize"),
+        ("http://proxy.test/v1", "../tokenize"),
         ("http://proxy.test/v1", "chat/completions"),
     ]
     assert requests[0][2]["messages"] == requests[1][2]["messages"]
@@ -188,10 +188,19 @@ def test_cancellation_waits_for_worker_cleanup(
             raise CancelledError("rollout cancelled")
 
     monkeypatch.setattr(harness, "_run", run)
+    monkeypatch.setattr(shared_runtime, "current", Mock(return_value=Mock(work={})))
 
     async def check() -> None:
         work = asyncio.create_task(
-            harness.launch(Mock(), Mock(), Mock(), "unused", "unused", {}, Mock())
+            harness.launch(
+                Mock(),
+                Mock(info={}),
+                Mock(),
+                "unused",
+                "unused",
+                {},
+                QorlTaskData(task_id="job-01a", template_id="job-01"),
+            )
         )
         try:
             assert await asyncio.to_thread(started.wait, WAIT_SECONDS)

@@ -1,8 +1,8 @@
 """QORL library and Prime-RL environment, task set, and harness plugin exports."""
 
-from qorl.training.environment import QorlEnvironment
-from qorl.training.harness import QorlHarness
-from qorl.training.taskset import QorlTaskset
+from qorl.rl.environment import QorlEnvironment
+from qorl.rl.harness import QorlHarness
+from qorl.rl.tasks import QorlTaskset
 
 __all__ = [
     "QorlEnvironment",

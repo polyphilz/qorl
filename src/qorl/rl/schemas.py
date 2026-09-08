@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 
 from prime_rl.configs.trainer import validate_scheduler
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from renderers import AutoRendererConfig, RendererConfig
 
 from qorl.adapters.schemas import LoraSettings
 from qorl.measure.schemas import RolloutRecord
@@ -33,6 +34,7 @@ class RlTrainingSettings(BaseModel):
     lora: LoraSettings
     optimizer: OptimizerSettings
     checkpoints: CheckpointSettings
+    renderer: RendererConfig = AutoRendererConfig()
 
     @model_validator(mode="after")
     def whole_groups(self) -> Self:
@@ -104,3 +106,15 @@ class RlRolloutRecord(RolloutRecord):
     database_pool: PoolManifest
     database_worker: WorkerManifest
     scalar_reward: float | None
+
+
+class RlTrainingIdentity(BaseModel):
+    """The recorded base and native trainer used by explicit checkpoint export."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    experiment_sha256: str
+    base_weights_sha256: str
+    trainer_source: str
+    trainer_config_sha256: str

@@ -1,22 +1,42 @@
 import asyncio
 import inspect
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from qorl.measure.schemas import KeptDefaultOutcome, PairedMeasurements, RolloutFailure
 from qorl.rl.schemas import RlRolloutRecord
-from qorl.training.taskset import QorlTask, selected_items
+from qorl.rl.tasks import QorlTask, QorlTaskset, QorlTasksetConfig
+from qorl.taskset.schemas import BenchmarkId, TaskSelection
+from qorl.taskset.taskset import TaskSet
 
 
-def test_known_inventories_only_expose_their_declared_splits() -> None:
-    run = {
-        "inventory_id": "qorl-rl-run-v2",
-        "splits": {"train": [{"task_id": "task", "template_id": "template"}]},
-    }
-    assert selected_items(run, "train") == run["splits"]["train"]
-    with pytest.raises(ValueError, match="not allowed"):
-        selected_items(run, "validation")
+@pytest.mark.parametrize("benchmark", list(BenchmarkId))
+def test_loads_exact_saved_selection(
+    repository_root: Path, tmp_path: Path, benchmark: BenchmarkId
+) -> None:
+    catalog = TaskSet.load(repository_root, benchmark.value)
+    selected = [catalog.tasks[2], catalog.tasks[0]]
+    selection = tmp_path / "tasks.json"
+    selection.write_text(
+        TaskSelection(
+            benchmark_id=benchmark, task_ids=[task.task_id for task in selected]
+        ).model_dump_json()
+    )
+    adapter = QorlTaskset(
+        QorlTasksetConfig(id="qorl", selection=selection, repository=repository_root)
+    )
+    tasks = list(adapter)
+    assert [task.key for task in tasks] == [task.task_id for task in selected]
+    assert [task.data.template_id for task in tasks] == [
+        task.template_id for task in selected
+    ]
+
+
+def test_selection_is_required() -> None:
+    with pytest.raises(ValueError, match="saved selection"):
+        list(QorlTaskset(QorlTasksetConfig(id="qorl")))
 
 
 def test_scoring_hooks_use_rl_metadata_and_raw_performance(

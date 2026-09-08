@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Protocol
@@ -57,6 +58,31 @@ def adapter_name(checkpoint_name: str) -> str:
     raise RuntimeError(f"unrecognized LoRA checkpoint key: {checkpoint_name}")
 
 
+def export_configuration(
+    model: Path, lora: LoraSettings, tensor_names: Iterable[str]
+) -> AdapterConfig:
+    """Build adapter metadata from recorded settings and the actual LoRA tensors."""
+    return AdapterConfig.model_validate(
+        {
+            "peft_type": "LORA",
+            "task_type": "CAUSAL_LM",
+            "base_model_name_or_path": str(model.resolve()),
+            "r": lora.rank,
+            "lora_alpha": lora.alpha,
+            "lora_dropout": lora.dropout,
+            "bias": "none",
+            "target_modules": sorted(
+                {
+                    key.split(".")[-3]
+                    for key in tensor_names
+                    if key.endswith(("lora_A.weight", "lora_B.weight"))
+                }
+            ),
+            "modules_to_save": None,
+        }
+    )
+
+
 def export_adapter(
     checkpoint: Path, model: Path, lora: LoraSettings, output: Path
 ) -> AdapterExportManifest:
@@ -107,26 +133,7 @@ def export_adapter(
     if rank != lora.rank:
         raise RuntimeError("checkpoint rank differs from recorded training rank")
 
-    target_modules = sorted(
-        {
-            key.split(".")[-3]
-            for key in adapter
-            if key.endswith(("lora_A.weight", "lora_B.weight"))
-        }
-    )
-    adapter_config = AdapterConfig.model_validate(
-        {
-            "peft_type": "LORA",
-            "task_type": "CAUSAL_LM",
-            "base_model_name_or_path": str(model),
-            "r": rank,
-            "lora_alpha": lora.alpha,
-            "lora_dropout": lora.dropout,
-            "bias": "none",
-            "target_modules": target_modules,
-            "modules_to_save": None,
-        }
-    )
+    adapter_config = export_configuration(model, lora, adapter)
     native_sha256 = checkpoint_sha256(checkpoint)
     output.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".qorl-export-", dir=output.parent) as temporary:

@@ -13,16 +13,18 @@ from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
 from qorl.model.client import HttpTransport, LocalModelClient
 from qorl.model.schemas import LocalInferenceSettings, ModelSettings
+from qorl.rl import runtime as shared_runtime
 from qorl.rl.reward import scalar_reward
 from qorl.rl.schemas import AnchoredGrpoSettings, RlRolloutRecord, RlSettings
-from qorl.training import runtime as shared_runtime
-from qorl.training.taskset import QorlTaskData
+from qorl.rl.tasks import QorlTaskData
+from qorl.util.seeds import derive_seed
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
     """Allow Verifiers' fallback construction; experiments supply resolved settings."""
 
     id: str = "qorl"
+    seed: int = 42
     model: ModelSettings | None = None
     inference: LocalInferenceSettings | None = None
     agent: AgentSettings = AgentSettings(
@@ -68,10 +70,23 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
         data: vf.TaskData,
     ) -> vf.ProgramResult:
         del runtime, mcp_urls
+        task_data = QorlTaskData.model_validate(data.model_dump())
+        index = task_data.rollout_index
+        trace.info["qorl_seeds"] = {
+            "rollout_index": index,
+            "model": derive_seed(
+                self.config.seed, "rl-model", task_data.task_id, str(index)
+            ),
+            "pairs": derive_seed(
+                self.config.seed, "rl-pairs", task_data.task_id, str(index)
+            ),
+        }
         cancel = Event()
         work = asyncio.create_task(
             asyncio.to_thread(self._run, ctx, trace, endpoint, secret, data, cancel)
         )
+        active = shared_runtime.current()
+        active.work[work] = cancel
         try:
             await asyncio.shield(work)
         except asyncio.CancelledError:
@@ -83,6 +98,8 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                         await asyncio.shield(work)
                 work.result()
             raise
+        finally:
+            active.work.pop(work, None)
         return vf.ProgramResult(exit_code=0, stdout="", stderr="")
 
     def _run(
@@ -111,15 +128,15 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             transport=HttpTransport(
                 model.model_copy(update={"base_url": endpoint.rstrip("/")}),
                 api_key=secret,
+                semaphore=active.requests,
             ),
-            token_transport=HttpTransport(model),
         )
         policy = QoAgentPolicy(
             client,
             self.config.agent,
             context_length=model.context_length,
             max_tokens=inference.max_tokens,
-            seed=None,
+            seed=None,  # The environment supplies the recorded native per-rollout seed.
         )
 
         with active.claim_worker() as slot:
@@ -150,9 +167,7 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 evaluator.start()
                 policy_trace = policy.search(evaluator)
                 trace.info["qorl_policy"] = policy_trace.model_dump(mode="json")
-                evaluator.finish(
-                    random.Random(f"qorl-rl:{task.task_id}:{trace.id}:pairs")
-                )
+                evaluator.finish(random.Random(trace.info["qorl_seeds"]["pairs"]))
                 store_record(evaluator.record())
             except BaseException as error:
                 if policy.trace is not None:

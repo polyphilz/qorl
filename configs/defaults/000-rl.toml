@@ -48,6 +48,9 @@ optimization_dtype = "bfloat16"
 reduce_dtype = "bfloat16"
 compile = false
 
+[training.renderer]
+name = "auto"
+
 [training.lora]
 rank = 16
 alpha = 32.0

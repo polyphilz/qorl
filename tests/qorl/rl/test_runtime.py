@@ -7,9 +7,9 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from qorl.postgres.config import PostgresConfig
+from qorl.rl import runtime
+from qorl.rl.runtime import QorlRuntime
 from qorl.taskset.taskset import TaskSet
-from qorl.training import runtime
-from qorl.training.runtime import QorlRuntime
 from qorl.worker_pool.config import (
     load_pool_config,
     validate_host_topology,
@@ -20,37 +20,42 @@ ROOT = Path(__file__).resolve().parents[3]
 
 class WorkerPoolTest(unittest.TestCase):
     def test_start_loads_indexes_after_restoring_and_starting_postgres(self) -> None:
-        environment = {
-            runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
-            runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
-        }
         with (
             patch.object(runtime, "_runtime", None),
             patch.object(runtime, "QorlRuntime") as factory,
         ):
-            started = runtime.start(ROOT, environment)
+            started = runtime.start(
+                ROOT,
+                TaskSet.load(ROOT, "job"),
+                PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),
+                load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8")),
+            )
             self.assertIs(started, factory.return_value)
             self.assertEqual(
                 [call[0] for call in factory.return_value.method_calls],
                 ["create", "restore", "start", "load_indexes"],
             )
 
-    def test_start_requires_both_configuration_paths(self) -> None:
-        for missing in (runtime.POSTGRES_CONFIG_ENV, runtime.POOL_CONFIG_ENV):
-            for value in (None, "", " "):
-                with self.subTest(missing=missing, value=value):
-                    environment = {
-                        runtime.POSTGRES_CONFIG_ENV: "docker/postgres/configs/000-pgconf-default",
-                        runtime.POOL_CONFIG_ENV: "docker/worker_pool/configs/002-poolconf-4x8",
-                    }
-                    if value is None:
-                        del environment[missing]
-                    else:
-                        environment[missing] = value
-                    with patch.object(runtime, "QorlRuntime") as pool:
-                        with self.assertRaisesRegex(RuntimeError, missing):
-                            runtime.start(ROOT, environment)
-                        pool.assert_not_called()
+    def test_failed_start_closes_owned_pool(self) -> None:
+        with (
+            patch.object(runtime, "_runtime", None),
+            patch.object(runtime, "QorlRuntime") as factory,
+        ):
+            factory.return_value.restore.side_effect = RuntimeError("restore failed")
+            with self.assertRaisesRegex(RuntimeError, "restore failed"):
+                runtime.start(
+                    ROOT,
+                    TaskSet.load(ROOT, "job"),
+                    PostgresConfig.load(
+                        Path("docker/postgres/configs/000-pgconf-default")
+                    ),
+                    load_pool_config(
+                        Path("docker/worker_pool/configs/002-poolconf-4x8")
+                    ),
+                )
+            factory.return_value.close.assert_called_once()
+            with self.assertRaises(RuntimeError):
+                runtime.current()
 
     def test_resources_are_distinct_and_parameterized(self) -> None:
         resources = load_pool_config(
@@ -107,3 +112,38 @@ class WorkerPoolTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_drain_waits_for_all_episode_threads() -> None:
+    import asyncio
+    from threading import Event
+
+    pool = QorlRuntime(
+        TaskSet.load(ROOT, "job"),
+        load_pool_config(Path("docker/worker_pool/configs/002-poolconf-4x8")),
+        "drain-test",
+        PostgresConfig.load(Path("docker/postgres/configs/000-pgconf-default")),
+    )
+
+    async def check() -> None:
+        cancelled, release, finished = Event(), Event(), Event()
+
+        def execute() -> None:
+            assert cancelled.wait(2)
+            assert release.wait(2)
+            finished.set()
+
+        work = asyncio.create_task(asyncio.to_thread(execute))
+        pool.work[work] = cancelled
+        with patch.object(runtime, "_runtime", pool):
+            cleaning = asyncio.create_task(runtime.drain())
+            assert await asyncio.to_thread(cancelled.wait, 2)
+            cleaning.cancel()
+            await asyncio.sleep(0)
+            assert not cleaning.done() and not finished.is_set()
+            release.set()
+            await cleaning
+            await work
+            assert finished.is_set()
+
+    asyncio.run(check())

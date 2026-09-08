@@ -222,8 +222,6 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
     directory = (REPOSITORY_ROOT / directory).resolve()
     config = load_config(directory / "config.toml")
     validate_stage(config, request)
-    if request.stage == RunStage.TRAIN and not isinstance(config, SftExperimentConfig):
-        raise NotImplementedError(f"stage {request.stage.value} is not implemented")
     if request.stage == RunStage.PREPARE and (
         not isinstance(config, SftExperimentConfig) or config.data.dataset_from is None
     ):
@@ -274,6 +272,14 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
         )
         return output
     if request.stage == RunStage.TRAIN:
+        if isinstance(config, RlExperimentConfig):
+            from qorl.rl.train import train as train_rl
+
+            if output is None:
+                output = create_run(directory, inputs)
+            print(f"QORL run {output.name}: {output}", flush=True)
+            train_rl(config, output)
+            return output
         from qorl.sft.train import train
 
         if not isinstance(config, SftExperimentConfig) or output is None:
@@ -320,13 +326,11 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
                 from qorl.sft.train import checkpoint_model
 
                 model = checkpoint_model(model, output / "training", request.checkpoint)
-            else:
-                model = model.model_copy(
-                    update={
-                        "adapter_path": (
-                            REPOSITORY_ROOT / request.checkpoint.expanduser()
-                        ).resolve(),
-                    }
+            elif isinstance(config, RlExperimentConfig):
+                from qorl.rl.train import checkpoint_model as rl_checkpoint_model
+
+                model = rl_checkpoint_model(
+                    model, output / "training", request.checkpoint
                 )
         # Each invocation owns a fresh slot so a restart cannot reuse partial records.
         invocation = numbered_output(output / "evaluation" / role.value)
