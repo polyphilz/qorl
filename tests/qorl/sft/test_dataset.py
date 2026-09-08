@@ -1,16 +1,26 @@
 """Offline preparation against real renderers and Prime-RL's CPU packer."""
 
+import asyncio
 import json
+import random
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Protocol
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 import tomli_w
 import torch
+import verifiers.v1 as vf
 from datasets import Dataset
+from openai import AsyncOpenAI
+from prime_rl.orchestrator import trajectories
+from prime_rl.orchestrator.algo import routing
 from prime_rl.trainer.sft.data import Sample, SFTDataset, cat_collate
-from pydantic import ValidationError
+from prime_rl.transports.batch import TrainingSample
+from pydantic import TypeAdapter, ValidationError
 from renderers.configs import (
     AutoRendererConfig,
     Qwen3RendererConfig,
@@ -18,10 +28,20 @@ from renderers.configs import (
     Qwen38RendererConfig,
     RendererConfig,
 )
+from tests.qorl.agent.test_agent import ScriptedTransport, policy
+from tests.qorl.measure.test_feedback import ENABLED, InspectionWorker
+from tests.qorl.measure.test_rollout import ACTION, TASK, Sql
 from tokenizers import Tokenizer, decoders, models, pre_tokenizers
 from transformers import PreTrainedTokenizerFast
+from verifiers.v1 import graph
+from verifiers.v1.clients import train
+from verifiers.v1.configs.client import TrainClientConfig
+from verifiers.v1.dialects import ChatDialect
+from verifiers.v1.types import Message as NativeMessage
+from verifiers.v1.types import SamplingConfig
 
 from qorl.agent.tools import agent_tools
+from qorl.agent.types import InspectionExecutor
 from qorl.experiment import create, run
 from qorl.experiment.schemas import (
     CreateRequest,
@@ -31,6 +51,7 @@ from qorl.experiment.schemas import (
     SftExperimentConfig,
     load_config,
 )
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.model.schemas import (
     FunctionCall,
     Message,
@@ -92,6 +113,8 @@ class SavedTokenizer(dataset.StudentTokenizer, Protocol):
 
     def save_pretrained(self, save_directory: Path) -> tuple[str, ...]: ...
 
+    def encode(self, text: str, *, add_special_tokens: bool) -> list[int]: ...
+
 
 class DatasetLoader(Protocol):
     """JSON records accepted by Hugging Face's in-memory dataset constructor."""
@@ -101,6 +124,53 @@ class DatasetLoader(Protocol):
 
 BYTE_ALPHABET: ByteAlphabet = pre_tokenizers.ByteLevel
 DATASET_LOADER: DatasetLoader = Dataset
+
+type NativeTrace = vf.Trace[vf.TaskData, vf.State, vf.AgentConfig]
+
+
+class CreditRouting(Protocol):
+    def assign_advantages(self, trace: NativeTrace, values: float) -> None: ...
+
+
+class Trajectories(Protocol):
+    def trace_to_samples(self, trace: NativeTrace) -> list[TrainingSample]: ...
+
+
+class Graph(Protocol):
+    def prepare_turn(
+        self, trace: NativeTrace, prompt: list[NativeMessage]
+    ) -> graph.PendingTurn: ...
+
+
+class NativeTrainingClient(Protocol):
+    """Typed signatures for the pinned native client's chat-only test boundary."""
+
+    client: AsyncOpenAI
+
+    async def relay_aux(
+        self,
+        dialect: ChatDialect,
+        route: str,
+        body: JsonObject,
+        *,
+        sampling: SamplingConfig,
+        turn: graph.PendingTurn,
+    ) -> JsonObject: ...
+
+    async def get_response(
+        self,
+        dialect: ChatDialect,
+        body: JsonObject,
+        sampling: SamplingConfig,
+        *,
+        turn: graph.PendingTurn,
+    ) -> vf.Response: ...
+
+    async def close(self) -> None: ...
+
+
+def native_training_client() -> NativeTrainingClient:
+    return train.TrainClient(TrainClientConfig.model_validate({"api_key_var": ""}))
 
 
 @pytest.fixture
@@ -1022,6 +1092,313 @@ def test_a_conversation_can_end_at_a_tool_call(tools: list[ToolDefinition]) -> N
             update={"messages": record.messages[:3], "requests": record.requests[:1]}
         )
     )
+
+
+def test_feedback_repair_and_earlier_selection_prepare_exact_context(
+    experiment: Path, repository_root: Path
+) -> None:
+    worker = InspectionWorker(repository_root)
+    evaluator = RolloutEvaluator[InspectionExecutor](
+        worker, Sql(), TASK, measurement=ENABLED, max_candidates=3
+    )
+    evaluator.start()
+    calls: list[tuple[str, JsonObject]] = [
+        ("evaluate_candidate", {"action": ACTION}),
+        (
+            "evaluate_candidate",
+            {
+                "action": {
+                    "version": 1,
+                    "joins": [{"relations": ["a", "b"], "force": "nestloop"}],
+                }
+            },
+        ),
+        (
+            "evaluate_candidate",
+            {"action": {"version": 1, "settings": {"seq_page_cost": 3.0}}},
+        ),
+        ("finish", {"selected_candidate_id": "candidate-01"}),
+    ]
+    responses: list[JsonObject] = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": f"Decision {index}",
+                        "tool_calls": [
+                            {
+                                "id": f"call-{index}",
+                                "type": "function",
+                                "function": {
+                                    "name": name,
+                                    "arguments": json.dumps(arguments),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+        }
+        for index, (name, arguments) in enumerate(calls)
+    ]
+    transport = ScriptedTransport(responses)
+    trace = policy(transport, attempts=3, turns=8).search(evaluator)
+    assert evaluator.candidates[0].execution_feedback is not None
+    assert not evaluator.candidates[1].constraints_satisfied
+    assert evaluator.candidates[2].constraints_satisfied
+    assert trace.selection.selected_candidate_id == "candidate-01"
+    # Final pairs happen after the last model request and cannot become its context.
+    frozen_requests = json.dumps(transport.requests)
+    worker.default_ms = 123.456  # A later final-pair timing, absent from all requests.
+    evaluator.finish(
+        random.Random(42), selected_candidate_id=trace.selection.selected_candidate_id
+    )
+    assert json.dumps(transport.requests) == frozen_requests
+    config = sft_config(experiment)
+    config = config.model_copy(
+        update={
+            "model": config.model.model_copy(
+                update={"context_length": FULL_TOOL_CONTEXT_LENGTH}
+            ),
+            "training": config.training.model_copy(
+                update={"renderer": Qwen35RendererConfig()}
+            ),
+        }
+    )
+    inputs = run.load_inputs(experiment)
+    source = dataset.load_source(config, inputs.selections)
+    requests: list[ConversationRequest] = []
+    for response in trace.model_responses:
+        wire_messages = TypeAdapter(list[JsonObject]).validate_python(
+            response.request["messages"]
+        )
+        for message in wire_messages:
+            # The local chat wire spells the preserved reasoning field "reasoning".
+            if "reasoning" in message:
+                message["reasoning_content"] = message.pop("reasoning")
+        preceding = TypeAdapter(list[Message]).validate_python(wire_messages)
+        assert trace.transcript[: len(preceding)] == preceding
+        requests.append(
+            ConversationRequest(
+                assistant_message_index=len(preceding),
+                tools=TypeAdapter(list[ToolDefinition]).validate_python(
+                    response.request["tools"]
+                ),
+            )
+        )
+    assert [tool.function.name for tool in requests[-1].tools] == ["finish"]
+    assert len(requests[0].tools) == 5  # finish is not available before candidates.
+    assert config.data.dataset_from is not None
+    for role, name in (
+        (TaskRole.TRAIN, "training"),
+        (TaskRole.VALIDATION, "validation"),
+    ):
+        original = source.conversations[role][0]
+        controlled = Conversation(
+            conversation_id=original.conversation_id,
+            task_id=original.task_id,
+            messages=trace.transcript,
+            requests=requests,
+            metadata={"fixture": "controlled shared-agent feedback; no quality claim"},
+        )
+        dataset.validate_conversation(controlled)
+        dataset.write_records(config.data.dataset_from / f"{name}.jsonl", [controlled])
+    frozen_source = (config.data.dataset_from / "training.jsonl").read_bytes()
+    controlled = Conversation.model_validate_json(frozen_source)
+    output = experiment / "controlled-preparation"
+    report = dataset.prepare_dataset(config, inputs.selections, output)
+    assert report.training.accepted_conversations == 1
+    assert (config.data.dataset_from / "training.jsonl").read_bytes() == frozen_source
+    rendered = RenderedConversation.model_validate_json(
+        (output / "training/rendered/000000.json").read_bytes()
+    )
+    student = dataset.load_student(config)
+    for index, (request, sample) in enumerate(
+        zip(requests, rendered.requests, strict=True)
+    ):
+        schema_text = sample.rendered_text.split("<tools>\n")[1].split("\n</tools>")[0]
+        assert [
+            ToolDefinition.model_validate_json(line)
+            for line in schema_text.splitlines()
+        ] == request.tools
+        # Rendering each frozen prefix alone must reproduce the prepared sample.
+        prefix = controlled.model_copy(
+            update={
+                "messages": controlled.messages[: request.assistant_message_index + 1],
+                "requests": requests[: index + 1],
+            }
+        )
+        assert (
+            dataset.render_conversation(
+                prefix, student, FULL_TOOL_CONTEXT_LENGTH
+            ).requests[-1]
+            == sample
+        )
+        assert "candidate_median_execution_time_ms" not in sample.rendered_text
+        assert "123.456" not in sample.rendered_text
+        for target_index, mask in zip(
+            sample.target_message_indices, sample.sample.loss_mask, strict=True
+        ):
+            if mask:
+                assert target_index == request.assistant_message_index
+
+
+@pytest.mark.parametrize("thinking", [False, True])
+@pytest.mark.parametrize("advantage", [0.4, -0.1, 0.0])
+def test_native_renderer_client_credit(
+    experiment: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    thinking: bool,
+    advantage: float,
+    tokenizer: SavedTokenizer,
+) -> None:
+    asyncio.run(
+        native_renderer_client_credit(
+            experiment, monkeypatch, thinking, advantage, tokenizer
+        )
+    )
+
+
+async def native_renderer_client_credit(
+    experiment: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    thinking: bool,
+    advantage: float,
+    tokenizer: SavedTokenizer,
+    credit_routing: CreditRouting = routing,
+    native_graph: Graph = graph,
+    native_trajectories: Trajectories = trajectories,
+) -> None:
+    """Real native rendering/parsing/transport; only the engine's sampled output is controlled."""
+    config = sft_config(experiment)
+    config = config.model_copy(
+        update={
+            "training": config.training.model_copy(
+                update={"renderer": Qwen35RendererConfig()}
+            ),
+            "inference": config.inference.model_copy(update={"thinking": thinking}),
+        }
+    )
+    student = dataset.load_student(config)
+    slot = train.RendererSlot(student.renderer)
+
+    @asynccontextmanager
+    async def acquire() -> AsyncGenerator[train.RendererSlot]:
+        yield slot
+
+    monkeypatch.setattr(
+        train, "ElasticRendererPool", Mock(return_value=Mock(acquire=acquire))
+    )
+    monkeypatch.setattr(
+        "renderers.client._resolve_max_prompt_len",
+        AsyncMock(return_value=FULL_TOOL_CONTEXT_LENGTH),
+    )
+    client = native_training_client()
+    trace = vf.Trace(
+        agent=vf.AgentInfo(config=vf.AgentConfig()),
+        task=vf.TraceTask(type="Task", data=vf.TaskData(idx=0, prompt="query")),
+    )
+    messages: list[NativeMessage] = [
+        vf.SystemMessage(content="rules"),
+        vf.UserMessage(content="query"),
+    ]
+    expected: list[int] = []
+    try:
+        for index, name in enumerate(
+            ["get_plan", "evaluate_candidate", "evaluate_candidate", "finish"]
+        ):
+            tools = [
+                tool
+                for tool in agent_tools(["a", "b"], execution_feedback=True)
+                if name != "finish" or tool.function.name == "finish"
+            ]
+            body: JsonObject = {
+                "model": "controlled",
+                "tools": [tool.model_dump(mode="json") for tool in tools],
+                "tool_choice": "auto",
+                "parallel_tool_calls": True,
+            }
+            turn = native_graph.prepare_turn(trace, messages)
+            sampling = SamplingConfig(max_tokens=2048)
+            counted = await client.relay_aux(
+                ChatDialect(), "/tokenize", body, sampling=sampling, turn=turn
+            )
+            text = (
+                f"reasoning {index}</think>\n" if thinking else ""
+            ) + f"<tool_call>\n<function={name}>\n</function>\n</tool_call><|im_end|>"
+            completion = tokenizer.encode(text, add_special_tokens=False)
+            expected.extend(completion)
+            post = AsyncMock(
+                return_value=httpx.Response(
+                    200,
+                    json={
+                        "choices": [
+                            {
+                                "token_ids": completion,
+                                "finish_reason": "stop",
+                                "logprobs": {
+                                    "content": [
+                                        {"token": f"token_id:{token}", "logprob": -1.0}
+                                        for token in completion
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                )
+            )
+            monkeypatch.setattr(client.client, "post", post)
+            response = await client.get_response(
+                ChatDialect(), body, sampling, turn=turn
+            )
+            assert response.tokens is not None
+            assert counted["count"] == len(response.tokens.prompt_ids)
+            assert (
+                response.message.tool_calls
+                and response.message.tool_calls[0].name == name
+            )
+            if thinking:
+                assert response.message.reasoning_content == f"reasoning {index}"
+            turn.commit(
+                response,
+                tools=[
+                    vf.Tool(
+                        name=tool.function.name,
+                        description=tool.function.description,
+                        parameters=tool.function.parameters,
+                    )
+                    for tool in tools
+                ],
+            )
+            messages.extend(
+                [
+                    response.message,
+                    vf.ToolMessage(
+                        tool_call_id=response.message.tool_calls[0].id,
+                        content="feedback",
+                    ),
+                ]
+            )
+    finally:
+        await client.close()
+    credit_routing.assign_advantages(trace, advantage)
+    trained: list[int] = []
+    for sample in native_trajectories.trace_to_samples(trace):
+        assert sample.advantages is not None
+        for token, mask, credit in zip(
+            sample.token_ids, sample.mask, sample.advantages, strict=True
+        ):
+            if mask:
+                assert credit == advantage
+                trained.append(token)
+    assert (
+        trained == expected
+    )  # Every completion, exactly once despite physical branches.
+    assert all(not any(node.mask) for node in trace.nodes if not node.sampled)
+    assert all(node.advantages is None for node in trace.nodes if not any(node.mask))
 
 
 def test_prepare_rejects_unanswered_calls_before_rendering(

@@ -219,13 +219,13 @@ def test_request_goldens(
         [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
     )
     policy(transport).search(evaluator)
-    # Interface-v6 inspection request bytes with unconstrained local decoding.
+    # Final combined interface-v6 request bytes, including the committed prompt line break.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
     ] == [
-        "c5940995fefa17aafc0de4a964a88a24a785f9997d5e32019835d0529590a53f",
-        "b20e5f174545f6c8c21b117c332a973502041ba246faa8257799c829545f6a85",
+        "aa47d42a190e1b43412f91188e5cef0db60e35c111e7c684cb6cba86436226d3",
+        "95e97a5f9e5a41e1d65ccbd230b4b4baeb6f3d46bd9e270278ea0ab4f129990c",
     ]
 
 

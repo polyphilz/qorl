@@ -20,7 +20,11 @@ class EvaluationSettings(BaseModel):
 
 
 class PerformanceSummary(BaseModel):
-    """Unclipped latency statistics; failed and timed-out rollouts have no speedup."""
+    """Unclipped latency statistics; failed and timed-out rollouts have no speedup.
+
+    Selected positions are one-based over all issued attempts, including invalid
+    attempts, not speed ranks. An earlier choice precedes the last issued attempt.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -30,6 +34,9 @@ class PerformanceSummary(BaseModel):
     timeout_count: int
     no_valid_candidate_count: int
     selection_failure_count: int = 0
+    selected_candidate_positions: dict[int, int] = Field(default_factory=dict[int, int])
+    earlier_candidate_selection_count: int = 0
+    rejected_selection_count: int = 0
     geometric_mean_speedup: float | None
     candidate_workload_time_ms: float
     default_workload_time_ms: float

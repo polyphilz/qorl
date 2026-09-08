@@ -6,8 +6,9 @@ from pathlib import Path
 
 import pytest
 from prime_rl.monitors.file.traces import get_annotations_dir, get_trace_stream
-from tests.qorl.measure.test_feedback import ENABLED
-from tests.qorl.measure.test_rollout import ACTION, Worker, evaluator
+from tests.qorl.agent.test_agent import ScriptedTransport, policy, reply
+from tests.qorl.measure.test_feedback import ENABLED, InspectionWorker
+from tests.qorl.measure.test_rollout import ACTION, TASK, Sql, Worker, evaluator
 from verifiers.v1.configs.agent import AgentConfig
 from verifiers.v1.episode import (
     Episode,
@@ -19,6 +20,8 @@ from verifiers.v1.episode import (
 from verifiers.v1.state import State
 from verifiers.v1.trace import Error, TraceTask
 
+from qorl.agent.types import InspectionExecutor
+from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import OutcomeKind
 from qorl.postgres.exceptions import PostgresError
 from qorl.postgres.schemas import ExplainResult
@@ -37,8 +40,17 @@ from qorl.rl.tasks import QorlTaskData
 
 
 def test_report_keeps_credit_for_unshipped_groups_and_raw_speedups(
-    tmp_path: Path, rl_rollout_record: RlRolloutRecord
+    tmp_path: Path, rl_rollout_record: RlRolloutRecord, repository_root: Path
 ) -> None:
+    run = RolloutEvaluator[InspectionExecutor](
+        InspectionWorker(repository_root),
+        Sql(),
+        TASK,
+        measurement=ENABLED,
+        max_candidates=1,
+    )
+    run.start()
+    policy_trace = policy(ScriptedTransport([reply("keep_default")])).search(run)
     stream = get_trace_stream(tmp_path)
     stream.mkdir(parents=True)
     episode = EpisodeEvidence(
@@ -52,7 +64,12 @@ def test_report_keeps_credit_for_unshipped_groups_and_raw_speedups(
             id="native-run",
             work=TrainWorkInfo(step=2, policy=PolicySpan(start=1, end=1)),
         ),
-        traces=[TraceEvidence(id="trace", info=TraceInfo(qorl=rl_rollout_record))],
+        traces=[
+            TraceEvidence(
+                id="trace",
+                info=TraceInfo(qorl=rl_rollout_record, qorl_policy=policy_trace),
+            )
+        ],
     )
     failed = Episode[QorlTaskData, State, AgentConfig](
         id="failed",
@@ -142,6 +159,10 @@ def test_report_keeps_credit_for_unshipped_groups_and_raw_speedups(
     assert row.assigned_advantage == 0.643
     assert final.optimizer_steps == [2]
     assert final.scalar_reward_hook == "unused for anchored credit (0.0)"
+    assert final.usage == policy_trace.usage
+    assert final.usage.prompt_tokens == 100
+    assert final.usage.completion_tokens == 1
+    assert final.policy_usage_missing_count == 1
 
 
 def test_report_counts_probe_work_on_unscored_failure(

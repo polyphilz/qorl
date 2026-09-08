@@ -25,7 +25,8 @@ def test_prompt_budget_and_join_contract(attempts: int, label: str) -> None:
         "Omit empty constraints."
     ) in prompt
     assert prompt.endswith(
-        "Otherwise finish by selecting the eligible candidate you expect to execute fastest. You may select an earlier candidate.\n"
+        "Otherwise finish by selecting the eligible candidate you expect to execute fastest.\n"
+        "You may select an earlier candidate.\n"
     )
 
 

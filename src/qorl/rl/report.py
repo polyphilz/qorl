@@ -9,9 +9,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from verifiers.v1.episode import GroupInfo, TrainRunInfo
 from verifiers.v1.trace import Error, TraceTask
 
+from qorl.agent.agent import total_usage
+from qorl.agent.schemas import AgentTrace
 from qorl.evaluation.evaluate import summarize_performance
 from qorl.evaluation.schemas import PerformanceSummary
 from qorl.measure.schemas import OutcomeKind, RolloutRecord
+from qorl.model.schemas import TokenUsage
 from qorl.rl.schemas import RlRolloutRecord
 from qorl.rl.tasks import QorlTaskData
 from qorl.util.io import write_json
@@ -36,6 +39,7 @@ class TraceInfo(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     qorl: RlRolloutRecord | None = None
+    qorl_policy: AgentTrace | None = None
     qorl_advantage: AnchoredCredit | None = None
     ship: ShipInfo | None = None
 
@@ -104,6 +108,12 @@ class UpdateMetric(BaseModel):
 
 
 class RlTrainingReport(BaseModel):
+    """Usage sums available policy traces, including unscored rollouts.
+
+    Missing policy usage counts traces; no-trace failures are counted separately
+    in episode_failures. Provider-unknown token counts remain unknown.
+    """
+
     schema_version: int = 1
     completed: bool
     scalar_reward_hook: str
@@ -116,6 +126,8 @@ class RlTrainingReport(BaseModel):
     performance: PerformanceSummary
     learning: list[LearningEvidence]
     checkpoints: list[Path]
+    usage: TokenUsage = TokenUsage()
+    policy_usage_missing_count: int = 0
 
 
 def write_report(
@@ -154,6 +166,8 @@ def write_report(
     failures: list[EpisodeFailure] = []
     records: list[RolloutRecord] = []
     learning: list[LearningEvidence] = []
+    usage: list[TokenUsage] = []
+    missing_usage = 0
     directory = get_trace_stream(training)
     for chunk in sorted(chunk_numbers(directory)):
         with open_chunk(directory, chunk) as stream:
@@ -171,6 +185,10 @@ def write_report(
                     )
                 policy = episode.run.work.policy
                 for trace in episode.traces:
+                    if trace.info.qorl_policy is not None:
+                        usage.append(trace.info.qorl_policy.usage)
+                    else:
+                        missing_usage += 1
                     record = trace.info.qorl
                     if record is not None:
                         records.append(record)
@@ -217,6 +235,8 @@ def write_report(
             for kind in OutcomeKind
         },
         performance=summarize_performance(records),
+        usage=total_usage(usage),
+        policy_usage_missing_count=missing_usage,
         learning=learning,
         checkpoints=sorted(
             path.parent

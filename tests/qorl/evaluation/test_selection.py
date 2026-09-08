@@ -57,6 +57,8 @@ REJECTED_FINISHES: dict[str, JsonValue] = {
         "earlier",
         "middle",
         "slower",
+        "five_third",
+        "five_slower",
         "omitted",
         "all_rejected",
         "ineligible",
@@ -85,7 +87,9 @@ def test_selected_outcome_through_active_consumers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     count = (
-        3
+        5
+        if scenario.startswith("five_")
+        else 3
         if scenario in {"earlier", "middle", "slower"}
         else 1
         if scenario.startswith(("rejected_", "ignored_", "truncated_"))
@@ -101,6 +105,8 @@ def test_selected_outcome_through_active_consumers(
         actions = [{"version": 2}]
     if scenario == "ineligible":
         actions[0] = {"version": 2}
+    if scenario.startswith("five_"):
+        actions[1] = {"version": 2}
     if scenario == "forced_none":
         actions = []
     responses = [
@@ -108,7 +114,11 @@ def test_selected_outcome_through_active_consumers(
         for action in actions
     ]
     chosen = (
-        2
+        5
+        if scenario == "five_slower"
+        else 3
+        if scenario == "five_third"
+        else 2
         if scenario in {"planning_success", "execution_success", "middle"}
         else 3
         if scenario == "slower"
@@ -325,6 +335,16 @@ def test_selected_outcome_through_active_consumers(
         assert record.final.selected_candidate_id == f"candidate-{chosen:02d}"
         assert record.final.speedup == 100.0 / chosen
         assert final_hints == [chosen] * 4
+        if scenario.startswith("five_"):
+            assert len(record.candidates) == 5
+            assert not record.candidates[1].selection_eligible
+            assert record.execution_counts is not None
+            assert record.execution_counts.initial_default == 2
+            assert record.execution_counts.candidate_feedback == 8
+            assert record.execution_counts.final_paired == 8
+            performance = summarize_performance([record])
+            assert performance.selected_candidate_positions == {chosen: 1}
+            assert performance.earlier_candidate_selection_count == (chosen == 3)
     if scenario == "corrected":
         assert (
             trace.selection.status == "accepted"

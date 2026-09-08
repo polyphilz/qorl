@@ -4,6 +4,7 @@ import math
 import os
 import random
 import time
+from collections import Counter
 from concurrent.futures import (
     CancelledError,
     Future,
@@ -86,6 +87,15 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
         for record in records
         if record.execution_counts is not None
     ]
+    selected_positions: Counter[int] = Counter()
+    earlier_selections = 0
+    for record in records:
+        if record.final is None or record.final.selected_candidate_id is None:
+            continue
+        for position, candidate in enumerate(record.candidates, start=1):
+            if candidate.candidate_id == record.final.selected_candidate_id:
+                selected_positions[position] += 1
+                earlier_selections += position < len(record.candidates)
     return PerformanceSummary(
         rollout_count=len(records),
         scored_rollout_count=len(speedups),
@@ -98,6 +108,13 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
         ),
         selection_failure_count=sum(
             outcome.kind == OutcomeKind.SELECTION_FAILED for outcome in outcomes
+        ),
+        selected_candidate_positions=dict(sorted(selected_positions.items())),
+        earlier_candidate_selection_count=earlier_selections,
+        rejected_selection_count=sum(
+            len(record.selection.rejections)
+            for record in records
+            if record.selection is not None
         ),
         geometric_mean_speedup=math.exp(
             sum(math.log(value) for value in speedups) / len(speedups)
