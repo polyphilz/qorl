@@ -21,8 +21,14 @@ from prime_rl.configs.trainer import (
     LoRAConfig,
     ModelConfig,
 )
+from safetensors.torch import load as load_tensors
 
-from qorl.adapters.export import checkpoint_sha256, export_adapter
+from qorl.adapters.config import adapter_config
+from qorl.adapters.export import (
+    checkpoint_sha256,
+    export_adapter,
+    export_configuration,
+)
 from qorl.adapters.schemas import AdapterExportManifest, LoraSettings
 from qorl.adapters.verify import verify_adapter_base
 from qorl.experiment.schemas import SftExperimentConfig
@@ -81,6 +87,10 @@ def trainer_config(
     settings = config.training
     runtime = settings.runtime
     optimizer = settings.optimizer
+    keep_last = settings.checkpoints.keep_last
+    if keep_last is None and settings.checkpoints.keep_interval is not None:
+        # Prime-RL otherwise deletes a final step outside the retained intervals.
+        keep_last = 1
     steps_per_epoch = math.ceil(report.training.packed_rows / settings.batch_size)
     base = resolve_model(config.model)
     return SFTConfig(
@@ -127,7 +137,7 @@ def trainer_config(
         scheduler=optimizer.scheduler,
         ckpt=CheckpointConfig(
             interval=settings.checkpoints.interval,
-            keep_last=settings.checkpoints.keep_last,
+            keep_last=keep_last,
             keep_interval=settings.checkpoints.keep_interval,
         ),
         max_steps=settings.epochs * steps_per_epoch,
@@ -178,6 +188,12 @@ def checkpoint_model(
     lora = native.model.lora
     if lora is None:
         raise ValueError("checkpoint evaluation requires recorded LoRA settings")
+    settings = LoraSettings(
+        rank=lora.rank,
+        alpha=lora.alpha,
+        dropout=lora.dropout,
+        target_modules=lora.target_modules,
+    )
     adapter = checkpoint.parent / "adapter"
     if adapter.exists():
         verify_adapter_base(adapter, base)
@@ -186,18 +202,16 @@ def checkpoint_model(
         )
         if exported.checkpoint_sha256 != checkpoint_sha256(checkpoint):
             raise ValueError("exported adapter belongs to different checkpoint weights")
-    else:
-        export_adapter(
-            checkpoint,
-            base,
-            LoraSettings(
-                rank=lora.rank,
-                alpha=lora.alpha,
-                dropout=lora.dropout,
-                target_modules=lora.target_modules,
-            ),
-            adapter,
+        weights = adapter / "adapter_model.safetensors"
+        if sha256_file(weights) != exported.adapter_sha256:
+            raise ValueError("exported adapter weights changed")
+        expected = export_configuration(
+            base, settings, load_tensors(weights.read_bytes())
         )
+        if adapter_config(adapter) != expected:
+            raise ValueError("exported adapter differs from recorded LoRA settings")
+    else:
+        export_adapter(checkpoint, base, settings, adapter)
     return model.model_copy(
         update={"name_or_path": str(base), "revision": None, "adapter_path": adapter}
     )

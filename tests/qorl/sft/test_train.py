@@ -9,6 +9,8 @@ import pytest
 import torch
 from prime_rl.configs.sft import SFTConfig
 from prime_rl.configs.trainer import CosineSchedulerConfig
+from pydantic import JsonValue
+from safetensors.torch import save as serialize_safetensors
 from torch.distributed.checkpoint import state_dict_saver
 from torch.distributed.checkpoint.metadata import Metadata
 
@@ -20,9 +22,11 @@ from qorl.sft.schemas import (
     DatasetPreparationIdentity,
     DatasetPreparationReport,
     PreparedSplitReport,
+    SftTrainingReport,
     TrainingIdentity,
     TrainingRow,
 )
+from qorl.training.schemas import CheckpointSettings
 from qorl.util.hashing import sha256_file, sha256_json
 from qorl.util.io import write_json
 
@@ -180,6 +184,41 @@ def test_native_scheduler_rejects_warmup_beyond_row_schedule(
         train.trainer_config(changed, prepared, report)
 
 
+@pytest.mark.parametrize(
+    ("checkpoints", "expected_keep_last"),
+    [
+        (CheckpointSettings(type="final"), None),
+        (CheckpointSettings(type="interval", interval=1), None),
+        (CheckpointSettings(type="interval", interval=1, keep_interval=3), 1),
+        (CheckpointSettings(type="interval", interval=1, keep_last=2), 2),
+        (
+            CheckpointSettings(
+                type="interval", interval=1, keep_last=2, keep_interval=3
+            ),
+            2,
+        ),
+    ],
+)
+def test_translated_retention_keeps_latest_checkpoint(
+    config: SftExperimentConfig,
+    prepared: Path,
+    checkpoints: CheckpointSettings,
+    expected_keep_last: int | None,
+) -> None:
+    report = train.prepared_report(config, prepared / "dataset")
+    changed = config.model_copy(
+        update={
+            "training": config.training.model_copy(update={"checkpoints": checkpoints})
+        }
+    )
+    native = train.trainer_config(changed, prepared, report)
+    assert native.max_steps == 4
+    assert native.ckpt is not None
+    assert native.ckpt.keep_last == expected_keep_last
+    assert native.ckpt.keep_interval == checkpoints.keep_interval
+    assert native.ckpt.interval == checkpoints.interval
+
+
 def test_changed_prepared_rows_are_rejected(
     config: SftExperimentConfig, prepared: Path
 ) -> None:
@@ -197,12 +236,13 @@ def test_existing_training_is_not_overwritten(
         train.train(config, prepared)
 
 
-def test_train_records_counts_and_exports_recorded_scale(
+@pytest.fixture
+def trained(
     config: SftExperimentConfig,
     prepared: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+) -> SftTrainingReport:
     checkpoint = tmp_path / "native-checkpoint"
     CHECKPOINT_SAVER.save(
         {
@@ -233,7 +273,16 @@ def test_train_records_counts_and_exports_recorded_scale(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(train.subprocess, "run", launch)
-    result = train.train(config, prepared)
+    return train.train(config, prepared)
+
+
+def test_train_records_counts_and_exports_recorded_scale(
+    config: SftExperimentConfig,
+    prepared: Path,
+    tmp_path: Path,
+    trained: SftTrainingReport,
+) -> None:
+    result = trained
     assert result.optimizer_updates == 4 and result.steps_per_epoch == 2
     assert [loss.step for loss in result.validation_losses] == [0, 2, 4]
     assert result.training.packed_rows == ROW_COUNT
@@ -255,11 +304,64 @@ def test_train_records_counts_and_exports_recorded_scale(
     with pytest.raises(ValueError, match="already complete"):
         train.train(config, prepared)
     with pytest.raises(ValueError, match="from this run"):
-        train.checkpoint_model(config.model, prepared / "training", checkpoint)
+        train.checkpoint_model(
+            config.model, prepared / "training", tmp_path / "native-checkpoint"
+        )
     shard = next(result.checkpoints[-1].glob("*.distcp"))
     with shard.open("ab") as stream:
         stream.write(b"changed")
     with pytest.raises(ValueError, match="different checkpoint weights"):
         train.checkpoint_model(
             config.model, prepared / "training", result.checkpoints[-1]
+        )
+
+
+def test_cached_adapter_rejects_changed_tensors(
+    config: SftExperimentConfig, prepared: Path, trained: SftTrainingReport
+) -> None:
+    weights = trained.final_adapter / "adapter_model.safetensors"
+    weights.write_bytes(
+        serialize_safetensors(
+            {
+                "layer.q_proj.lora_A.weight": torch.full(
+                    (LORA_RANK, CONTEXT_LENGTH), 2.0
+                ),
+                "layer.q_proj.lora_B.weight": torch.full(
+                    (CONTEXT_LENGTH, LORA_RANK), 2.0
+                ),
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="adapter weights changed"):
+        train.checkpoint_model(
+            config.model, prepared / "training", trained.checkpoints[-1]
+        )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"r": LORA_RANK + 1},
+        {"lora_alpha": LORA_ALPHA * 2},
+        {"lora_dropout": 0.5},
+        {"target_modules": ["k_proj"]},
+        {"use_rslora": True},
+        {"bias": "all"},
+    ],
+)
+def test_cached_adapter_rejects_changed_lora_settings(
+    config: SftExperimentConfig,
+    prepared: Path,
+    trained: SftTrainingReport,
+    changes: dict[str, JsonValue],
+) -> None:
+    path = trained.final_adapter / "adapter_config.json"
+    settings = AdapterConfig.model_validate_json(path.read_bytes()).model_dump(
+        mode="json"
+    )
+    settings.update(changes)
+    write_json(path, settings)
+    with pytest.raises(ValueError, match="recorded LoRA settings"):
+        train.checkpoint_model(
+            config.model, prepared / "training", trained.checkpoints[-1]
         )
