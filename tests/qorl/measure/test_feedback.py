@@ -19,12 +19,15 @@ from tests.qorl.measure.test_rollout import (
 )
 
 from qorl.agent.feedback import execution_observation
+from qorl.agent.interface import AgentInterface
 from qorl.agent.presentation import FIELD_BYTES, PLAN_BYTES, plan_view
 from qorl.agent.tool_runtime import AgentEnvironment
+from qorl.agent.tools import agent_tools
 from qorl.agent.types import InspectionExecutor
 from qorl.evaluation.evaluate import summarize_performance
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
+from qorl.measure.validation import PlanValidationEvaluator
 from qorl.model.client import JSON_OBJECT
 from qorl.model.schemas import JsonObject, JsonValue
 from qorl.plans.fingerprint import plan_sha256
@@ -224,6 +227,39 @@ class InspectionWorker(Worker):
                         "HintStateDump: {used hints:(none)}, {not used hints:Set(seq_page_cost)}, {duplicate hints:(none)}, {error hints:(none)}",
                     )
         return result
+
+
+@pytest.mark.parametrize("attempts", [1, 5])
+@pytest.mark.parametrize("measurement", [None, SETTINGS, ENABLED])
+def test_tool_description_matches_active_evaluator(
+    repository_root: Path,
+    attempts: int,
+    measurement: RolloutMeasurementSettings | None,
+) -> None:
+    worker = InspectionWorker(repository_root)
+    run: PlanValidationEvaluator[InspectionExecutor]
+    if measurement is None:
+        run = PlanValidationEvaluator(
+            worker, Sql(), TASK, default_timeout_ms=5000, max_candidates=attempts
+        )
+    else:
+        run = RolloutEvaluator(
+            worker, Sql(), TASK, measurement=measurement, max_candidates=attempts
+        )
+    run.start()
+    interface = AgentInterface.from_evaluator(run, 64)
+    expected = "Submit one self-contained PlanAction for plain-EXPLAIN validation and return validation diagnostics."
+    if measurement is not None and measurement.candidate_feedback_measurements > 0:
+        expected += " For valid candidates, also return available execution observations, including timings and observed plan diagnostics."
+    reference = agent_tools(["a", "b"], execution_feedback=False)
+    assert len(interface.tools) == len(reference) == 6
+    for tool, original in zip(interface.tools, reference, strict=True):
+        assert tool.function.name == original.function.name
+        assert tool.function.parameters == original.function.parameters
+        if tool.function.name == "evaluate_candidate":
+            assert tool.function.description == expected
+        else:
+            assert tool == original
 
 
 def test_feedback_is_in_next_request_even_when_only_finish_remains(

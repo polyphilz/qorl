@@ -10,7 +10,13 @@ def test_prompt_budget_and_join_contract(attempts: int, label: str) -> None:
     prompt = system_prompt(attempts)
     assert prompt.startswith("You are qo-agent.")
     assert f"You may submit up to {attempts} {label}; you do not need\n" in prompt
-    assert "to use every attempt. Leave a turn to finish." in prompt
+    assert (
+        "to use every attempt. Reserve one model turn for a terminal tool call."
+        in prompt
+    )
+    assert (
+        "Calling finish or keep_default does not consume a candidate attempt." in prompt
+    )
     assert (
         "Each joins[].relations value must contain the complete set of leaf aliases\n"
         "beneath one internal node of the candidate plan.\n"

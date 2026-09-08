@@ -43,7 +43,6 @@ class AgentInterface:
         inspection_turns_per_alias: int = INSPECTION_TURNS_PER_ALIAS,
     ) -> AgentInterface:
         aliases = sorted(evaluator.catalog.relations)
-        tools = agent_tools(aliases)
         candidate_attempts = evaluator.max_candidates
         reserved_decision_turns = candidate_attempts + 1
         inspection_turn_limit = min(
@@ -55,6 +54,11 @@ class AgentInterface:
         postgres_settings = evaluator.worker.settings
         measurement = (
             evaluator.measurement if isinstance(evaluator, RolloutEvaluator) else None
+        )
+        tools = agent_tools(
+            aliases,
+            execution_feedback=measurement is not None
+            and measurement.candidate_feedback_measurements > 0,
         )
         observation = AgentObservation(
             task_id=evaluator.task.task_id,

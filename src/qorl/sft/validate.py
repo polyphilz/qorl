@@ -122,7 +122,11 @@ def validate_protocol_demo(
 
     aliases = sorted(relation["alias"] for relation in task["relations"])
     require(
-        tools == [tool.model_dump(mode="json") for tool in agent_tools(aliases)],
+        tools
+        == [
+            tool.model_dump(mode="json")
+            for tool in agent_tools(aliases, execution_feedback=False)
+        ],
         "tool schemas differ from the live agent",
     )
     maximum_turns = metadata.get("maximum_model_turns")

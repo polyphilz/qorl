@@ -224,8 +224,8 @@ def test_request_goldens(
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
     ] == [
-        "99b8c8635034ec75516cac0d095afeeb189fafe9675a9b6293d55ca590402db4",
-        "aa3f8dc00f55caf691d99694f8aa9047249daeee77e53df9b072a9b7f89b1dab",
+        "85a1f83d602c19d6cd80ff182cb745bcc7367ca1f67e2e159e6ac2062063df7c",
+        "8598bc9a88f151f736cc065c958d87882076b4abe97a8f82a9b3ece8eef86798",
     ]
 
 

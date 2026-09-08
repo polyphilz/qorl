@@ -407,7 +407,9 @@ def test_six_tools_resources_and_unavailable_metadata(
     interface = AgentInterface.from_evaluator(runtime.evaluator, 64)
     assert interface.observation.resource_limits.worker == database.allocation
     assert interface.inspection_turn_limit == 6
-    assert [tool.function.name for tool in agent_tools(["a", "b"])] == [
+    assert [
+        tool.function.name for tool in agent_tools(["a", "b"], execution_feedback=False)
+    ] == [
         "inspect_relation",
         "get_column_stats",
         "get_plan",

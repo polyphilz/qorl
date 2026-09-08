@@ -49,7 +49,7 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
     action, hint = plan_action.to_wire(), plan_action.compile()
     plan = {"Plan": {**raw_plan(leading), "Startup Cost": 1.0}}
     visible_plan = plan_view(plan["Plan"]).model_dump(mode="json")
-    tools = agent_tools(aliases)
+    tools = agent_tools(aliases, execution_feedback=False)
     maximum_turns = 64
     reserved_decision_turns = candidate_attempts + 1
     inspection_limit = min(len(aliases) * 3, maximum_turns - reserved_decision_turns)

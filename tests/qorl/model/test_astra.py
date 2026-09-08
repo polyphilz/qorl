@@ -50,7 +50,7 @@ def turn() -> GenerationRequest:
             Message(role=MessageRole.SYSTEM, content="Use the tools."),
             Message(role=MessageRole.USER, content="Optimize this query."),
         ],
-        tools=agent_tools(["a", "b"]),
+        tools=agent_tools(["a", "b"], execution_feedback=False),
         seed=42,
     )
 
@@ -278,7 +278,7 @@ def test_live_tool_continuation(
     """Opt-in paid API check: inspect a synthetic plan, then keep it unchanged."""
     assert isinstance(preset.inference, AstraInferenceSettings)
     client = AstraModelClient(preset.model, preset.inference)
-    tools = agent_tools(["a", "b"])
+    tools = agent_tools(["a", "b"], execution_feedback=False)
     initial = GenerationRequest(
         messages=[
             Message(

@@ -25,7 +25,11 @@ def function(
     )
 
 
-def agent_tools(relations: list[str]) -> list[ToolDefinition]:
+def agent_tools(
+    relations: list[str],
+    *,
+    execution_feedback: bool,
+) -> list[ToolDefinition]:
     def relation_schema(arguments: type[RelationArguments]) -> JsonObject:
         schema = arguments.model_json_schema()
         schema["properties"]["relation"]["enum"] = relations
@@ -33,6 +37,9 @@ def agent_tools(relations: list[str]) -> list[ToolDefinition]:
 
     action = PlanAction.tool_schema(relations)
     definitions = action.pop("$defs")
+    evaluation_description = "Submit one self-contained PlanAction for plain-EXPLAIN validation and return validation diagnostics."
+    if execution_feedback:
+        evaluation_description += " For valid candidates, also return available execution observations, including timings and observed plan diagnostics."
     return [
         function(
             ToolName.INSPECT_RELATION,
@@ -51,7 +58,7 @@ def agent_tools(relations: list[str]) -> list[ToolDefinition]:
         ),
         function(
             ToolName.EVALUATE_CANDIDATE,
-            "Submit one self-contained PlanAction for plain-EXPLAIN validation. Invalid or unsatisfied actions do not execute. Valid candidates receive configured execution feedback before the next turn in measured mode; exact timing-identity reuse is explicitly sourced. Preliminary feedback is not final paired speedup. Plan-only callers never execute; 0+0 feedback defers timing until finalization.",
+            evaluation_description,
             OBJECT.validate_python(
                 {
                     "type": "object",

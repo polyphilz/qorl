@@ -818,7 +818,9 @@ def test_job_queries_render_their_own_alias_schemas(
         task = next(
             task for task in benchmark_task_sets["job"].tasks if task.task_id == task_id
         )
-        tools = agent_tools([relation.alias for relation in task.relations])
+        tools = agent_tools(
+            [relation.alias for relation in task.relations], execution_feedback=False
+        )
         record = Conversation(
             conversation_id=task_id,
             task_id=task_id,
@@ -932,7 +934,9 @@ def test_wrong_query_alias_is_rejected_by_the_recorded_schema(
     describe = ToolDefinition.model_validate(
         next(
             tool
-            for tool in agent_tools(["ct", "it", "mc", "mi_idx", "t"])
+            for tool in agent_tools(
+                ["ct", "it", "mc", "mi_idx", "t"], execution_feedback=False
+            )
             if tool.function.name == "inspect_relation"
         )
     )

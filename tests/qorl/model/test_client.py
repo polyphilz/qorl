@@ -209,7 +209,7 @@ def test_server_settings_never_enter_api_payloads(
 def test_real_agent_tools_and_prompt_are_not_rewritten(
     config: EvaluationExperimentConfig,
 ) -> None:
-    definitions = agent_tools(["a", "b"])
+    definitions = agent_tools(["a", "b"], execution_feedback=False)
     prompt = system_prompt(1)
     request = GenerationRequest(
         messages=[Message(role=MessageRole.SYSTEM, content=prompt)],
