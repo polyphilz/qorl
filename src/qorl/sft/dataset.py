@@ -1,4 +1,4 @@
-"""Prepare frozen conversations for a student without generating or measuring SQL."""
+"""Generate or reuse frozen conversations, then render and pack them for a student."""
 
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -40,6 +40,7 @@ from qorl.sft.schemas import (
     ConversationRequest,
     DatasetPreparationIdentity,
     DatasetPreparationReport,
+    ImportedGenerationSeeds,
     PackingRowMetadata,
     PreparedDatasetManifest,
     PreparedSplitReport,
@@ -132,21 +133,31 @@ def source_file(directory: Path, relative: Path) -> Path:
 
 
 def load_source(
-    config: SftExperimentConfig, selections: dict[TaskRole, TaskSelection]
+    config: SftExperimentConfig,
+    selections: dict[TaskRole, TaskSelection],
+    *,
+    generated_source: Path | None = None,
 ) -> ConversationSource:
     """Check frozen split membership, original seeds and tool references, not outcomes."""
-    if config.data.dataset_from is None:
-        raise NotImplementedError(
-            "SFT conversation generation is not implemented; acceptance policy is gated on 032-sft-v3"
+    source = config.data.dataset_from or generated_source
+    if source is None:
+        raise ValueError(
+            "generate a conversation artifact before loading the student source"
         )
-    directory = (REPOSITORY_ROOT / config.data.dataset_from.expanduser()).resolve()
+    directory = (REPOSITORY_ROOT / source.expanduser()).resolve()
     manifest_path = directory / "manifest.json"
     manifest_bytes = manifest_path.read_bytes()
     manifest = PreparedDatasetManifest.model_validate_json(manifest_bytes)
     files = {"source-manifest.json": manifest_bytes}
     conversations: dict[TaskRole, list[Conversation]] = {}
     seen: set[str] = set()
-    seeds = config.data.imported_generation_seeds
+    seeds = (
+        config.data.imported_generation_seeds
+        if config.data.dataset_from is not None
+        else ImportedGenerationSeeds(
+            training=config.experiment.seed, validation=config.experiment.seed
+        )
+    )
     if seeds is None:
         raise ValueError("reused conversations require original generation seeds")
     for role, split, configured, generation_seed in (
@@ -175,8 +186,6 @@ def load_source(
             for line in content.splitlines()
             if line.strip()
         ]
-        if not records:
-            raise ValueError(f"source {role.value} has no conversations")
         for record in records:
             if record.conversation_id in seen:
                 raise ValueError(f"repeated conversation_id: {record.conversation_id}")
@@ -508,11 +517,16 @@ def prepare_dataset(
     resume: bool = False,
 ) -> DatasetPreparationReport:
     """Reuse immutable sources and completed renders; publish a report after packing."""
-    source = load_source(config, selections)
     if output.exists() and not resume:
         raise ValueError(
             "dataset preparation already exists; use --resume or start a new run"
         )
+    generated = None
+    if config.data.dataset_from is None:
+        from qorl.sft.generate import generate_dataset
+
+        generated = generate_dataset(config, selections, output.parent / "generation")
+    source = load_source(config, selections, generated_source=generated)
     student = load_student(config)
     identity = preparation_identity(config, source, student)
     identity_path = output / "preparation.json"

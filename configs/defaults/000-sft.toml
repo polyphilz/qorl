@@ -36,6 +36,11 @@ expression = "FILL_ME_IN"
 [data.generation]
 model = "FILL_ME_IN"
 generations_per_task = "FILL_ME_IN"
+plan_only = false
+
+[data.generation.inference]
+max_tokens = 8192
+reasoning_effort = "medium"
 
 [training]
 epochs = 1

@@ -199,30 +199,6 @@ def test_changed_defaults_are_not_read_during_execution(
 
 
 @pytest.mark.parametrize(
-    "stage,method",
-    [
-        (RunStage.PREPARE, ExperimentMethod.SFT),
-    ],
-)
-def test_unimplemented_stages_do_not_allocate_outputs(
-    stage: RunStage,
-    method: ExperimentMethod,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    directory = tmp_path / "experiment"
-    directory.mkdir()
-    (directory / "config.toml").write_bytes(create.latest_template(method).read_bytes())
-    monkeypatch.setattr(run, "OUTPUTS_DIRECTORY", tmp_path / "outputs")
-    request = RunRequest(
-        stage, split=TaskRole.TEST if stage == RunStage.EVALUATE else None
-    )
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        run.run_experiment(directory, request)
-    assert not run.OUTPUTS_DIRECTORY.exists()
-
-
-@pytest.mark.parametrize(
     "method,stage_request,message",
     [
         (ExperimentMethod.CALIBRATE, RunRequest(RunStage.TRAIN), "not valid"),

@@ -217,12 +217,6 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
     directory = (REPOSITORY_ROOT / directory).resolve()
     config = load_config(directory / "config.toml")
     validate_stage(config, request)
-    if request.stage == RunStage.PREPARE and (
-        not isinstance(config, SftExperimentConfig) or config.data.dataset_from is None
-    ):
-        raise NotImplementedError(
-            "SFT conversation generation is not implemented; acceptance policy is gated on 032-sft-v3"
-        )
     if request.resume and request.stage == RunStage.CALIBRATE:
         raise ValueError("calibration cannot resume partial runs; start a new run")
 

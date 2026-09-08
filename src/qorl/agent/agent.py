@@ -119,6 +119,7 @@ class QoAgentPolicy:
                 tools=interface.available_tools(turn, len(evaluator.candidates)),
                 seed=turn_seed(self.seed, evaluator.task.task_id, turn),
             )
+            trace.model_requests.append(request.model_copy(deep=True))
             try:
                 response = self.client.generate(request)
             except ContextBudgetError as error:

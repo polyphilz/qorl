@@ -8,6 +8,7 @@ from qorl.agent.observation import AgentObservation
 from qorl.agent.types import StopReason
 from qorl.measure.schemas import SelectionState
 from qorl.model.schemas import (
+    GenerationRequest,
     GenerationResponse,
     JsonObject,
     Message,
@@ -51,6 +52,9 @@ class AgentTrace(BaseModel):
     transcript: list[Message]
     model_responses: list[GenerationResponse] = Field(
         default_factory=list[GenerationResponse]
+    )
+    model_requests: list[GenerationRequest] = Field(
+        default_factory=list[GenerationRequest]
     )
     tool_events: list[ToolEvent] = Field(default_factory=list[ToolEvent])
     usage: TokenUsage = TokenUsage()
