@@ -1,15 +1,16 @@
 """CPU checkpoint export retains base provenance for each supported weight layout."""
 
-import sys
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 import torch
 from safetensors.torch import save as serialize_safetensors
 from torch.distributed.checkpoint import state_dict_saver
+from torch.distributed.checkpoint.metadata import Metadata
 
 from qorl.adapters import export
-from qorl.adapters.schemas import AdapterExportManifest
+from qorl.adapters.schemas import AdapterExportManifest, LoraSettings
 from qorl.adapters.verify import verify_adapter_base
 from qorl.model.files import model_weights_sha256
 from qorl.model.schemas import ModelWeightIndex
@@ -18,11 +19,22 @@ WEIGHT_WIDTH = 2
 LORA_RANK = 1
 
 
+class CheckpointSaver(Protocol):
+    def save(
+        self,
+        state_dict: dict[str, dict[str, dict[str, torch.Tensor]]],
+        *,
+        checkpoint_id: Path,
+    ) -> Metadata: ...
+
+
+CHECKPOINT_SAVER: CheckpointSaver = state_dict_saver
+
+
 @pytest.mark.parametrize("filename", ["model.safetensors", "pytorch_model.bin"])
 @pytest.mark.parametrize("sharded", [False, True])
 def test_export_records_verifiable_base_weights(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     filename: str,
     sharded: bool,
 ) -> None:
@@ -44,7 +56,7 @@ def test_export_records_verifiable_base_weights(
             ).model_dump_json()
         )
     checkpoint = tmp_path / "checkpoint"
-    state_dict_saver.save(
+    CHECKPOINT_SAVER.save(
         {
             "app": {
                 "model": {
@@ -56,20 +68,12 @@ def test_export_records_verifiable_base_weights(
         checkpoint_id=checkpoint,
     )
     output = tmp_path / "adapter"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "export",
-            "--checkpoint",
-            str(checkpoint),
-            "--model",
-            str(base),
-            "--output",
-            str(output),
-        ],
+    export.export_adapter(
+        checkpoint,
+        base,
+        LoraSettings(rank=LORA_RANK, alpha=1.0, dropout=0.0, target_modules=["layer"]),
+        output,
     )
-    export.main()
     manifest = AdapterExportManifest.model_validate_json(
         (output / "qorl-manifest.json").read_bytes()
     )

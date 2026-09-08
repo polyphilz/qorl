@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gpu = [
-    "prime-rl[gpu,flash-attn] ; sys_platform == 'linux'",
+    "prime-rl[gpu,flash-attn,kernels] ; sys_platform == 'linux'",
     "vllm==0.28.0 ; sys_platform == 'linux'",
 ]
 
@@ -43,7 +43,7 @@ environments = [
 ]
 
 [tool.uv.sources]
-prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "166a3aa9837d54dbd619bb715191cec01d4cd809" }
+prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "ff0f103d790b6a5125a7623be03ef288dd66c99b" }
 
 # uv reads metadata corrections from the root project. These match Prime-RL's.
 # ModelExpress's generated protobuf code supports v6 despite its published <6 cap.

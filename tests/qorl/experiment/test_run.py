@@ -231,7 +231,12 @@ def test_unimplemented_stages_do_not_allocate_outputs(
         (
             ExperimentMethod.RL,
             RunRequest(RunStage.TRAIN, resume=True),
-            "--resume requires --run",
+            "training cannot resume",
+        ),
+        (
+            ExperimentMethod.SFT,
+            RunRequest(RunStage.TRAIN, number=0, resume=True),
+            "training cannot resume",
         ),
         (
             ExperimentMethod.CALIBRATE,

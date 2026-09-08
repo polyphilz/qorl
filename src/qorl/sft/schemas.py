@@ -263,6 +263,50 @@ class DatasetPreparationReport(BaseModel):
     files: dict[str, str]
 
 
+class TrainingIdentity(BaseModel):
+    """Recorded training inputs and the base used to export its adapters."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[1] = 1
+    experiment_sha256: str
+    preparation_sha256: str
+    base_weights_sha256: str
+    trainer_source: str
+    trainer_config_sha256: str
+
+
+class TrainerMetric(BaseModel):
+    """The fields consumed from Prime-RL's otherwise unchanged metrics JSONL."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True, allow_inf_nan=False)
+
+    step: int
+    validation_loss: float | None = Field(default=None, alias="val/loss")
+
+
+class ValidationLoss(BaseModel):
+    """Loss on validation targets at a completed optimizer-update count."""
+
+    step: int
+    loss: float = Field(allow_inf_nan=False)
+
+
+class SftTrainingReport(BaseModel):
+    """Completed schedule, dataset counts and explicitly identified saved weights."""
+
+    schema_version: Literal[1] = 1
+    training: PreparedSplitReport
+    validation: PreparedSplitReport
+    epochs: int
+    batch_size: int
+    steps_per_epoch: int
+    optimizer_updates: int
+    validation_losses: list[ValidationLoss]
+    checkpoints: list[Path]
+    final_adapter: Path
+
+
 class SamplingMode(StrEnum):
     NORMAL = "normal"
     DEFAULT_BEST = "default_best"

@@ -37,7 +37,12 @@ from qorl.measure.schemas import (
     RunStatus,
 )
 from qorl.model.exceptions import ModelRequestError
-from qorl.model.schemas import AstraInferenceSettings, ModelProvider, ReasoningEffort
+from qorl.model.schemas import (
+    AstraInferenceSettings,
+    ModelProvider,
+    ModelSettings,
+    ReasoningEffort,
+)
 from qorl.postgres.config import PostgresConfig
 from qorl.taskset.schemas import BenchmarkId, TaskRole, TaskSelection
 from qorl.taskset.taskset import TaskSet
@@ -471,6 +476,19 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
     # Standalone evaluation uses the configured adapter; training evaluation uses
     # the explicit stage checkpoint. The serving boundary records what it receives.
     adapter = tmp_path / "explicit-adapter"
+    if method == ExperimentMethod.SFT:
+        from qorl.sft import train as sft_training
+
+        def exported_model(
+            model: ModelSettings, training_directory: Path, checkpoint: Path
+        ) -> ModelSettings:
+            assert (
+                training_directory
+                == run.OUTPUTS_DIRECTORY / directory.name / "000/training"
+            )
+            return model.model_copy(update={"adapter_path": checkpoint})
+
+        monkeypatch.setattr(sft_training, "checkpoint_model", exported_model)
     changed = config.model_copy(
         update={
             "evaluation": EvaluationSettings(rollouts_per_task=1),

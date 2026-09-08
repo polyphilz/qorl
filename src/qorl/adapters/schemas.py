@@ -34,3 +34,4 @@ class AdapterExportManifest(BaseModel):
     nonzero_lora_b_values: int = Field(gt=0)
     adapter_sha256: str
     base_model_sha256: str | None = None
+    checkpoint_sha256: str | None = None

@@ -62,7 +62,7 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--split", choices=[TaskRole.VALIDATION, TaskRole.TEST])
     parser.add_argument(
-        "--resume", action="store_true", help="continue saved stage progress"
+        "--resume", action="store_true", help="reuse saved preparation progress only"
     )
 
 
@@ -155,6 +155,8 @@ def validate_stage(config: ExperimentConfig, request: RunRequest) -> None:
         raise ValueError("run number must be nonnegative")
     if request.stage == RunStage.EVALUATE and request.resume:
         raise ValueError("evaluation cannot resume; restart into fresh outputs")
+    if request.stage == RunStage.TRAIN and request.resume:
+        raise ValueError("training cannot resume; start a new run")
     if request.resume and request.number is None:
         raise ValueError("--resume requires --run")
     if request.number is None and request.stage != METHOD_STAGES[method][0]:
@@ -220,7 +222,7 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
     directory = (REPOSITORY_ROOT / directory).resolve()
     config = load_config(directory / "config.toml")
     validate_stage(config, request)
-    if request.stage not in (RunStage.CALIBRATE, RunStage.EVALUATE, RunStage.PREPARE):
+    if request.stage == RunStage.TRAIN and not isinstance(config, SftExperimentConfig):
         raise NotImplementedError(f"stage {request.stage.value} is not implemented")
     if request.stage == RunStage.PREPARE and (
         not isinstance(config, SftExperimentConfig) or config.data.dataset_from is None
@@ -271,6 +273,18 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
             flush=True,
         )
         return output
+    if request.stage == RunStage.TRAIN:
+        from qorl.sft.train import train
+
+        if not isinstance(config, SftExperimentConfig) or output is None:
+            raise ValueError("SFT training requires an existing prepared run")
+        print(f"QORL run {output.name}: {output}", flush=True)
+        training = train(config, output)
+        print(
+            f"Trained {training.optimizer_updates} updates across {training.epochs} epochs.",
+            flush=True,
+        )
+        return output
     if PLACEHOLDER in (str(config.postgres.path), str(config.pool.path)):
         raise ValueError("fill in the PostgreSQL and pool configuration paths")
     postgres_config = PostgresConfig.load(config.postgres.path)
@@ -302,13 +316,18 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
     else:
         model = config.model
         if request.checkpoint is not None:
-            model = model.model_copy(
-                update={
-                    "adapter_path": (
-                        REPOSITORY_ROOT / request.checkpoint.expanduser()
-                    ).resolve(),
-                }
-            )
+            if isinstance(config, SftExperimentConfig):
+                from qorl.sft.train import checkpoint_model
+
+                model = checkpoint_model(model, output / "training", request.checkpoint)
+            else:
+                model = model.model_copy(
+                    update={
+                        "adapter_path": (
+                            REPOSITORY_ROOT / request.checkpoint.expanduser()
+                        ).resolve(),
+                    }
+                )
         # Each invocation owns a fresh slot so a restart cannot reuse partial records.
         invocation = numbered_output(output / "evaluation" / role.value)
         print(f"QORL evaluation results: {invocation}", flush=True)
