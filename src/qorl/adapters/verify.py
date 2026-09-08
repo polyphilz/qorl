@@ -1,232 +1,195 @@
-from __future__ import annotations
+"""Checks for exported adapters and complete merged model artifacts."""
 
-import argparse
-import json
-import os
-import shutil
-import sys
-import urllib.request
+from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Any
+from typing import Protocol
 
-from qorl.adapters.config import adapter_config, adapter_rank
-from qorl.adapters.schemas import AdapterExportManifest
-from qorl.inference.serving import ServedModel
-from qorl.model.files import model_weights_sha256
+import safetensors
+from transformers import (
+    AutoConfig,
+    AutoTokenizer,
+    PretrainedConfig,
+    PreTrainedTokenizerBase,
+)
+
+from qorl.adapters.config import adapter_config
+from qorl.adapters.schemas import (
+    AdapterExportManifest,
+    MergeArtifact,
+    MergeLoraConfig,
+    MergeManifest,
+    TensorSignature,
+)
+from qorl.model.files import (
+    model_weight_files,
+    model_weights_sha256,
+    validate_model_directory,
+)
+from qorl.model.schemas import ModelWeightIndex
 from qorl.paths import REPOSITORY_ROOT
 from qorl.util.hashing import sha256_file
 
-BASE_MODEL = "qorl-base"
-ADAPTER_MODEL = "qorl-protocol-adapter"
-MINIMUM_LOGPROBABILITY_DELTA = 1e-7
-TOP_LOGPROBS = 20
 ADAPTER_MANIFEST_FILE = "qorl-manifest.json"
 
 
+class PretrainedLoader[Result](Protocol):
+    """The local-only subset of Transformers' dynamic loading API."""
+
+    def from_pretrained(self, path: Path, /, *, local_files_only: bool) -> Result: ...
+
+
+CONFIG_LOADER: PretrainedLoader[PretrainedConfig] = AutoConfig
+TOKENIZER_LOADER: PretrainedLoader[PreTrainedTokenizerBase] = AutoTokenizer
+
+
+class TensorSlice(Protocol):
+    def get_shape(self) -> list[int]: ...
+    def get_dtype(self) -> str: ...
+
+
+class TensorHeader(Protocol):
+    def keys(self) -> list[str]: ...
+    def get_slice(self, name: str) -> TensorSlice: ...
+
+
+class TensorOpener(Protocol):
+    def __call__(
+        self, filename: Path, *, framework: str, device: str
+    ) -> AbstractContextManager[TensorHeader]: ...
+
+
+OPEN_TENSORS: TensorOpener = safetensors.safe_open
+
+
+def tensor_signatures(model: Path) -> dict[str, TensorSignature]:
+    """Check complete shard membership and headers without allocating model tensors."""
+    signatures: dict[str, TensorSignature] = {}
+    locations: dict[str, str] = {}
+    files = model_weight_files(model)
+    index_path = next(
+        (file for file in files if file.name.endswith(".index.json")), None
+    )
+    for file in files:
+        if file == index_path:
+            continue
+        if file.suffix != ".safetensors":
+            raise RuntimeError("merge requires a safetensors base")
+        with OPEN_TENSORS(file, framework="pt", device="cpu") as tensors:
+            for key in sorted(tensors.keys()):
+                if key in signatures:
+                    raise RuntimeError(f"duplicate tensor across shards: {key}")
+                view = tensors.get_slice(key)
+                signatures[key] = TensorSignature(
+                    shape=view.get_shape(), dtype=view.get_dtype()
+                )
+                locations[key] = file.relative_to(model).as_posix()
+    if index_path is not None:
+        index = ModelWeightIndex.model_validate_json(index_path.read_bytes())
+        if index.weight_map != locations:
+            raise RuntimeError("model shard index does not match its tensors")
+    if not signatures:
+        raise RuntimeError("model has no tensors")
+    return signatures
+
+
 def verify_adapter_base(adapter: Path, base: Path) -> str:
-    """Match the recorded and supplied base weights, including complete sharded bases."""
-    recorded = Path(adapter_config(adapter).base_model_name_or_path).expanduser()
-    recorded = (REPOSITORY_ROOT / recorded).resolve()
+    """Use recorded checksums when available, so identical relocated bases work."""
+    recorded = (
+        REPOSITORY_ROOT
+        / Path(adapter_config(adapter).base_model_name_or_path).expanduser()
+    ).resolve()
+    manifest_path = adapter / ADAPTER_MANIFEST_FILE
+    manifest = (
+        AdapterExportManifest.model_validate_json(manifest_path.read_bytes())
+        if manifest_path.is_file()
+        else None
+    )
+    expected = manifest.base_model_sha256 if manifest is not None else None
+    if expected is None:
+        try:
+            expected = model_weights_sha256(recorded)
+        except (OSError, ValueError) as error:
+            raise RuntimeError(
+                f"adapter's recorded base model is missing or invalid: {recorded}"
+            ) from error
     try:
-        recorded_sha256 = model_weights_sha256(recorded)
+        supplied = model_weights_sha256(base.resolve())
     except (OSError, ValueError) as error:
         raise RuntimeError(
-            f"adapter's recorded base model is missing or invalid: {recorded}"
+            f"base model weights are missing or invalid: {base}"
         ) from error
-    manifest_path = adapter / ADAPTER_MANIFEST_FILE
-    if manifest_path.is_file():
-        manifest = AdapterExportManifest.model_validate_json(
-            manifest_path.read_text(encoding="utf-8")
-        )
-        if (
-            manifest.base_model_sha256 is not None
-            and manifest.base_model_sha256 != recorded_sha256
-        ):
+    if supplied != expected:
+        if base.resolve() == recorded:
             raise RuntimeError(
                 "adapter manifest does not match its recorded base model"
             )
-    supplied_base = base.resolve()
-    try:
-        supplied_sha256 = (
-            recorded_sha256
-            if supplied_base == recorded
-            else model_weights_sha256(supplied_base)
-        )
-    except (OSError, ValueError) as error:
-        raise RuntimeError(
-            f"base model weights are missing or invalid: {supplied_base}"
-        ) from error
-    if supplied_sha256 != recorded_sha256:
         raise RuntimeError(
             "supplied base model does not match the adapter's training base"
         )
-    return recorded_sha256
+    return expected
+
+
+def verify_adapter_weights(adapter: Path) -> AdapterExportManifest:
+    """Require the export's recorded tensor bytes before applying its updates."""
+    manifest = AdapterExportManifest.model_validate_json(
+        (adapter / ADAPTER_MANIFEST_FILE).read_bytes()
+    )
+    if sha256_file(adapter / "adapter_model.safetensors") != manifest.adapter_sha256:
+        raise RuntimeError("adapter weights do not match the export manifest")
+    if manifest.base_model_sha256 is None:
+        raise RuntimeError("adapter export manifest has no base checksum")
+    return manifest
+
+
+def artifact_inventory(directory: Path) -> list[MergeArtifact]:
+    """Inventory all published files except the inventory itself."""
+    return [
+        MergeArtifact(
+            path=path.relative_to(directory).as_posix(),
+            bytes=path.stat().st_size,
+            sha256=sha256_file(path),
+        )
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and path != directory / "qorl-merge.json"
+    ]
 
 
 def verify_merged_model(base: Path, adapter: Path, merged: Path) -> None:
-    manifest_path = merged / "qorl-merge.json"
-    model_path = merged / "model.safetensors"
-    if not manifest_path.is_file() or not model_path.is_file():
-        raise RuntimeError(f"merged SFT model is incomplete: {merged}")
-    base_model_sha256 = verify_adapter_base(adapter, base)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {
-        "base_model_sha256": base_model_sha256,
-        "adapter_model_sha256": sha256_file(adapter / "adapter_model.safetensors"),
-        "adapter_config_sha256": sha256_file(adapter / "adapter_config.json"),
-        "merged_model_sha256": sha256_file(model_path),
-    }
-    if any(manifest.get(key) != value for key, value in expected.items()):
-        raise RuntimeError("merged SFT model checksum mismatch")
-    if "artifacts" in manifest:
-        artifacts = [
-            {
-                "path": path.relative_to(merged).as_posix(),
-                "bytes": path.stat().st_size,
-                "sha256": sha256_file(path),
-            }
-            for path in sorted(merged.rglob("*"))
-            if path.is_file() and path.name != "qorl-merge.json"
-        ]
-        if manifest["artifacts"] != artifacts:
-            raise RuntimeError("merged SFT model artifact inventory differs")
-
-
-def request(url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = None if body is None else json.dumps(body).encode()
-    call = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
+    """Check input identity and every staged or published output file."""
+    base_hash = verify_adapter_base(adapter, base)
+    export = verify_adapter_weights(adapter)
+    validate_model_directory(merged)
+    manifest = MergeManifest.model_validate_json(
+        (merged / "qorl-merge.json").read_bytes()
     )
-    with urllib.request.urlopen(call, timeout=30) as response:
-        payload = response.read()
-    return json.loads(payload) if payload else {}
-
-
-def completion(base_url: str, model: str, prompt: list[int]) -> dict[str, Any]:
-    response = request(
-        f"{base_url}/v1/completions",
-        {
-            "model": model,
-            "prompt": prompt,
-            "max_tokens": 1,
-            "temperature": 0,
-            "seed": 0,
-            "logprobs": TOP_LOGPROBS,
-        },
+    config = MergeLoraConfig.model_validate_json(
+        (adapter / "adapter_config.json").read_bytes()
     )
-    choice = response["choices"][0]
-    return {
-        "text": choice["text"],
-        "token_logprobs": choice["logprobs"]["token_logprobs"],
-        "top_logprobs": choice["logprobs"]["top_logprobs"][0],
-    }
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Reload a Prime-RL adapter in vLLM and compare probabilities."
-    )
-    parser.add_argument("--model", type=Path, required=True)
-    parser.add_argument("--adapter", type=Path, required=True)
-    parser.add_argument("--audit", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--port", type=int, default=8011)
-    parser.add_argument("--startup-timeout", type=int, default=600)
-    arguments = parser.parse_args()
-
-    vllm = shutil.which("vllm") or str(Path(sys.executable).parent / "vllm")
-    if not Path(vllm).is_file():
-        raise RuntimeError("vLLM executable is absent from the training environment")
-    audit = json.loads(arguments.audit.read_text())
-    prompt = audit["probability_probe"]["prompt_token_ids"]
-    target = audit["probability_probe"]["target_token"]
-    if not prompt:
-        raise RuntimeError("probability probe has an empty prompt")
-
-    arguments.output.parent.mkdir(parents=True, exist_ok=True)
-    log_path = arguments.output.with_suffix(".vllm.log")
-    command = [
-        vllm,
-        "serve",
-        str(arguments.model.resolve()),
-        "--served-model-name",
-        BASE_MODEL,
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(arguments.port),
-        "--language-model-only",
-        "--enable-lora",
-        "--max-lora-rank",
-        str(adapter_rank(arguments.adapter)),
-        "--lora-modules",
-        f"{ADAPTER_MODEL}={arguments.adapter.resolve()}",
-        "--max-model-len",
-        str(audit["packed_sequence_length"]),
-        "--max-num-seqs",
-        "1",
-        "--gpu-memory-utilization",
-        "0.9",
-        "--generation-config",
-        "vllm",
-        "--enforce-eager",
-        "--disable-log-stats",
-    ]
-    environment = {**os.environ, "VLLM_USE_FLASHINFER_SAMPLER": "0"}
-    base_url = f"http://127.0.0.1:{arguments.port}"
-    with ServedModel(
-        command,
-        repository=REPOSITORY_ROOT,
-        log_path=log_path,
-        health_url=f"{base_url}/health",
-        startup_timeout=arguments.startup_timeout,
-        environment=environment,
+    if (
+        manifest.lora_rank != config.r
+        or manifest.lora_alpha != config.lora_alpha
+        or manifest.lora_scale != config.lora_alpha / config.r
+        or manifest.merged_tensor_count * 2 != export.tensor_count
     ):
-        base = completion(base_url, BASE_MODEL, prompt)
-        adapted = completion(base_url, ADAPTER_MODEL, prompt)
-
-    keys = set(base["top_logprobs"]) | set(adapted["top_logprobs"])
-    shared = keys & set(base["top_logprobs"]) & set(adapted["top_logprobs"])
-    largest_shared_delta = max(
-        (
-            abs(base["top_logprobs"][key] - adapted["top_logprobs"][key])
-            for key in shared
-        ),
-        default=0.0,
-    )
-    changed = (
-        base["text"] != adapted["text"]
-        or set(base["top_logprobs"]) != set(adapted["top_logprobs"])
-        or largest_shared_delta > MINIMUM_LOGPROBABILITY_DELTA
-    )
-    if not changed:
-        raise RuntimeError("reloaded adapter did not change the measured distribution")
-    if target not in base["top_logprobs"] or target not in adapted["top_logprobs"]:
+        raise RuntimeError("merged model scaling or tensor count differs from adapter")
+    if (
+        manifest.base_model_sha256 != base_hash
+        or manifest.adapter_model_sha256
+        != sha256_file(adapter / "adapter_model.safetensors")
+        or manifest.adapter_config_sha256
+        != sha256_file(adapter / "adapter_config.json")
+        or manifest.adapter_manifest_sha256
+        != sha256_file(adapter / ADAPTER_MANIFEST_FILE)
+        or manifest.merged_model_sha256 != model_weights_sha256(merged)
+    ):
+        raise RuntimeError("merged model checksum mismatch")
+    if manifest.artifacts != artifact_inventory(merged):
+        raise RuntimeError("merged model artifact inventory differs")
+    if tensor_signatures(base) != tensor_signatures(merged):
         raise RuntimeError(
-            f"target token {target!r} is absent from top log probabilities"
+            "merged model tensor names, shapes or dtypes differ from base"
         )
-
-    report = {
-        "schema_version": 1,
-        "adapter_reloaded": True,
-        "probabilities_changed": True,
-        "prompt_tokens": len(prompt),
-        "largest_shared_logprob_delta": largest_shared_delta,
-        "target_token": target,
-        "target_logprob_before": base["top_logprobs"][target],
-        "target_logprob_after": adapted["top_logprobs"][target],
-        "target_logprob_delta": (
-            adapted["top_logprobs"][target] - base["top_logprobs"][target]
-        ),
-        "base": base,
-        "adapted": adapted,
-        "vllm_log": str(log_path),
-    }
-    arguments.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    print(json.dumps(report, indent=2))
-
-
-if __name__ == "__main__":
-    main()
+    CONFIG_LOADER.from_pretrained(merged, local_files_only=True)
+    tokenizer = TOKENIZER_LOADER.from_pretrained(merged, local_files_only=True)
+    if len(tokenizer) == 0:
+        raise RuntimeError("merged model tokenizer is empty")

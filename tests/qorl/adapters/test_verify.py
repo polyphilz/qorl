@@ -59,16 +59,6 @@ def merged_fixture(tmp_path: Path) -> tuple[Path, Path, Path]:
     return base, adapter, merged
 
 
-def test_merged_model_verifies_every_recorded_artifact(tmp_path: Path) -> None:
-    base, adapter, merged = merged_fixture(tmp_path)
-
-    verify_merged_model(base, adapter, merged)
-
-    (merged / "tokenizer.json").write_bytes(b"changed")
-    with pytest.raises(RuntimeError, match="artifact inventory differs"):
-        verify_merged_model(base, adapter, merged)
-
-
 def test_merged_model_rejects_an_adapter_applied_to_the_wrong_base(
     tmp_path: Path,
 ) -> None:

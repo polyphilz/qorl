@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from collections.abc import Iterable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -153,36 +152,3 @@ def export_adapter(
         write_json(staging / "qorl-manifest.json", manifest.model_dump(mode="json"))
         staging.rename(output)
     return manifest
-
-
-def main() -> None:
-    """Export using a saved native SFT configuration, not independent scale flags."""
-    from prime_rl.configs.sft import SFTConfig
-
-    parser = argparse.ArgumentParser(
-        description="Export a recorded SFT checkpoint as a PEFT adapter."
-    )
-    parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--training-config", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    arguments = parser.parse_args()
-    config = SFTConfig.model_validate_json(Path(arguments.training_config).read_bytes())
-    if config.model.lora is None:
-        raise ValueError("recorded training configuration has no LoRA settings")
-    settings = config.model.lora
-    manifest = export_adapter(
-        Path(arguments.checkpoint),
-        Path(config.model.name),
-        LoraSettings(
-            rank=settings.rank,
-            alpha=settings.alpha,
-            dropout=settings.dropout,
-            target_modules=settings.target_modules,
-        ),
-        Path(arguments.output),
-    )
-    print(manifest.model_dump_json(indent=2))
-
-
-if __name__ == "__main__":
-    main()

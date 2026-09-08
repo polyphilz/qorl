@@ -1,154 +1,188 @@
-#!/usr/bin/env python3
-from __future__ import annotations
+"""Apply exported plain LoRA updates to a complete local safetensors model."""
 
-import argparse
-import hashlib
-import json
 import shutil
-import tempfile
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Protocol
 
 import torch
-from safetensors import safe_open
-from safetensors.torch import save_file
+from pydantic import TypeAdapter
+from safetensors import torch as safetensors
 
-from qorl.adapters.config import adapter_config
-from qorl.adapters.verify import verify_adapter_base
+from qorl.adapters.schemas import MergeLoraConfig, MergeManifest
+from qorl.adapters.verify import (
+    ADAPTER_MANIFEST_FILE,
+    artifact_inventory,
+    tensor_signatures,
+    verify_adapter_base,
+    verify_adapter_weights,
+    verify_merged_model,
+)
+from qorl.model.files import (
+    model_weight_files,
+    model_weights_sha256,
+    validate_model_directory,
+)
+from qorl.model.schemas import JsonObject
+from qorl.util.hashing import sha256_file
+from qorl.util.io import write_json
 
-MODEL_FILE = "model.safetensors"
-ADAPTER_FILE = "adapter_model.safetensors"
 MANIFEST_FILE = "qorl-merge.json"
+ADAPTER_FILE = "adapter_model.safetensors"
+MATRIX_DIMENSIONS = 2
+OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for block in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+class TensorFiles(Protocol):
+    """Typed tensor-only boundary for safetensors' PathLike signatures."""
+
+    def load_file(self, filename: Path) -> dict[str, torch.Tensor]: ...
+
+    def save_file(
+        self, tensors: dict[str, torch.Tensor], filename: Path, metadata: dict[str, str]
+    ) -> None: ...
 
 
-def adapter_pairs(path: Path) -> dict[str, tuple[str, str]]:
-    with safe_open(path, framework="pt", device="cpu") as source:
-        keys = set(source.keys())
+TENSOR_FILES: TensorFiles = safetensors
+
+
+def adapter_pairs(tensors: dict[str, torch.Tensor]) -> dict[str, tuple[str, str]]:
     pairs: dict[str, tuple[str, str]] = {}
-    for key in sorted(keys):
+    for key in sorted(tensors):
         marker = ".lora_A.weight"
         if not key.endswith(marker):
             continue
-        base_key = key[: -len(marker)] + ".weight"
-        b_key = key[: -len(marker)] + ".lora_B.weight"
-        if b_key not in keys:
+        base_key = key.removesuffix(marker) + ".weight"
+        b_key = key.removesuffix(marker) + ".lora_B.weight"
+        if b_key not in tensors:
             raise RuntimeError(f"missing LoRA B tensor for {key}")
         pairs[base_key] = (key, b_key)
-    if len(pairs) * 2 != len(keys):
-        raise RuntimeError("adapter contains tensors other than LoRA A/B pairs")
+    if not pairs or len(pairs) * 2 != len(tensors):
+        raise RuntimeError("adapter must contain only nonempty LoRA A/B pairs")
     return pairs
 
 
-def merge(base: Path, adapter: Path, output: Path) -> Path:
-    base_model = base / MODEL_FILE
-    adapter_model = adapter / ADAPTER_FILE
-    adapter_config_path = adapter / "adapter_config.json"
-    for path in (base_model, adapter_model, adapter_config_path):
-        if not path.is_file():
-            raise RuntimeError(f"required input is missing: {path}")
-    if output.exists():
-        raise RuntimeError(f"output already exists: {output}")
+def merged_weight(
+    key: str,
+    weight: torch.Tensor,
+    a: torch.Tensor,
+    b: torch.Tensor,
+    config: MergeLoraConfig,
+) -> torch.Tensor:
+    """Accumulate in float32, then retain the base's floating-point dtype."""
+    if (
+        weight.ndim != MATRIX_DIMENSIONS
+        or a.ndim != MATRIX_DIMENSIONS
+        or b.ndim != MATRIX_DIMENSIONS
+        or a.shape != (config.r, weight.shape[1])
+        or b.shape != (weight.shape[0], config.r)
+    ):
+        raise RuntimeError(f"LoRA shape/rank mismatch for {key}")
+    if not all(
+        t.is_floating_point() and bool(torch.isfinite(t).all()) for t in (weight, a, b)
+    ):
+        raise RuntimeError(f"LoRA merge requires finite floating-point tensors: {key}")
+    if not any(
+        key.removesuffix(".weight").endswith("." + target) or key == target + ".weight"
+        for target in config.target_modules
+    ):
+        raise RuntimeError(f"LoRA tensor is outside target_modules: {key}")
+    merged = (
+        weight.float() + (config.lora_alpha / config.r) * (b.float() @ a.float())
+    ).to(weight.dtype)
+    if not bool(torch.isfinite(merged).all()):
+        raise RuntimeError(f"LoRA update overflows base dtype: {key}")
+    return merged.contiguous()
 
-    config = adapter_config(adapter)
-    if config.peft_type != "LORA" or config.bias != "none":
-        raise RuntimeError("only an unbiased LoRA adapter can be merged")
-    base_model_sha256 = verify_adapter_base(adapter, base)
-    rank = config.r
-    scale = config.lora_alpha / rank
-    pairs = adapter_pairs(adapter_model)
+
+def merge(base: Path, adapter: Path, output: Path) -> Path:
+    """Stage and verify a complete model, preserving the base shard boundaries."""
+    if output.exists() or output.is_symlink():
+        raise RuntimeError(f"output already exists: {output}")
+    if any(
+        output.resolve().is_relative_to(source.resolve()) for source in (base, adapter)
+    ):
+        raise RuntimeError(
+            "merge output must be outside the base and adapter directories"
+        )
+    validate_model_directory(base)
+    config = MergeLoraConfig.model_validate_json(
+        (adapter / "adapter_config.json").read_bytes()
+    )
+    base_config = OBJECT.validate_json((base / "config.json").read_bytes())
+    if base_config.get("quantization_config") is not None:
+        raise RuntimeError("quantized bases are not supported for LoRA merging")
+    base_hash = verify_adapter_base(adapter, base)
+    export = verify_adapter_weights(adapter)
+    files = model_weight_files(base)
+    index_path = next(
+        (file for file in files if file.name.endswith(".index.json")), None
+    )
+    shards = [file for file in files if file != index_path]
+    if any(file.suffix != ".safetensors" for file in shards):
+        raise RuntimeError("merge requires a safetensors base")
+    base_tensors = tensor_signatures(base)
+    adapter_tensors = TENSOR_FILES.load_file(adapter / ADAPTER_FILE)
+    if len(adapter_tensors) != export.tensor_count:
+        raise RuntimeError("adapter tensor count differs from export manifest")
+    pairs = adapter_pairs(adapter_tensors)
+    if missing := set(pairs) - base_tensors.keys():
+        raise RuntimeError(
+            f"LoRA tensors do not match base model: {sorted(missing)[:3]}"
+        )
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=f".{output.name}-", dir=output.parent
-    ) as temporary:
-        target = Path(temporary)
-        for source in base.iterdir():
-            if source.name not in {MODEL_FILE, MANIFEST_FILE} and source.is_file():
-                shutil.copy2(source, target / source.name, follow_symlinks=True)
-
-        with (
-            safe_open(base_model, framework="pt", device="cpu") as base_file,
-            safe_open(adapter_model, framework="pt", device="cpu") as lora_file,
-        ):
-            base_keys = set(base_file.keys())
-            missing = sorted(set(pairs) - base_keys)
-            if missing:
-                raise RuntimeError(
-                    f"LoRA tensors do not match base model: {missing[:3]}"
-                )
-
-            tensors: dict[str, torch.Tensor] = {}
-            for index, key in enumerate(base_file.keys(), start=1):
-                weight = base_file.get_tensor(key)
+    with TemporaryDirectory(prefix=f".{output.name}-", dir=output.parent) as temporary:
+        staging = Path(temporary)
+        for source in base.rglob("*"):
+            if (
+                not source.is_file()
+                or source.suffix in {".safetensors", ".bin"}
+                or source.name.endswith(".index.json")
+            ):
+                continue
+            if source.name in {
+                MANIFEST_FILE,
+                ADAPTER_MANIFEST_FILE,
+                "adapter_config.json",
+            }:
+                continue
+            target = staging / source.relative_to(base)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+        for shard in shards:
+            tensors = TENSOR_FILES.load_file(shard)
+            relative = shard.relative_to(base).as_posix()
+            for key, weight in tensors.items():
                 if key in pairs:
                     a_key, b_key = pairs[key]
-                    a = lora_file.get_tensor(a_key).float()
-                    b = lora_file.get_tensor(b_key).float()
-                    if b.shape[0] != weight.shape[0] or a.shape[1] != weight.shape[1]:
-                        raise RuntimeError(f"LoRA shape mismatch for {key}")
-                    weight = (weight.float() + scale * (b @ a)).to(weight.dtype)
-                tensors[key] = weight.contiguous()
-                if index % 100 == 0:
-                    print(f"loaded {index}/{len(base_keys)} base tensors", flush=True)
-            save_file(
-                tensors,
-                target / MODEL_FILE,
-                metadata=base_file.metadata(),
-            )
-
-        merged_model_sha256 = sha256(target / MODEL_FILE)
-        manifest = {
-            "schema_version": 1,
-            "operation": "merge_lora_into_base",
-            "base_model_sha256": base_model_sha256,
-            "adapter_model_sha256": sha256(adapter_model),
-            "adapter_config_sha256": sha256(adapter_config_path),
-            "merged_model_sha256": merged_model_sha256,
-            "lora_rank": rank,
-            "lora_alpha": config.lora_alpha,
-            "lora_scale": scale,
-            "merged_tensor_count": len(pairs),
-            "artifacts": [
-                {
-                    "path": path.relative_to(target).as_posix(),
-                    "bytes": path.stat().st_size,
-                    "sha256": (
-                        merged_model_sha256 if path.name == MODEL_FILE else sha256(path)
-                    ),
-                }
-                for path in sorted(target.rglob("*"))
-                if path.is_file()
-            ],
-        }
-        (target / MANIFEST_FILE).write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
+                    tensors[key] = merged_weight(
+                        key,
+                        weight,
+                        adapter_tensors[a_key],
+                        adapter_tensors[b_key],
+                        config,
+                    )
+            destination = staging / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            TENSOR_FILES.save_file(tensors, destination, metadata={"format": "pt"})
+        if index_path is not None:
+            shutil.copy2(index_path, staging / index_path.name)
+        manifest = MergeManifest(
+            base_model_sha256=base_hash,
+            adapter_model_sha256=export.adapter_sha256,
+            adapter_config_sha256=sha256_file(adapter / "adapter_config.json"),
+            adapter_manifest_sha256=sha256_file(adapter / ADAPTER_MANIFEST_FILE),
+            merged_model_sha256=model_weights_sha256(staging),
+            lora_rank=config.r,
+            lora_alpha=config.lora_alpha,
+            lora_scale=config.lora_alpha / config.r,
+            merged_tensor_count=len(pairs),
+            artifacts=artifact_inventory(staging),
         )
-        Path(temporary).rename(output)
-    return output / MANIFEST_FILE
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base", type=Path, required=True)
-    parser.add_argument("--adapter", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    arguments = parser.parse_args()
-    print(
-        merge(
-            arguments.base.resolve(),
-            arguments.adapter.resolve(),
-            arguments.output.resolve(),
-        )
-    )
-
-
-if __name__ == "__main__":
-    main()
+        write_json(staging / MANIFEST_FILE, manifest.model_dump(mode="json"))
+        verify_merged_model(base, adapter, staging)
+        if output.exists() or output.is_symlink():
+            raise RuntimeError(f"output already exists: {output}")
+        staging.rename(output)
+    return output

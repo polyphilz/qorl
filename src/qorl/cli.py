@@ -4,6 +4,8 @@ import argparse
 from pathlib import Path
 
 from qorl import __version__
+from qorl.adapters.merge import merge
+from qorl.adapters.schemas import MergeLoraConfig
 from qorl.experiment.create import create_experiment
 from qorl.experiment.run import (
     add_run_arguments,
@@ -15,13 +17,25 @@ from qorl.experiment.schemas import (
     CreateRequest,
     ExperimentMethod,
 )
-from qorl.model.schemas import ModelProvider
+from qorl.model.files import resolve_model
+from qorl.model.schemas import ModelProvider, ModelSettings
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="qorl")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
+    model_parser = commands.add_parser("model", help="model artifacts")
+    model_commands = model_parser.add_subparsers(dest="model_command", required=True)
+    merge_parser = model_commands.add_parser(
+        "merge", help="merge an exported LoRA adapter into its base"
+    )
+    merge_parser.add_argument("--adapter-path", type=Path, required=True)
+    merge_parser.add_argument("--output", type=Path, required=True)
+    merge_parser.add_argument("--base-model-name-or-path")
+    merge_parser.add_argument(
+        "--base-model-revision", help="already-cached Hugging Face revision"
+    )
     experiment_parser = commands.add_parser(
         "experiment", help="create and run experiments"
     )
@@ -96,6 +110,27 @@ def main() -> int:
         root.print_help()
         return 0
     try:
+        if arguments.command == "model":
+            adapter = arguments.adapter_path.expanduser().resolve()
+            config = MergeLoraConfig.model_validate_json(
+                (adapter / "adapter_config.json").read_bytes()
+            )
+            base = resolve_model(
+                ModelSettings(
+                    provider=ModelProvider.LOCAL,
+                    name_or_path=arguments.base_model_name_or_path
+                    or config.base_model_name_or_path,
+                    revision=arguments.base_model_revision
+                    or (
+                        config.revision
+                        if arguments.base_model_name_or_path is None
+                        else None
+                    ),
+                    context_length=1,
+                )
+            )
+            print(merge(base, adapter, arguments.output.expanduser().absolute()))
+            return 0
         if arguments.command == "experiment":
             if arguments.experiment_command == "run":
                 return launch_experiment(
