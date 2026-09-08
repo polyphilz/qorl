@@ -24,10 +24,11 @@ from qorl.model.schemas import (
     ToolDefinition,
 )
 from qorl.sft import dataset
-from qorl.sft.generate import GenerationAttempt, GenerationReport
 from qorl.sft.schemas import (
     Conversation,
     DatasetPreparationReport,
+    GenerationAttempt,
+    GenerationReport,
     GenerationSettings,
     RenderedConversation,
 )

@@ -3,27 +3,13 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Iterator
-from pathlib import Path
 
 import verifiers.v1 as vf
 
 from qorl.measure.schemas import OutcomeKind
-from qorl.paths import REPOSITORY_ROOT
-from qorl.rl.schemas import RlRolloutRecord
+from qorl.rl.schemas import QorlTaskData, QorlTasksetConfig, RlRolloutRecord
 from qorl.taskset.schemas import TaskSelection
 from qorl.taskset.taskset import TaskSet
-
-
-class QorlTasksetConfig(vf.TasksetConfig):
-    repository: Path = REPOSITORY_ROOT
-    selection: Path | None = None
-    shuffle_seed: int | None = None
-
-
-class QorlTaskData(vf.TaskData):
-    task_id: str
-    template_id: str
-    rollout_index: int = 0
 
 
 class QorlTask(vf.Task[QorlTaskData]):

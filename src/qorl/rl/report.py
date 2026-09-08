@@ -5,129 +5,21 @@ from pathlib import Path
 
 from prime_rl.monitors.file.traces import get_annotations_dir, get_trace_stream
 from prime_rl.monitors.file.traces.chunks import chunk_numbers, open_chunk
-from pydantic import BaseModel, ConfigDict, Field
-from verifiers.v1.episode import GroupInfo, TrainRunInfo
-from verifiers.v1.trace import Error, TraceTask
 
 from qorl.agent.agent import total_usage
-from qorl.agent.schemas import AgentTrace
 from qorl.evaluation.evaluate import summarize_performance
-from qorl.evaluation.schemas import PerformanceSummary
 from qorl.measure.schemas import OutcomeKind, RolloutRecord
 from qorl.model.schemas import TokenUsage
-from qorl.rl.schemas import RlRolloutRecord
-from qorl.rl.tasks import QorlTaskData
+from qorl.rl.schemas import (
+    AnchoredCredit,
+    Annotation,
+    EpisodeEvidence,
+    EpisodeFailure,
+    LearningEvidence,
+    RlTrainingReport,
+    UpdateMetric,
+)
 from qorl.util.io import write_json
-
-
-class AnchoredCredit(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    discarded: bool
-    discard_reason: str | None = None
-    quality: float | None = None
-    reference: float | None = None
-    protocol_cost: float
-    advantage: float
-
-
-class ShipInfo(BaseModel):
-    step: int
-
-
-class TraceInfo(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    qorl: RlRolloutRecord | None = None
-    qorl_policy: AgentTrace | None = None
-    qorl_advantage: AnchoredCredit | None = None
-    ship: ShipInfo | None = None
-
-
-class TraceEvidence(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    id: str
-    info: TraceInfo
-
-
-class EpisodeEvidence(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    id: str
-    group: GroupInfo
-    run: TrainRunInfo
-    traces: list[TraceEvidence]
-    task: TraceTask[QorlTaskData]
-    ok: bool
-    errors: list[Error] = []
-
-
-class BranchCredit(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    advantages: list[float] | None = None
-
-
-class Annotation(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    trace_id: str
-    info: TraceInfo
-    branches: list[BranchCredit] = []
-
-
-class LearningEvidence(BaseModel):
-    """Join keys into native episodes, ship annotations, metrics and checkpoints."""
-
-    episode_id: str
-    group_id: str
-    trace_id: str
-    task_id: str | None
-    policy_start: int | None
-    policy_end: int | None
-    ship_step: int | None
-    anchored: AnchoredCredit | None
-    assigned_advantage: float | None
-
-
-class EpisodeFailure(BaseModel):
-    episode_id: str
-    group_id: str
-    task_id: str
-    errors: list[Error]
-
-
-class UpdateMetric(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
-
-    producer: str | None = None
-    step: int | None = None
-    learning_rate: float | None = Field(default=None, alias="optim/lr")
-    gradient_norm: float | None = Field(default=None, alias="optim/grad_norm")
-
-
-class RlTrainingReport(BaseModel):
-    """Usage sums available policy traces, including unscored rollouts.
-
-    Missing policy usage counts traces; no-trace failures are counted separately
-    in episode_failures. Provider-unknown token counts remain unknown.
-    """
-
-    schema_version: int = 1
-    completed: bool
-    scalar_reward_hook: str
-    optimizer_steps: list[int]
-    episode_count: int
-    episode_failure_count: int
-    episode_failures: list[EpisodeFailure]
-    outcome_counts: dict[OutcomeKind, int]
-    outcome_rates: dict[OutcomeKind, float | None]
-    performance: PerformanceSummary
-    learning: list[LearningEvidence]
-    checkpoints: list[Path]
-    usage: TokenUsage = TokenUsage()
-    policy_usage_missing_count: int = 0
 
 
 def write_report(

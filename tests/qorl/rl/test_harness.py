@@ -18,10 +18,9 @@ from qorl.model.schemas import JsonObject
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.rl import runtime as shared_runtime
-from qorl.rl.harness import QorlHarness, QorlHarnessConfig
+from qorl.rl.harness import QorlHarness
 from qorl.rl.runtime import QorlRuntime
-from qorl.rl.schemas import RlRolloutRecord
-from qorl.rl.tasks import QorlTaskData
+from qorl.rl.schemas import QorlHarnessConfig, QorlTaskData, RlRolloutRecord
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.schemas import PoolConfig
 

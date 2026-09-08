@@ -12,9 +12,10 @@ from renderers.configs import Qwen35RendererConfig
 from renderers.qwen35 import Qwen35Renderer
 
 from qorl.experiment.schemas import RlExperimentConfig, load_config
-from qorl.model.client import JSON_OBJECT, ChatResponse, LocalModelClient
+from qorl.model.client import JSON_OBJECT, LocalModelClient
 from qorl.model.exceptions import ContextBudgetError
 from qorl.model.schemas import (
+    ChatResponse,
     GenerationRequest,
     JsonObject,
     LocalInferenceSettings,

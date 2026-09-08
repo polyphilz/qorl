@@ -16,11 +16,8 @@ from qorl.agent.tool_schemas import (
 from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.measure.schemas import ToolResultStatus
 from qorl.model.schemas import JsonObject, JsonValue
-from qorl.postgres.inspection import (
-    RelationMetadata,
-    column_statistics,
-    inspect_relation,
-)
+from qorl.postgres.inspection import column_statistics, inspect_relation
+from qorl.postgres.schemas import RelationMetadata
 
 OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 

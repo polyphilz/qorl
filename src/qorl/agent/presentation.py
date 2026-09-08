@@ -2,8 +2,9 @@
 
 import json
 
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import TypeAdapter, ValidationError
 
+from qorl.agent.schemas import PlanNode, PlanView
 from qorl.model.schemas import JsonObject
 from qorl.postgres.exceptions import PostgresError
 
@@ -71,27 +72,6 @@ OBSERVED_FIELDS = (
     "Workers Launched",
     "Workers",
 )
-
-
-class PlanNode(BaseModel):
-    node_id: str
-    parent_id: str | None
-    child_ids: list[str]
-    leaf_aliases: list[str]
-    estimates: JsonObject
-    observed: JsonObject | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
-    omitted_fields: list[str] = Field(default_factory=list)
-
-
-class PlanView(BaseModel):
-    source: str = "plain_explain"
-    cost_unit: str = "planner_units_not_milliseconds"
-    row_kind: str = "estimated"
-    root_node_id: str
-    nodes: list[PlanNode]
-    omitted_nodes: int
 
 
 def plan_view(

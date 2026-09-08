@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from qorl.agent.observation import (
+from qorl.agent.presentation import plan_view
+from qorl.agent.prompts import system_prompt
+from qorl.agent.schemas import (
     AgentObservation,
     ContextBudget,
     DecisionTurns,
@@ -11,8 +13,6 @@ from qorl.agent.observation import (
     ResourceLimits,
     TurnBudget,
 )
-from qorl.agent.presentation import plan_view
-from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.measure.rollout import RolloutEvaluator

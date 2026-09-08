@@ -8,51 +8,17 @@ from threading import Event
 import verifiers.v1 as vf
 
 from qorl.agent.agent import QoAgentPolicy
-from qorl.agent.schemas import AgentSettings
 from qorl.measure.rollout import RolloutEvaluator
-from qorl.measure.schemas import RolloutMeasurementSettings, RolloutRecord
+from qorl.measure.schemas import RolloutRecord
 from qorl.model.client import HttpTransport, LocalModelClient
-from qorl.model.schemas import LocalInferenceSettings, ModelSettings
 from qorl.rl import runtime as shared_runtime
 from qorl.rl.reward import scalar_reward
-from qorl.rl.schemas import AnchoredGrpoSettings, RlRolloutRecord, RlSettings
-from qorl.rl.tasks import QorlTaskData
+from qorl.rl.schemas import (
+    QorlHarnessConfig,
+    QorlTaskData,
+    RlRolloutRecord,
+)
 from qorl.util.seeds import derive_seed
-
-
-class QorlHarnessConfig(vf.HarnessConfig):
-    """Allow Verifiers' fallback construction; experiments supply resolved settings."""
-
-    id: str = "qorl"
-    seed: int = 42
-    model: ModelSettings | None = None
-    inference: LocalInferenceSettings | None = None
-    agent: AgentSettings = AgentSettings(
-        candidate_attempts=1,
-        maximum_model_turns=64,
-        inspection_turns_per_alias=3,
-    )
-    measurement: RolloutMeasurementSettings = RolloutMeasurementSettings(
-        default_warmups=1,
-        default_measurements=1,
-        candidate_feedback_warmups=1,
-        candidate_feedback_measurements=1,
-        paired_warmups=1,
-        paired_measurements=3,
-        default_timeout_seconds=300.0,
-        candidate_timeout_floor_seconds=5.0,
-        candidate_timeout_multiplier=3.0,
-    )
-    rl: RlSettings = RlSettings(
-        algorithm=AnchoredGrpoSettings(
-            type="qorl_anchored_grpo",
-            tau=0.05,
-            c=0.10,
-            d=0.02,
-            t=0.10,
-            min_peers=2,
-        )
-    )
 
 
 class QorlHarness(vf.Harness[QorlHarnessConfig]):

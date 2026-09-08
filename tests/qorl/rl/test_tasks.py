@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from qorl.measure.schemas import KeptDefaultOutcome, PairedMeasurements, RolloutFailure
-from qorl.rl.schemas import RlRolloutRecord
-from qorl.rl.tasks import QorlTask, QorlTaskset, QorlTasksetConfig
+from qorl.rl.schemas import QorlTasksetConfig, RlRolloutRecord
+from qorl.rl.tasks import QorlTask, QorlTaskset
 from qorl.taskset.schemas import BenchmarkId, TaskSelection
 from qorl.taskset.taskset import TaskSet
 

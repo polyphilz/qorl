@@ -25,18 +25,18 @@ from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import OutcomeKind
 from qorl.postgres.exceptions import PostgresError
 from qorl.postgres.schemas import ExplainResult
-from qorl.rl.report import (
+from qorl.rl.report import write_report
+from qorl.rl.schemas import (
     AnchoredCredit,
     Annotation,
     BranchCredit,
     EpisodeEvidence,
+    QorlTaskData,
+    RlRolloutRecord,
     ShipInfo,
     TraceEvidence,
     TraceInfo,
-    write_report,
 )
-from qorl.rl.schemas import RlRolloutRecord
-from qorl.rl.tasks import QorlTaskData
 
 
 def test_report_keeps_credit_for_unshipped_groups_and_raw_speedups(

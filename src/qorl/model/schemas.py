@@ -241,3 +241,106 @@ class ModelWeightIndex(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
 
     weight_map: dict[str, str] = Field(min_length=1)
+
+
+class TokenCount(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+    count: int = Field(ge=0)
+    max_model_len: int = Field(gt=0)
+
+
+class ModelList(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    data: list[AdvertisedModel]
+
+
+class VersionResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    version: str = Field(min_length=1)
+
+
+class CompletionDetails(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+
+
+class PromptDetails(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    cached_tokens: int | None = Field(default=None, ge=0)
+
+
+class ChatUsage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens_details: CompletionDetails | None = None
+    prompt_tokens_details: PromptDetails | None = None
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    role: str
+    content: str | None = None
+    reasoning: str | None = None
+    reasoning_content: str | None = None
+    tool_calls: list[ToolCall] | None = None
+
+
+class ChatChoice(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    message: ChatMessage
+    finish_reason: str
+
+
+class ChatResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    choices: list[ChatChoice] = Field(min_length=1, max_length=1)
+    usage: ChatUsage | None = None
+
+
+class InputTokenCount(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True, strict=True)
+
+    input_tokens: int = Field(ge=0)
+
+
+class ResponsesUsage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    input_tokens_details: PromptDetails | None = None
+    output_tokens_details: CompletionDetails | None = None
+
+
+class ResponseItem(BaseModel):
+    """Fields inspected by QORL; complete provider items are retained separately."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    type: str
+    role: str | None = None
+    name: str | None = None
+    call_id: str | None = None
+    arguments: str | None = None
+    content: list[JsonObject] = Field(default_factory=list[JsonObject])
+    summary: list[JsonObject] = Field(default_factory=list[JsonObject])
+
+
+class ResponsesReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    model: str
+    status: str
+    output: list[JsonObject]
+    usage: ResponsesUsage | None = None
+    incomplete_details: JsonObject | None = None

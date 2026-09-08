@@ -30,6 +30,9 @@ from qorl.model.schemas import (
 from qorl.sft import dataset, generate
 from qorl.sft.schemas import (
     Conversation,
+    GenerationAttempt,
+    GenerationIdentity,
+    GenerationReport,
     GenerationSettings,
     ImportedGenerationSeeds,
     RenderedConversation,
@@ -90,9 +93,9 @@ def configured(
     ), inputs.selections
 
 
-def attempts(output: Path) -> list[generate.GenerationAttempt]:
+def attempts(output: Path) -> list[GenerationAttempt]:
     return [
-        generate.GenerationAttempt.model_validate_json(path.read_bytes())
+        GenerationAttempt.model_validate_json(path.read_bytes())
         for path in sorted((output / "attempts").glob("*.json"))
     ]
 
@@ -137,7 +140,7 @@ def test_generate_prepare_and_reuse_original_evidence(
     uri = record.metadata["generation_attempt"]
     assert isinstance(uri, str)
     original = Path(unquote(urlparse(uri).path))
-    saved = generate.GenerationAttempt.model_validate_json(original.read_bytes())
+    saved = GenerationAttempt.model_validate_json(original.read_bytes())
     assert saved.attempt_id == record.conversation_id
     assert record.metadata["generation_identity_sha256"] == sha256_file(
         output / "generation/identity.json"
@@ -208,9 +211,7 @@ def test_failures_and_exclusions_retain_attempts_without_replacement(
     artifact = generate.generate_dataset(config, selections, output)
     records = attempts(output)
     assert len(records) == 2
-    report = generate.GenerationReport.model_validate_json(
-        (output / "report.json").read_bytes()
-    )
+    report = GenerationReport.model_validate_json((output / "report.json").read_bytes())
     for split in (report.training, report.validation):
         assert (
             split.requested_attempts
@@ -425,7 +426,7 @@ def test_pool_failure_records_every_requested_attempt(
         and item.error == "pool unavailable"
         for item in saved
     )
-    report = generate.GenerationReport.model_validate_json(
+    report = GenerationReport.model_validate_json(
         (tmp_path / "generation/report.json").read_bytes()
     )
     assert report.training.failed_attempts == report.validation.failed_attempts == 1
@@ -518,7 +519,7 @@ def test_independent_generations_combine_without_rewriting_ids(
             matching.measurement_seed,
         )
     identities = [
-        generate.GenerationIdentity.model_validate_json(
+        GenerationIdentity.model_validate_json(
             (source.parent / "identity.json").read_bytes()
         )
         for source in (first, second)
@@ -586,7 +587,7 @@ def test_reopening_before_artifact_publication_reuses_allocated_run_id(
     def request(
         transport: HttpTransport, path: str, body: JsonObject | None = None
     ) -> JsonObject:
-        identity = generate.GenerationIdentity.model_validate_json(
+        identity = GenerationIdentity.model_validate_json(
             (output / "identity.json").read_bytes()
         )
         assert (

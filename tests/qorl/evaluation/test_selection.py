@@ -22,11 +22,10 @@ from qorl.model.schemas import JsonObject, JsonValue
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
 from qorl.rl import runtime as shared_runtime
-from qorl.rl.harness import QorlHarness, QorlHarnessConfig
+from qorl.rl.harness import QorlHarness
 from qorl.rl.reward import scalar_reward, training_speedup
 from qorl.rl.runtime import QorlRuntime
-from qorl.rl.schemas import ScalarRewardSettings
-from qorl.rl.tasks import QorlTaskData
+from qorl.rl.schemas import QorlHarnessConfig, QorlTaskData, ScalarRewardSettings
 from qorl.taskset.taskset import TaskSet
 from qorl.worker_pool.schemas import PoolConfig
 

@@ -2,25 +2,23 @@
 
 import asyncio
 from dataclasses import replace
-from pathlib import Path
 from typing import Protocol
 
 import verifiers.v1 as vf
-from verifiers.v1.envs.single_agent import SingleAgentEnvConfig
 
 from qorl.postgres.config import PostgresConfig
 from qorl.rl import runtime
-from qorl.rl.harness import QorlHarnessConfig
-from qorl.rl.tasks import QorlTask, QorlTaskData, QorlTasksetConfig
+from qorl.rl.schemas import (
+    QorlEnvironmentConfig,
+    QorlHarnessConfig,
+    QorlTaskData,
+    QorlTasksetConfig,
+)
+from qorl.rl.tasks import QorlTask
 from qorl.taskset.schemas import TaskSelection
 from qorl.taskset.taskset import TaskSet
 from qorl.util.seeds import derive_seed
 from qorl.worker_pool.config import load_pool_config
-
-
-class QorlEnvironmentConfig(SingleAgentEnvConfig):
-    postgres_config: Path | None = None
-    pool_config: Path | None = None
 
 
 class RolloutAgent(Protocol):

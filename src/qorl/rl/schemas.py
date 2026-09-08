@@ -1,13 +1,22 @@
 """RL batch settings and the parameters consumed by each learning algorithm."""
 
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
+import verifiers.v1 as vf
 from prime_rl.configs.trainer import validate_scheduler
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
+from verifiers.v1.envs.single_agent import SingleAgentEnvConfig
+from verifiers.v1.episode import GroupInfo, TrainRunInfo
+from verifiers.v1.trace import Error, TraceTask
 
 from qorl.adapters.schemas import LoraSettings
-from qorl.measure.schemas import RolloutRecord
+from qorl.agent.schemas import AgentSettings, AgentTrace
+from qorl.evaluation.schemas import PerformanceSummary
+from qorl.measure.schemas import OutcomeKind, RolloutMeasurementSettings, RolloutRecord
+from qorl.model.schemas import LocalInferenceSettings, ModelSettings, TokenUsage
+from qorl.paths import REPOSITORY_ROOT
 from qorl.training.schemas import (
     CheckpointSettings,
     OptimizerSettings,
@@ -118,3 +127,165 @@ class RlTrainingIdentity(BaseModel):
     base_weights_sha256: str
     trainer_source: str
     trainer_config_sha256: str
+
+
+class QorlTasksetConfig(vf.TasksetConfig):
+    repository: Path = REPOSITORY_ROOT
+    selection: Path | None = None
+    shuffle_seed: int | None = None
+
+
+class QorlTaskData(vf.TaskData):
+    task_id: str
+    template_id: str
+    rollout_index: int = 0
+
+
+class QorlHarnessConfig(vf.HarnessConfig):
+    """Allow Verifiers' fallback construction; experiments supply resolved settings."""
+
+    id: str = "qorl"
+    seed: int = 42
+    model: ModelSettings | None = None
+    inference: LocalInferenceSettings | None = None
+    agent: AgentSettings = AgentSettings(
+        candidate_attempts=1,
+        maximum_model_turns=64,
+        inspection_turns_per_alias=3,
+    )
+    measurement: RolloutMeasurementSettings = RolloutMeasurementSettings(
+        default_warmups=1,
+        default_measurements=1,
+        candidate_feedback_warmups=1,
+        candidate_feedback_measurements=1,
+        paired_warmups=1,
+        paired_measurements=3,
+        default_timeout_seconds=300.0,
+        candidate_timeout_floor_seconds=5.0,
+        candidate_timeout_multiplier=3.0,
+    )
+    rl: RlSettings = RlSettings(
+        algorithm=AnchoredGrpoSettings(
+            type="qorl_anchored_grpo",
+            tau=0.05,
+            c=0.10,
+            d=0.02,
+            t=0.10,
+            min_peers=2,
+        )
+    )
+
+
+class QorlEnvironmentConfig(SingleAgentEnvConfig):
+    postgres_config: Path | None = None
+    pool_config: Path | None = None
+
+
+class AnchoredCredit(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    discarded: bool
+    discard_reason: str | None = None
+    quality: float | None = None
+    reference: float | None = None
+    protocol_cost: float
+    advantage: float
+
+
+class ShipInfo(BaseModel):
+    step: int
+
+
+class TraceInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    qorl: RlRolloutRecord | None = None
+    qorl_policy: AgentTrace | None = None
+    qorl_advantage: AnchoredCredit | None = None
+    ship: ShipInfo | None = None
+
+
+class TraceEvidence(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    info: TraceInfo
+
+
+class EpisodeEvidence(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    group: GroupInfo
+    run: TrainRunInfo
+    traces: list[TraceEvidence]
+    task: TraceTask[QorlTaskData]
+    ok: bool
+    errors: list[Error] = []
+
+
+class BranchCredit(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    advantages: list[float] | None = None
+
+
+class Annotation(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    trace_id: str
+    info: TraceInfo
+    branches: list[BranchCredit] = []
+
+
+class LearningEvidence(BaseModel):
+    """Join keys into native episodes, ship annotations, metrics and checkpoints."""
+
+    episode_id: str
+    group_id: str
+    trace_id: str
+    task_id: str | None
+    policy_start: int | None
+    policy_end: int | None
+    ship_step: int | None
+    anchored: AnchoredCredit | None
+    assigned_advantage: float | None
+
+
+class EpisodeFailure(BaseModel):
+    episode_id: str
+    group_id: str
+    task_id: str
+    errors: list[Error]
+
+
+class UpdateMetric(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    producer: str | None = None
+    step: int | None = None
+    learning_rate: float | None = Field(default=None, alias="optim/lr")
+    gradient_norm: float | None = Field(default=None, alias="optim/grad_norm")
+
+
+class RlTrainingReport(BaseModel):
+    """Usage sums available policy traces, including unscored rollouts.
+
+    Missing policy usage counts traces; no-trace failures are counted separately
+    in episode_failures. Provider-unknown token counts remain unknown.
+    """
+
+    schema_version: int = 1
+    completed: bool
+    scalar_reward_hook: str
+    optimizer_steps: list[int]
+    episode_count: int
+    episode_failure_count: int
+    episode_failures: list[EpisodeFailure]
+    outcome_counts: dict[OutcomeKind, int]
+    outcome_rates: dict[OutcomeKind, float | None]
+    performance: PerformanceSummary
+    learning: list[LearningEvidence]
+    checkpoints: list[Path]
+    usage: TokenUsage = TokenUsage()
+    policy_usage_missing_count: int = 0

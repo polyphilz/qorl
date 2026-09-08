@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal, Self
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -15,6 +16,16 @@ from pydantic import (
 from renderers.configs import AutoRendererConfig, RendererConfig
 
 from qorl.adapters.schemas import LoraSettings
+from qorl.agent.interface import AGENT_INTERFACE_VERSION
+from qorl.agent.schemas import AgentSettings, AgentTrace
+from qorl.measure.schemas import (
+    Baseline,
+    Candidate,
+    RolloutMeasurementSettings,
+    RolloutRecord,
+    RunStatus,
+    SelectionState,
+)
 from qorl.model.schemas import (
     AstraInferenceSettings,
     Message,
@@ -22,12 +33,14 @@ from qorl.model.schemas import (
     ModelSettings,
     ToolDefinition,
 )
-from qorl.taskset.schemas import TaskSelection
+from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
+from qorl.taskset.schemas import Task, TaskRole, TaskSelection, TaskSelectionInput
 from qorl.training.schemas import (
     CheckpointSettings,
     OptimizerSettings,
     TrainingRuntimeSettings,
 )
+from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
 
 type JsonObject = dict[str, JsonValue]
 
@@ -340,3 +353,66 @@ def require_list(value: JsonValue, label: str) -> list[JsonValue]:
     if not isinstance(value, list):
         raise RuntimeError(f"{label} must be a list")
     return value
+
+
+class GenerationIdentity(BaseModel):
+    """Allocated generation run and its inputs, independent of student rendering."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    run_id: UUID
+    generation: GenerationSettings
+    agent: AgentSettings
+    measurement: RolloutMeasurementSettings
+    seed: int
+    selections: dict[TaskRole, TaskSelection]
+    selection_inputs: dict[TaskRole, TaskSelectionInput]
+    tasks: dict[TaskRole, list[Task]]
+    expected_pool: PoolManifest
+    system_prompt: str
+    agent_interface_version: int = AGENT_INTERFACE_VERSION
+    plan_fingerprint_version: int = PLAN_FINGERPRINT_VERSION
+
+
+class PlanOnlyEvidence(BaseModel):
+    """Shared validation records and selection, with no invented timing outcome."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    default: Baseline | None
+    candidates: list[Candidate]
+    kept_default: bool
+    selection: SelectionState
+
+
+class GenerationAttempt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    attempt_id: str
+    split: TaskRole
+    task_id: str
+    generation_index: int
+    model_seed: int
+    measurement_seed: int
+    status: RunStatus
+    started_at_utc: str
+    completed_at_utc: str | None = None
+    worker: WorkerManifest | None = None
+    trace: AgentTrace | None = None
+    rollout: RolloutRecord | None = None
+    plan_only: PlanOnlyEvidence | None = None
+    error_type: str | None = None
+    error: str | None = None
+
+
+class GenerationSplitReport(BaseModel):
+    requested_attempts: int
+    completed_attempts: int
+    failed_attempts: int
+    saved_conversations: int
+    conversion_exclusions: dict[str, str]
+
+
+class GenerationReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    training: GenerationSplitReport
+    validation: GenerationSplitReport
+    worker_pool: PoolManifest | None
+    files: dict[str, str]

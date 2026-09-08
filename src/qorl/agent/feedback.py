@@ -1,49 +1,14 @@
 """Present retained probe evidence."""
 
 import statistics
-from typing import Literal
 
-from pydantic import BaseModel
-
-from qorl.agent.presentation import PlanView, plan_view
-from qorl.measure.schemas import Baseline, Candidate, SelectionState, SelectionStatus
-
-
-class ExecutionObservation(BaseModel):
-    status: Literal["collecting", "completed", "timed_out"]
-    source_id: str
-    reused: bool
-    new_executions: int
-    warmup_count: int
-    measurement_count: int
-    median_execution_time_ms: float | None
-    preliminary_ratio_to_initial_default: float | None
-    ratio_meaning: str = "Preliminary initial-default median / feedback median; not final paired speedup or reward. Warmups excluded."
-    timeout_ms: int | None
-    displayed_sample_phase: Literal["warmup", "measurement"] | None
-    displayed_sample_index: int | None
-    displayed_sample_execution_time_ms: float | None
-    plan: PlanView | None
-
-
-class CandidateSummary(BaseModel):
-    candidate_id: str
-    action_valid: bool
-    constraints_satisfied: bool
-    selection_eligible: bool
-    timeout_phase: Literal["planning", "execution"] | None
-    timeout_ms: int | None
-    feedback_source_id: str | None
-    feedback_median_execution_time_ms: float | None
-    preliminary_ratio_to_initial_default: float | None
-
-
-class CandidateHistory(BaseModel):
-    candidates: list[CandidateSummary]
-    selectable_candidate_ids: list[str]
-    attempts_remaining: int
-    selection_status: SelectionStatus
-    selected_candidate_id: str | None
+from qorl.agent.presentation import plan_view
+from qorl.agent.schemas import (
+    CandidateHistory,
+    CandidateSummary,
+    ExecutionObservation,
+)
+from qorl.measure.schemas import Baseline, Candidate, SelectionState
 
 
 def candidate_history(

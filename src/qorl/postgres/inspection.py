@@ -2,78 +2,19 @@
 
 import json
 from collections.abc import Callable
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
-from qorl.model.schemas import JsonValue
 from qorl.postgres.exceptions import PostgresError
+from qorl.postgres.schemas import (
+    RelationMetadata,
+    RelationStatistics,
+)
 
 METADATA_ITEMS = 64
 DISTRIBUTION_ITEMS = 16
 VALUE_BYTES = 128
 RELATION_BYTES = 32_768
-
-
-class Column(BaseModel):
-    name: str
-    type: str
-    nullable: bool
-
-
-class Index(BaseModel):
-    name: str
-    definition: str
-
-
-class ExtendedStatistics(BaseModel):
-    name: str
-    columns: list[str] | None
-    kinds: list[str]
-
-
-class RelationMetadata(BaseModel):
-    exists: bool
-    columns: list[Column] = Field(default_factory=list[Column])
-    indexes: list[Index] = Field(default_factory=list[Index])
-    extended_statistics: list[ExtendedStatistics] = Field(
-        default_factory=list[ExtendedStatistics]
-    )
-    estimated_rows: float | None = None
-    table_bytes: int | None = None
-    indexes_bytes: int | None = None
-    total_bytes: int | None = None
-    omitted_columns: int = 0
-    omitted_indexes: int = 0
-    omitted_extended_statistics: int = 0
-
-
-class ColumnStatistics(BaseModel):
-    model_config = ConfigDict(allow_inf_nan=False)
-
-    column: str
-    status: Literal["available", "missing_column", "missing_statistics"]
-    null_fraction: float | None = None
-    average_width_bytes: int | None = None
-    n_distinct: float | None = None
-    correlation: float | None = None
-    most_common_values: list[JsonValue] | None = None
-    most_common_frequencies: list[float] | None = None
-    histogram_bounds: list[JsonValue] | None = None
-    histogram_bound_positions: list[int] = Field(default_factory=list[int])
-    common_value_count: int = 0
-    histogram_bound_count: int = 0
-    omitted_common_values: int = 0
-    omitted_histogram_bounds: int = 0
-    omitted_common_value_indexes: list[int] = Field(default_factory=list[int])
-    omitted_histogram_bound_indexes: list[int] = Field(default_factory=list[int])
-
-
-class RelationStatistics(BaseModel):
-    columns: list[ColumnStatistics]
-    histogram_positions_meaning: str = "histogram_bound_positions contains zero-based positions in the original ordered histogram, aligned with histogram_bounds. omitted_histogram_bound_indexes identifies returned-array slots replaced with null for oversized values, not original histogram positions."
-    n_distinct_meaning: str = "Positive: estimated distinct count. Negative: fraction of estimated table rows (-1 means unique)."
-    correlation_meaning: str = "Correlation of column values with physical heap order, from -1 (reverse) to +1 (same); not correlation between columns."
 
 
 def literal(value: str) -> str:
