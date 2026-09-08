@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from qorl.measure.environment import capture_environment
+from qorl.measure.schemas import CapturePhase
 from qorl.postgres.config import PostgresConfig
 from qorl.util.io import write_json
 from qorl.worker_pool.containers import ContainerPool, start_pool
@@ -76,7 +77,7 @@ class TaskRun:
         finally:
             self.close()
 
-    def capture(self, phase: str) -> None:
+    def capture(self, phase: CapturePhase) -> None:
         if self.pool is None:
             raise RuntimeError("task run is not started")
         for slot in self.pool.workers:

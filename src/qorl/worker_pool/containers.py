@@ -7,7 +7,7 @@ import queue
 import re
 import subprocess
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path, PurePosixPath
@@ -321,7 +321,7 @@ test ! -e "/target/$2/postmaster.pid"
                 slot.container_id = ""
 
     @contextlib.contextmanager
-    def claim_worker(self) -> Iterator[WorkerSlot]:
+    def claim_worker(self) -> Generator[WorkerSlot, None, None]:
         slot = self._available.get()
         try:
             yield slot

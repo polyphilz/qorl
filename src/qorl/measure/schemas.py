@@ -6,14 +6,275 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import (
+    AliasPath,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
-from qorl.postgres.schemas import ExplainResult
+from qorl.postgres.schemas import ExplainResult, PostgresConfigManifest
 from qorl.taskset.schemas import BenchmarkId
-from qorl.worker_pool.schemas import PoolManifest, WorkerManifest
+from qorl.worker_pool.schemas import PoolManifest, WorkerManifest, WorkerPoolConfig
 
 MIN_CALIBRATION_RUNS = 2
 ROLLOUT_SCHEMA_VERSION = 2
+
+
+class DockerHealth(BaseModel):
+    """Only the health status is captured; Docker health logs remain private."""
+
+    model_config = ConfigDict(
+        extra="ignore", frozen=True, strict=True, hide_input_in_errors=True
+    )
+
+    status: str | None = Field(default=None, alias="Status")
+
+
+type CapturePhase = Literal["pre", "post"]
+type RawCommandDocument = JsonValue
+
+
+class CaptureRecord(BaseModel):
+    """Validated evidence; external fields outside the declared projection are dropped."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        frozen=True,
+        strict=True,
+        populate_by_name=True,
+        hide_input_in_errors=True,
+    )
+
+
+class ContainerState(CaptureRecord):
+    status: str = Field(validation_alias="Status")
+    started_at: str = Field(validation_alias="StartedAt")
+    health: str | None = Field(
+        default=None, validation_alias=AliasPath("Health", "Status")
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_health(cls, value: JsonValue) -> JsonValue:
+        if isinstance(value, dict) and "Health" in value:
+            DockerHealth.model_validate(value["Health"] or {})
+        return value
+
+
+class ContainerLimits(CaptureRecord):
+    cpuset_cpus: str = Field(validation_alias="CpusetCpus")
+    cpuset_mems: str = Field(validation_alias="CpusetMems")
+    cpu_period: int = Field(validation_alias="CpuPeriod")
+    cpu_quota: int = Field(validation_alias="CpuQuota")
+    nano_cpus: int = Field(validation_alias="NanoCpus")
+    memory: int = Field(validation_alias="Memory")
+    memory_swap: int = Field(validation_alias="MemorySwap")
+    shm_size: int = Field(validation_alias="ShmSize")
+    pids_limit: int | None = Field(validation_alias="PidsLimit")
+    readonly_rootfs: bool = Field(validation_alias="ReadonlyRootfs")
+    cgroupns_mode: str = Field(validation_alias="CgroupnsMode")
+
+
+class ContainerMount(CaptureRecord):
+    type: str = Field(validation_alias="Type")
+    name: str | None = Field(default=None, validation_alias="Name")
+    destination: str = Field(validation_alias="Destination")
+    driver: str | None = Field(default=None, validation_alias="Driver")
+    mode: str | None = Field(default=None, validation_alias="Mode")
+    rw: bool = Field(validation_alias="RW")
+    propagation: str | None = Field(default=None, validation_alias="Propagation")
+
+
+class ContainerCapture(CaptureRecord):
+    id: str = Field(validation_alias="Id")
+    name: str = Field(validation_alias="Name")
+    created: str = Field(validation_alias="Created")
+    image_id: str = Field(validation_alias="Image")
+    image_reference: str = Field(validation_alias=AliasPath("Config", "Image"))
+    labels: dict[str, str] = Field(
+        default_factory=dict[str, str], validation_alias=AliasPath("Config", "Labels")
+    )
+    state: ContainerState = Field(validation_alias="State")
+    limits: ContainerLimits = Field(validation_alias="HostConfig")
+    mounts: list[ContainerMount] = Field(validation_alias="Mounts")
+
+    @field_validator("name")
+    @classmethod
+    def bare_name(cls, value: str) -> str:
+        return value.lstrip("/")
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def empty_labels(cls, value: JsonValue) -> JsonValue:
+        return {} if value is None else value
+
+
+class ImageCapture(CaptureRecord):
+    id: str = Field(validation_alias="Id")
+    repo_tags: list[str] = Field(default_factory=list[str], validation_alias="RepoTags")
+    repo_digests: list[str] = Field(
+        default_factory=list[str], validation_alias="RepoDigests"
+    )
+    created: str = Field(validation_alias="Created")
+    os: str = Field(validation_alias="Os")
+    architecture: str = Field(validation_alias="Architecture")
+    size: int = Field(validation_alias="Size")
+    labels: dict[str, str] = Field(
+        default_factory=dict[str, str], validation_alias=AliasPath("Config", "Labels")
+    )
+    rootfs_layers: list[str] = Field(
+        default_factory=list[str], validation_alias=AliasPath("RootFS", "Layers")
+    )
+
+    @field_validator("repo_tags", "repo_digests", "rootfs_layers", mode="before")
+    @classmethod
+    def empty_lists(cls, value: JsonValue) -> JsonValue:
+        return [] if value is None else value
+
+    @field_validator("labels", mode="before")
+    @classmethod
+    def empty_labels(cls, value: JsonValue) -> JsonValue:
+        return {} if value is None else value
+
+
+class DockerInfo(CaptureRecord):
+    server_version: str | None = Field(default=None, alias="ServerVersion")
+    driver: str | None = Field(default=None, alias="Driver")
+    logging_driver: str | None = Field(default=None, alias="LoggingDriver")
+    cgroup_driver: str | None = Field(default=None, alias="CgroupDriver")
+    cgroup_version: str | None = Field(default=None, alias="CgroupVersion")
+    kernel_version: str | None = Field(default=None, alias="KernelVersion")
+    operating_system: str | None = Field(default=None, alias="OperatingSystem")
+    os_type: str | None = Field(default=None, alias="OSType")
+    architecture: str | None = Field(default=None, alias="Architecture")
+    cpu_count: int | None = Field(default=None, alias="NCPU")
+    memory_total: int | None = Field(default=None, alias="MemTotal")
+    docker_root_dir: str | None = Field(default=None, alias="DockerRootDir")
+    name: str | None = Field(default=None, alias="Name")
+    live_restore_enabled: bool | None = Field(default=None, alias="LiveRestoreEnabled")
+    security_options: list[str] | None = Field(default=None, alias="SecurityOptions")
+
+
+class ContainerRuntime(CaptureRecord):
+    cpus_allowed_list: str
+    mems_allowed_list: str
+    cpu_max: str
+    memory_max: str
+    memory_swap_max: str
+    shm_size_bytes: str
+
+
+class CpuPowerPolicy(CaptureRecord):
+    policy: str
+    affected_cpus: str | None
+    scaling_driver: str | None
+    scaling_governor: str | None
+    energy_performance_preference: str | None
+    cpuinfo_min_freq: str | None
+    cpuinfo_max_freq: str | None
+
+
+class GpuCapture(CaptureRecord):
+    index: str
+    name: str
+    uuid: str
+    pci_bus_id: str
+    driver_version: str
+    vbios_version: str
+
+
+class GpuState(CaptureRecord):
+    gpus: list[GpuCapture]
+    topology: str
+
+
+class HostKernel(CaptureRecord):
+    system: str
+    release: str
+    version: str
+    machine: str
+    command_line: str | None
+
+
+class HostMachine(CaptureRecord):
+    sys_vendor: str | None
+    product_name: str | None
+    product_version: str | None
+    bios_version: str | None
+
+
+class HostCpu(CaptureRecord):
+    summary: RawCommandDocument
+    topology: RawCommandDocument
+    microcode: str | None
+    isolated: str | None
+    power_policies: list[CpuPowerPolicy]
+
+
+class HostMemory(CaptureRecord):
+    meminfo: dict[str, str]
+    transparent_huge_pages: str | None
+
+
+class HostStorage(CaptureRecord):
+    docker_root_mount: RawCommandDocument
+    block_devices: RawCommandDocument
+    schedulers: dict[str, str]
+
+
+class HostCapture(CaptureRecord):
+    hostname: str
+    os_release: dict[str, str]
+    kernel: HostKernel
+    machine: HostMachine
+    cpu: HostCpu
+    memory: HostMemory
+    storage: HostStorage
+    gpus: GpuState | None
+
+
+class RuntimeIdentity(CaptureRecord):
+    postgres_image_id: str
+    postgres_config_id: str
+
+
+class RuntimeProfile(CaptureRecord):
+    id: str
+    path: str
+    sha256: str
+    configuration: WorkerPoolConfig
+
+
+class DockerCapture(CaptureRecord):
+    version: RawCommandDocument
+    compose_version: str
+    info: DockerInfo
+    container: ContainerCapture
+    container_runtime: ContainerRuntime
+    image: ImageCapture
+    image_file_sha256: dict[str, str]
+
+
+class CaptureArtifact(CaptureRecord):
+    sha256: str
+    bytes: int
+
+
+class EnvironmentCapture(CaptureRecord):
+    schema_version: Literal[1] = 1
+    runtime_identity: RuntimeIdentity
+    postgres_config: PostgresConfigManifest
+    phase: CapturePhase
+    captured_at_utc: str
+    assertion_output: str
+    runtime_profile: RuntimeProfile
+    host: HostCapture
+    docker: DockerCapture
+    artifacts: dict[str, CaptureArtifact]
 
 
 class RolloutMeasurementSettings(BaseModel):
