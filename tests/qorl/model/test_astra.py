@@ -21,7 +21,6 @@ from qorl.model.schemas import (
     MessageRole,
     ModelPreset,
     ModelSettings,
-    ToolDefinition,
 )
 
 PROMPT_TOKENS = 100
@@ -51,7 +50,7 @@ def turn() -> GenerationRequest:
             Message(role=MessageRole.SYSTEM, content="Use the tools."),
             Message(role=MessageRole.USER, content="Optimize this query."),
         ],
-        tools=[ToolDefinition.model_validate(tool) for tool in agent_tools(["a", "b"])],
+        tools=agent_tools(["a", "b"]),
         seed=42,
     )
 
@@ -279,7 +278,7 @@ def test_live_tool_continuation(
     """Opt-in paid API check: inspect a synthetic plan, then keep it unchanged."""
     assert isinstance(preset.inference, AstraInferenceSettings)
     client = AstraModelClient(preset.model, preset.inference)
-    tools = [ToolDefinition.model_validate(tool) for tool in agent_tools(["a", "b"])]
+    tools = agent_tools(["a", "b"])
     initial = GenerationRequest(
         messages=[
             Message(

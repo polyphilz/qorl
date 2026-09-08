@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
-from qorl.postgres.schemas import PostgresIndexes
+from qorl.postgres.schemas import PostgresIndexes, WorkerAllocation
 from qorl.worker_pool.config import validate_host_topology
 from qorl.worker_pool.exceptions import ContainerError
 from qorl.worker_pool.schemas import (
@@ -290,6 +290,11 @@ test ! -e "/target/$2/postmaster.pid"
             ],
         )
         self.execute(["docker", "exec", slot.container_id, "qorl-assert-config"])
+        slot.client.allocation = WorkerAllocation(
+            cpuset=slot.resources.cpuset,
+            physical_core_count=slot.resources.physical_core_count,
+            memory_bytes=slot.resources.memory_bytes,
+        )
 
     def load_indexes(self) -> None:
         """Populate the shared catalog from one worker after restoring or loading IMDb."""

@@ -26,23 +26,10 @@ from qorl.postgres.exceptions import QueryTimeoutError
 from qorl.taskset.schemas import Task
 
 
-def validate_candidate(
-    worker: QueryExecutor,
-    sql: str,
-    catalog: TaskCatalog,
-    raw_action: JsonValue,
-    *,
-    candidate_id: str,
-    timeout_ms: int,
-    attempts_remaining: int,
+def unvalidated_candidate(
+    raw_action: JsonValue, candidate_id: str, attempts_remaining: int
 ) -> Candidate:
-    """Parse, compile and verify one attempt; infrastructure errors propagate.
-
-    A malformed action consumes its issued attempt without querying PostgreSQL.
-    A planning timeout is candidate evidence, not a measured execution time.
-    Novelty and execution-duplicate classification belong to the owning rollout.
-    """
-    candidate = Candidate(
+    return Candidate(
         candidate_id=candidate_id,
         action=raw_action,
         action_valid=False,
@@ -59,6 +46,25 @@ def validate_candidate(
         pg_hint_plan=None,
         attempts_remaining=attempts_remaining,
     )
+
+
+def validate_candidate(
+    worker: QueryExecutor,
+    sql: str,
+    catalog: TaskCatalog,
+    raw_action: JsonValue,
+    *,
+    candidate_id: str,
+    timeout_ms: int,
+    attempts_remaining: int,
+) -> Candidate:
+    """Parse, compile and verify one attempt; infrastructure errors propagate.
+
+    A malformed action consumes its issued attempt without querying PostgreSQL.
+    A planning timeout is candidate evidence, not a measured execution time.
+    Novelty and execution-duplicate classification belong to the owning rollout.
+    """
+    candidate = unvalidated_candidate(raw_action, candidate_id, attempts_remaining)
     try:
         action = PlanAction.from_raw(raw_action, catalog)
     except ActionError as error:
@@ -155,8 +161,7 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         self.check_cancelled()
         return self.default
 
-    def evaluate(self, raw_action: JsonValue) -> Candidate:
-        """Issue one attempt and distinguish structural from execution duplicates."""
+    def check_attempt(self) -> None:
         self.check_cancelled()
         if self.default is None:
             raise RuntimeError("rollout baseline has not been started")
@@ -164,6 +169,27 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
             raise RuntimeError("rollout already kept the default plan")
         if len(self.candidates) >= self.max_candidates:
             raise RuntimeError("rollout candidate budget is exhausted")
+
+    def reject_attempt(self, arguments: JsonValue, diagnostics: list[str]) -> Candidate:
+        """Retain a malformed tool envelope without inventing an action or SQL."""
+        self.check_attempt()
+        candidate = unvalidated_candidate(
+            arguments.get("action") if isinstance(arguments, dict) else None,
+            f"candidate-{len(self.candidates) + 1:02d}",
+            self.max_candidates - len(self.candidates) - 1,
+        ).model_copy(
+            update={
+                "rejected_tool_arguments": arguments,
+                "errors_or_diagnostics": diagnostics,
+            }
+        )
+        self.candidates.append(candidate)
+        self.check_cancelled()
+        return candidate
+
+    def evaluate(self, raw_action: JsonValue) -> Candidate:
+        """Issue one attempt and distinguish structural from execution duplicates."""
+        self.check_attempt()
         candidate = validate_candidate(
             self.worker,
             self.sql,

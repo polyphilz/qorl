@@ -2,15 +2,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
 
+from qorl.agent.observation import (
+    AgentObservation,
+    ContextBudget,
+    DecisionTurns,
+    RemainingTurnBudget,
+    ResourceLimits,
+    TurnBudget,
+)
+from qorl.agent.presentation import plan_view
 from qorl.agent.prompts import system_prompt
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import AgentEvaluator, ToolName
-from qorl.plans.schemas import BOOLEAN_SETTINGS, INTEGER_SETTINGS, NUMERIC_SETTINGS
+from qorl.model.schemas import Message, MessageRole, ToolDefinition
+from qorl.postgres.schemas import PlannerSettings, PostgresResourceLimits
 
 INSPECTION_TURNS_PER_ALIAS = 3
-AGENT_INTERFACE_VERSION = 5
+AGENT_INTERFACE_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -19,8 +28,8 @@ class AgentInterface:
 
     maximum_model_turns: int
     inspection_turn_limit: int
-    observation: dict[str, Any]
-    tools: list[dict[str, Any]]
+    observation: AgentObservation
+    tools: list[ToolDefinition]
 
     @classmethod
     def from_evaluator(
@@ -40,44 +49,52 @@ class AgentInterface:
             len(aliases) * inspection_turns_per_alias,
             max(0, maximum_model_turns - reserved_decision_turns),
         )
-        settings = set(BOOLEAN_SETTINGS) | set(NUMERIC_SETTINGS) | set(INTEGER_SETTINGS)
         if evaluator.default is None:
             raise RuntimeError("rollout baseline has not been started")
         postgres_settings = evaluator.worker.settings
-        observation = {
-            "task_id": evaluator.task.task_id,
-            "objective": "minimize measured warm-cache execution time",
-            "sql": evaluator.sql,
-            "relations": [
-                relation.model_dump() for relation in evaluator.task.relations
-            ],
-            "join_edges": evaluator.task.join_edges,
-            "indexes": {
+        observation = AgentObservation(
+            task_id=evaluator.task.task_id,
+            sql=evaluator.sql,
+            relations=evaluator.task.relations,
+            join_edges=evaluator.task.join_edges,
+            indexes={
                 alias: sorted(indexes)
                 for alias, indexes in sorted(evaluator.catalog.indexes.items())
             },
-            "planner_settings": postgres_settings.model_dump(include=settings),
-            "default_plan": evaluator.default.compact_plan,
-            "default_median_execution_time_ms": (
+            planner_settings=PlannerSettings.model_validate(
+                postgres_settings.model_dump(include=set(PlannerSettings.model_fields))
+            ),
+            default_plan=plan_view(
+                evaluator.default.plain_explain["Plan"], summary=True
+            ),
+            resource_limits=ResourceLimits(
+                worker=evaluator.worker.allocation,
+                worker_source="startup_verified_container_limits"
+                if evaluator.worker.allocation is not None
+                else "unavailable",
+                postgres=PostgresResourceLimits.model_validate(
+                    postgres_settings.model_dump(
+                        include=set(PostgresResourceLimits.model_fields)
+                    )
+                ),
+            ),
+            default_median_execution_time_ms=(
                 evaluator.default.median_execution_time_ms
             ),
-            "candidate_attempts": candidate_attempts,
-            "candidate_timeout_ms": evaluator.timeout_ms,
-            "turn_budget": {
-                "total_model_turns": maximum_model_turns,
-                "maximum_inspection_turns": inspection_turn_limit,
-                "reserved_final_turns": reserved_decision_turns,
-                "reserved_for": {
-                    "candidate_evaluations": candidate_attempts,
-                    "finish_or_keep_default": 1,
-                },
-            },
-        }
+            candidate_attempts=candidate_attempts,
+            candidate_timeout_ms=evaluator.timeout_ms,
+            turn_budget=TurnBudget(
+                total_model_turns=maximum_model_turns,
+                maximum_inspection_turns=inspection_turn_limit,
+                reserved_final_turns=reserved_decision_turns,
+                reserved_for=DecisionTurns(candidate_evaluations=candidate_attempts),
+            ),
+        )
         if context_length is not None and completion_reserve is not None:
-            observation["context_budget"] = {
-                "maximum_tokens": context_length,
-                "reserved_for_next_completion": completion_reserve,
-            }
+            observation.context_budget = ContextBudget(
+                maximum_tokens=context_length,
+                reserved_for_next_completion=completion_reserve,
+            )
         return cls(
             maximum_model_turns=maximum_model_turns,
             inspection_turn_limit=inspection_turn_limit,
@@ -85,18 +102,22 @@ class AgentInterface:
             tools=tools,
         )
 
-    def initial_messages(self) -> list[dict[str, Any]]:
+    def initial_messages(self) -> list[Message]:
         return [
-            {"role": "system", "content": system_prompt(self.candidate_attempts)},
-            {
-                "role": "user",
-                "content": json.dumps(self.observation, sort_keys=True),
-            },
+            Message(
+                role=MessageRole.SYSTEM, content=system_prompt(self.candidate_attempts)
+            ),
+            Message(
+                role=MessageRole.USER,
+                content=json.dumps(
+                    self.observation.model_dump(mode="json"), sort_keys=True
+                ),
+            ),
         ]
 
-    def available_tools(self, turn: int, candidate_count: int) -> list[dict[str, Any]]:
+    def available_tools(self, turn: int, candidate_count: int) -> list[ToolDefinition]:
         names = self.available_tool_names(turn, candidate_count)
-        return [tool for tool in self.tools if tool["function"]["name"] in names]
+        return [tool for tool in self.tools if tool.function.name in names]
 
     def available_tool_names(self, turn: int, candidate_count: int) -> set[str]:
         if candidate_count >= self.candidate_attempts:
@@ -110,27 +131,25 @@ class AgentInterface:
                     ToolName.KEEP_DEFAULT.value,
                 }
             )
-        names = {tool["function"]["name"] for tool in self.tools}
+        names = {tool.function.name for tool in self.tools}
         if not candidate_count:
             names.remove(ToolName.FINISH.value)
         else:
             names.remove(ToolName.KEEP_DEFAULT.value)
         return names
 
-    def budget(self, turn: int) -> dict[str, int]:
-        return {
-            "current_turn": turn,
-            "turns_remaining": self.maximum_model_turns - turn,
-            "unrestricted_turns_remaining": max(0, self.inspection_turn_limit - turn),
-            "reserved_final_turns": self.reserved_decision_turns,
-        }
-
-    @property
-    def candidate_attempts(self) -> int:
-        return int(
-            self.observation["turn_budget"]["reserved_for"]["candidate_evaluations"]
+    def budget(self, turn: int) -> RemainingTurnBudget:
+        return RemainingTurnBudget(
+            current_turn=turn,
+            turns_remaining=self.maximum_model_turns - turn,
+            unrestricted_turns_remaining=max(0, self.inspection_turn_limit - turn),
+            reserved_final_turns=self.reserved_decision_turns,
         )
 
     @property
+    def candidate_attempts(self) -> int:
+        return self.observation.turn_budget.reserved_for.candidate_evaluations
+
+    @property
     def reserved_decision_turns(self) -> int:
-        return int(self.observation["turn_budget"]["reserved_final_turns"])
+        return self.observation.turn_budget.reserved_final_turns

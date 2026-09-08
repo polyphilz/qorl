@@ -195,6 +195,11 @@ class Candidate(Record):
 
     candidate_id: str
     action: JsonValue
+    # Original tool envelope for submissions rejected before PlanAction validation.
+    rejected_tool_arguments: JsonValue = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     action_valid: bool
     constraints_satisfied: bool
     compiled_hint: str

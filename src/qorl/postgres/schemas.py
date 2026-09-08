@@ -24,7 +24,7 @@ class PostgresIndexes(BaseModel):
     by_table: dict[str, frozenset[str]]
 
 
-class PostgresSettings(DatabaseRecord):
+class PlannerSettings(DatabaseRecord):
     """Baseline settings shown to the agent, in PostgreSQL's native string format."""
 
     enable_bitmapscan: str
@@ -51,6 +51,26 @@ class PostgresSettings(DatabaseRecord):
     parallel_setup_cost: str
     parallel_tuple_cost: str
     effective_cache_size: str
+
+
+class PostgresResourceLimits(DatabaseRecord):
+    work_mem: str
+    max_worker_processes: str
+    max_parallel_workers: str
+    max_parallel_workers_per_gather: str
+    parallel_leader_participation: str
+
+
+class PostgresSettings(PlannerSettings, PostgresResourceLimits):
+    """Verified planner settings and resource limits in native PostgreSQL units."""
+
+
+class WorkerAllocation(DatabaseRecord):
+    """Container limits verified at worker startup, not host-wide resources."""
+
+    cpuset: str
+    physical_core_count: int
+    memory_bytes: int
 
 
 class PostgreSQLExpected(DatabaseRecord):

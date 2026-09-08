@@ -11,6 +11,7 @@ from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.agent.types import ToolName
 from qorl.measure.timeouts import DEFAULT_STATEMENT_TIMEOUT_MS
 from qorl.measure.validation import PlanValidationEvaluator
+from qorl.model.schemas import FunctionCall, JsonObject, Message, MessageRole, ToolCall
 from qorl.paths import REPOSITORY_ROOT
 from qorl.plans.verify import plan_join_tree
 from qorl.postgres.config import PostgresConfig
@@ -48,45 +49,40 @@ def leading_action(plan: dict[str, Any]) -> dict[str, Any]:
 
 
 def call_tool(
-    messages: list[dict[str, Any]],
+    messages: list[Message],
     environment: AgentEnvironment,
     interface: AgentInterface,
     turn: int,
     name: str,
-    arguments: dict[str, Any],
-) -> tuple[dict[str, Any], bool]:
+    arguments: JsonObject,
+) -> tuple[JsonObject, bool]:
     if name not in interface.available_tool_names(
         turn, len(environment.evaluator.candidates)
     ):
         raise RuntimeError(f"{name} is unavailable on turn {turn}")
     call_id = f"call-{turn:04d}"
     messages.append(
-        {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": json.dumps(arguments, sort_keys=True),
-                    },
-                }
+        Message(
+            role=MessageRole.ASSISTANT,
+            tool_calls=[
+                ToolCall(
+                    id=call_id,
+                    function=FunctionCall(
+                        name=name, arguments=json.dumps(arguments, sort_keys=True)
+                    ),
+                )
             ],
-        }
+        )
     )
     result, finished = environment.execute(name, arguments)
-    if not isinstance(result, dict):
-        result = {"result": result}
-    result = {**result, "_turn_budget": interface.budget(turn)}
+    result["_turn_budget"] = interface.budget(turn).model_dump(mode="json")
     messages.append(
-        {
-            "role": "tool",
-            "tool_call_id": call_id,
-            "name": name,
-            "content": json.dumps(result, sort_keys=True),
-        }
+        Message(
+            role=MessageRole.TOOL,
+            tool_call_id=call_id,
+            name=name,
+            content=json.dumps(result, sort_keys=True),
+        )
     )
     return result, finished
 
@@ -169,8 +165,11 @@ def build_demo(
         measured_candidate = evaluator.candidates[0]
         return {
             "schema_version": PROTOCOL_DEMO_SCHEMA_VERSION,
-            "messages": messages,
-            "tools": interface.tools,
+            "messages": [
+                message.model_dump(mode="json", exclude_none=True)
+                for message in messages
+            ],
+            "tools": [tool.model_dump(mode="json") for tool in interface.tools],
             "metadata": {
                 "demonstration_id": DEMONSTRATION_ID,
                 "teacher": "postgres_default_join_tree",

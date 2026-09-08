@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from qorl.agent.observation import AgentObservation
 from qorl.agent.types import StopReason
 from qorl.model.schemas import (
     GenerationResponse,
@@ -42,7 +43,7 @@ class AgentTrace(BaseModel):
     agent_interface_version: int
     seed: int | None
     stop_reason: StopReason | None = None
-    initial_observation: JsonObject
+    initial_observation: AgentObservation
     tools: list[ToolDefinition]
     tools_sha256: str
     transcript: list[Message]

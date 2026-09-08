@@ -8,11 +8,15 @@ from typing import Any
 import pytest
 
 from qorl.agent.interface import AgentInterface
+from qorl.agent.observation import AgentObservation
+from qorl.agent.presentation import plan_view
 from qorl.agent.tools import agent_tools
+from qorl.model.schemas import ToolDefinition
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
 from qorl.plans.verify import compact_plan
+from qorl.postgres.config import PostgresConfig
 from qorl.sft.build_protocol_demo import CALL_SEQUENCE, TASK_ID
 from qorl.sft.validate import DemoValidationError, validate_protocol_demo
 from qorl.taskset.taskset import TaskSet
@@ -32,7 +36,7 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
     selected_task = next(item for item in task_set.tasks if item.task_id == TASK_ID)
     task = selected_task.model_dump()
     aliases = sorted(item["alias"] for item in task["relations"])
-    indexes = {alias: [] for alias in aliases}
+    indexes: dict[str, list[str]] = {alias: [] for alias in aliases}
     catalog = TaskCatalog.from_task(task, {alias: set() for alias in aliases})
     leading = {
         "left": {"left": "rt", "right": "ci"},
@@ -44,7 +48,7 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
     plan_action = PlanAction.from_raw({"version": 1, "leading": leading}, catalog)
     action, hint = plan_action.to_wire(), plan_action.compile()
     plan = {"Plan": {**raw_plan(leading), "Startup Cost": 1.0}}
-    visible_plan = {"Plan": compact_plan(plan["Plan"])}
+    visible_plan = plan_view(plan["Plan"]).model_dump(mode="json")
     tools = agent_tools(aliases)
     maximum_turns = 64
     reserved_decision_turns = candidate_attempts + 1
@@ -66,8 +70,41 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
             },
         },
     }
-    interface = AgentInterface(maximum_turns, inspection_limit, observation, tools)
-    messages: list[dict[str, Any]] = interface.initial_messages()
+    settings = PostgresConfig.load(
+        repository / "docker/postgres/configs/000-pgconf-default"
+    ).agent_settings
+    resource_names = {
+        "work_mem",
+        "max_worker_processes",
+        "max_parallel_workers",
+        "max_parallel_workers_per_gather",
+        "parallel_leader_participation",
+    }
+    observation.update(
+        {
+            "planner_settings": settings.model_dump(exclude=resource_names),
+            "resource_limits": {
+                "worker": None,
+                "worker_source": "unavailable",
+                "postgres": settings.model_dump(include=resource_names),
+            },
+            "default_plan": plan_view(plan["Plan"], summary=True).model_dump(
+                mode="json"
+            ),
+            "default_median_execution_time_ms": None,
+            "candidate_timeout_ms": 300000,
+        }
+    )
+    interface = AgentInterface(
+        maximum_turns,
+        inspection_limit,
+        AgentObservation.model_validate(observation),
+        tools,
+    )
+    messages = [
+        message.model_dump(mode="json", exclude_none=True)
+        for message in interface.initial_messages()
+    ]
 
     def add(
         turn: int, name: str, arguments: dict[str, Any], result: dict[str, Any]
@@ -94,7 +131,12 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
                     "tool_call_id": call_id,
                     "name": name,
                     "content": json.dumps(
-                        {**result, "_turn_budget": interface.budget(turn)},
+                        {
+                            **result,
+                            "_turn_budget": interface.budget(turn).model_dump(
+                                mode="json"
+                            ),
+                        },
                         sort_keys=True,
                     ),
                 },
@@ -125,7 +167,7 @@ def synthetic_demo(repository: Path, candidate_attempts: int = 5) -> dict[str, A
     return {
         "schema_version": 2,
         "messages": messages,
-        "tools": tools,
+        "tools": [tool.model_dump(mode="json") for tool in tools],
         "metadata": {
             "task_set_id": "ceb",
             "task_id": task["task_id"],
@@ -183,8 +225,8 @@ class TestProtocolDemo:
             inspection_turn_limit=observation["turn_budget"][
                 "maximum_inspection_turns"
             ],
-            observation=observation,
-            tools=demo["tools"],
+            observation=AgentObservation.model_validate(observation),
+            tools=[ToolDefinition.model_validate(tool) for tool in demo["tools"]],
         )
         demo["messages"] = demo["messages"][:4]
         demo["messages"].extend(
@@ -210,7 +252,7 @@ class TestProtocolDemo:
                     "content": json.dumps(
                         {
                             "status": "kept_default",
-                            "_turn_budget": interface.budget(2),
+                            "_turn_budget": interface.budget(2).model_dump(mode="json"),
                         },
                         sort_keys=True,
                     ),

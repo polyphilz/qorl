@@ -132,6 +132,13 @@ def test_start_updates_extension_before_waiting_for_config_health(
     pool.start()
 
     for slot in pool.workers:
+        assert slot.client.allocation is not None
+        assert slot.client.allocation.cpuset == slot.resources.cpuset
+        assert slot.client.allocation.memory_bytes == slot.resources.memory_bytes
+        assert (
+            slot.client.allocation.physical_core_count
+            == slot.resources.physical_core_count
+        )
         startup = [
             (command, options)
             for command, options in docker_commands

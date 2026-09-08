@@ -8,7 +8,12 @@ from collections.abc import Callable
 from pydantic import ValidationError
 
 from qorl.postgres.exceptions import PostgresError, QueryTimeoutError
-from qorl.postgres.schemas import ExplainResult, PostgresIndexes, PostgresSettings
+from qorl.postgres.schemas import (
+    ExplainResult,
+    PostgresIndexes,
+    PostgresSettings,
+    WorkerAllocation,
+)
 
 
 class PostgresClient:
@@ -23,6 +28,7 @@ class PostgresClient:
         self._run_command = run_command
         self.settings = settings
         self.indexes = indexes
+        self.allocation: WorkerAllocation | None = None
         self.explain_calls = 0
         self.explain_analyze_calls = 0
 

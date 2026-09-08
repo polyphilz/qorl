@@ -29,7 +29,12 @@ from qorl.model.schemas import (
     ModelSettings,
 )
 from qorl.postgres.exceptions import PostgresError
-from qorl.postgres.schemas import ExplainResult, PostgresIndexes, PostgresSettings
+from qorl.postgres.schemas import (
+    ExplainResult,
+    PostgresIndexes,
+    PostgresSettings,
+    WorkerAllocation,
+)
 from qorl.taskset.schemas import Task
 from qorl.worker_pool.exceptions import ContainerError
 
@@ -76,6 +81,7 @@ class Database:
     settings: PostgresSettings
     indexes: PostgresIndexes
     explain_calls: int = 0
+    allocation: WorkerAllocation | None = None
 
     def explain(
         self, sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
@@ -213,13 +219,13 @@ def test_request_goldens(
         [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
     )
     policy(transport).search(evaluator)
-    # Interface v5 with unconstrained local decoding and preserved reasoning.
+    # Interface-v6 inspection request bytes with unconstrained local decoding.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
     ] == [
-        "ead00e656795c436f8863765aceafadcf95bca2b85950a3b886a2f89cf5c8aba",
-        "3d02f8dc999272d0cb730ac72ed2a7cd5587a4b02cec2e6bbc1e8f1f7766ae2e",
+        "c6a4fb19caac08dc1f964863c66631d2e682a7cde773461764b7733e1ed7c2bf",
+        "b44bfaab592cbac7f4e0536adb2770b694d709b094f02fc6c95dbf088185daad",
     ]
 
 
@@ -266,9 +272,15 @@ def test_evaluate_then_finish(
                 if item.tool_call_id == message.tool_call_id
             )
             assert message.content == json.dumps(event.result, sort_keys=True)
-    initial = JSON_OBJECT.validate_python(trace.initial_observation["planner_settings"])
-    assert set(initial) == set(PostgresSettings.model_fields)
-    assert "postgresql_server_version_num" not in trace.initial_observation
+    initial = trace.initial_observation.planner_settings
+    limits = trace.initial_observation.resource_limits.postgres
+    assert set(type(initial).model_fields) | set(type(limits).model_fields) == set(
+        PostgresSettings.model_fields
+    )
+    assert (
+        "postgresql_server_version_num"
+        not in type(trace.initial_observation).model_fields
+    )
     assert transport.requests[1]["messages"] == transport.token_requests[1]["messages"]
     assert transport.requests[1]["messages"] != transport.requests[0]["messages"]
     assert '"reasoning": "choose a tool"' in json.dumps(transport.requests[1])
@@ -291,9 +303,12 @@ def test_budgets_mask_tools_and_reject_unavailable_calls(
     assert trace.stop_reason == StopReason.MODEL_FINISH
     assert len(evaluator.candidates) == 1
     for index in (0, 1):
-        assert trace.tool_events[index].result["Plan"] == {
+        nodes = trace.tool_events[index].result["nodes"]
+        assert isinstance(nodes, list)
+        assert JSON_OBJECT.validate_python(nodes[0])["estimates"] == {
             "Node Type": "Result",
             "Plan Rows": 1,
+            "Total Cost": 99.0,
         }
     for index in (2, 4):
         assert (
@@ -416,10 +431,12 @@ def test_turn_limit_and_candidate_limit(
 def test_terminal_order(evaluator: PlanValidationEvaluator[InspectionExecutor]) -> None:
     environment = AgentEnvironment(evaluator)
     result, finished = environment.execute("finish", {})
+    assert isinstance(result["error"], str)
     assert "use keep_default" in result["error"]
     assert not finished
     evaluator.evaluate({"version": 1})
     result, finished = environment.execute("keep_default", {})
+    assert isinstance(result["error"], str)
     assert "before submitting a candidate" in result["error"]
     assert not finished
     result, finished = environment.execute(
@@ -600,20 +617,24 @@ def test_single_candidate_observation_and_recursive_schema(
     evaluator: PlanValidationEvaluator[InspectionExecutor],
 ) -> None:
     interface = AgentInterface.from_evaluator(evaluator, MODEL_TURNS)
-    assert interface.observation["candidate_attempts"] == 1
-    assert interface.observation["turn_budget"]["reserved_final_turns"] == 2
+    assert interface.observation.candidate_attempts == 1
+    assert interface.observation.turn_budget.reserved_final_turns == 2
     assert interface.available_tool_names(1, 1) == {"finish"}
     tool = next(
-        item
-        for item in interface.tools
-        if item["function"]["name"] == "evaluate_candidate"
+        item for item in interface.tools if item.function.name == "evaluate_candidate"
     )
-    schema = tool["function"]["parameters"]
+    schema = tool.function.parameters
+    properties = JSON_OBJECT.validate_python(schema["properties"])
+    action = JSON_OBJECT.validate_python(properties["action"])
+    action_properties = JSON_OBJECT.validate_python(action["properties"])
     assert (
-        schema["properties"]["action"]["properties"]["leading"]["$ref"]
+        JSON_OBJECT.validate_python(action_properties["leading"])["$ref"]
         == "#/$defs/JoinNode"
     )
-    assert schema["$defs"]["JoinNode"]["properties"]["left"]["anyOf"][0]["enum"] == [
-        "a",
-        "b",
-    ]
+    definitions = JSON_OBJECT.validate_python(schema["$defs"])
+    join = JSON_OBJECT.validate_python(definitions["JoinNode"])
+    join_properties = JSON_OBJECT.validate_python(join["properties"])
+    left = JSON_OBJECT.validate_python(join_properties["left"])
+    alternatives = left["anyOf"]
+    assert isinstance(alternatives, list)
+    assert JSON_OBJECT.validate_python(alternatives[0])["enum"] == ["a", "b"]

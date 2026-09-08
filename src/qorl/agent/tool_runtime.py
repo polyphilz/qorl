@@ -1,163 +1,133 @@
-from __future__ import annotations
+"""Validated execution; conversation availability belongs to AgentInterface."""
 
-import json
-from typing import Any
+from pydantic import TypeAdapter, ValidationError
 
+from qorl.agent.presentation import plan_view
+from qorl.agent.tool_schemas import (
+    CandidateArguments,
+    ColumnArguments,
+    PlanArguments,
+    RelationArguments,
+    ToolArguments,
+    argument_errors,
+)
 from qorl.agent.types import AgentEvaluator, ToolName
 from qorl.measure.schemas import ToolResultStatus
-from qorl.plans.catalog import IDENTIFIER
-from qorl.plans.verify import compact_plan
-from qorl.postgres.exceptions import PostgresError
-from qorl.worker_pool.exceptions import ContainerError
+from qorl.model.schemas import JsonObject, JsonValue
+from qorl.postgres.inspection import (
+    RelationMetadata,
+    column_statistics,
+    inspect_relation,
+)
+
+OBJECT: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 
 
 class AgentEnvironment:
     def __init__(self, evaluator: AgentEvaluator) -> None:
         self.evaluator = evaluator
-        self.worker = evaluator.worker
         self.tables = {item.alias: item.table for item in evaluator.task.relations}
+        self.metadata: dict[str, RelationMetadata] = {}
 
-    @staticmethod
-    def literal(value: str) -> str:
-        return "'" + value.replace("'", "''") + "'"
+    def table(self, relation: str) -> str:
+        if relation not in self.tables:
+            raise ValueError("relation must be an alias in this query")
+        return self.tables[relation]
 
-    def table(self, arguments: dict[str, Any]) -> tuple[str, str]:
-        alias = arguments.get("relation")
-        if not isinstance(alias, str) or alias not in self.tables:
-            raise ValueError("relation is not part of this query")
-        return alias, self.tables[alias]
-
-    def query_json(self, sql: str) -> Any:
-        output = self.worker.admin_sql(sql).strip()
-        return json.loads(output) if output else None
-
-    def describe_table(self, arguments: dict[str, Any]) -> Any:
-        alias, table = self.table(arguments)
-        name = self.literal(f"public.{table}")
-        columns = self.query_json(
-            "SELECT COALESCE(json_agg(json_build_object("
-            "'name', attname, 'type', format_type(atttypid, atttypmod), "
-            "'nullable', NOT attnotnull) ORDER BY attnum), '[]'::json) "
-            "FROM pg_attribute WHERE attrelid = to_regclass("
-            f"{name}) AND attnum > 0 AND NOT attisdropped;"
+    def relation_context(self, alias: str, table: str) -> JsonObject:
+        return OBJECT.validate_python(
+            {
+                "relation": alias,
+                "schema": "public",
+                "table": table,
+                "query_aliases": [
+                    key for key, value in self.tables.items() if value == table
+                ],
+            }
         )
-        return {"relation": alias, "table": table, "columns": columns}
 
-    def list_indexes(self, arguments: dict[str, Any]) -> Any:
-        alias, table = self.table(arguments)
-        name = self.literal(table)
-        indexes = self.query_json(
-            "SELECT COALESCE(json_agg(json_build_object("
-            "'name', indexname, 'definition', indexdef) ORDER BY indexname), "
-            "'[]'::json) FROM pg_indexes WHERE schemaname = 'public' "
-            f"AND tablename = {name};"
-        )
-        return {"relation": alias, "table": table, "indexes": indexes}
-
-    def get_column_stats(self, arguments: dict[str, Any]) -> Any:
-        alias, table = self.table(arguments)
-        column = arguments.get("column")
-        if not isinstance(column, str) or not IDENTIFIER.fullmatch(column):
-            raise ValueError("column is not a valid identifier")
-        stats = self.query_json(
-            "SELECT json_build_object("
-            "'null_fraction', null_frac, 'average_width', avg_width, "
-            "'distinct_values', n_distinct, "
-            "'most_common_values', most_common_vals::text, "
-            "'most_common_frequencies', most_common_freqs, "
-            "'histogram_bounds', histogram_bounds::text, "
-            "'correlation', correlation) FROM pg_stats "
-            f"WHERE schemaname = 'public' AND tablename = {self.literal(table)} "
-            f"AND attname = {self.literal(column)};"
-        )
-        return {
-            "relation": alias,
-            "table": table,
-            "column": column,
-            "stats": stats,
-        }
-
-    def get_relation_size(self, arguments: dict[str, Any]) -> Any:
-        alias, table = self.table(arguments)
-        name = self.literal(f"public.{table}")
-        size = self.query_json(
-            "SELECT json_build_object("
-            "'table_bytes', pg_table_size(c.oid), "
-            "'indexes_bytes', pg_indexes_size(c.oid), "
-            "'total_bytes', pg_total_relation_size(c.oid), "
-            "'estimated_rows', c.reltuples) FROM pg_class c "
-            f"WHERE c.oid = to_regclass({name});"
-        )
-        return {"relation": alias, "table": table, **(size or {})}
-
-    def get_extended_stats(self, arguments: dict[str, Any]) -> Any:
-        alias, table = self.table(arguments)
-        stats = self.query_json(
-            "SELECT COALESCE(json_agg(json_build_object("
-            "'name', statistics_name, 'columns', attnames, 'kinds', kinds) "
-            "ORDER BY statistics_name), '[]'::json) FROM pg_stats_ext "
-            f"WHERE schemaname = 'public' AND tablename = {self.literal(table)};"
-        )
-        return {
-            "relation": alias,
-            "table": table,
-            "extended_statistics": stats,
-        }
-
-    def get_plan(self, arguments: dict[str, Any]) -> Any:
-        candidate_id = arguments.get("candidate_id")
-        if candidate_id == "default":
+    def get_plan(self, arguments: PlanArguments) -> JsonObject:
+        if arguments.candidate_id == "default":
             if self.evaluator.default is None:
                 raise RuntimeError("rollout baseline has not been started")
             plan = self.evaluator.default.plain_explain
-            return {"Plan": compact_plan(plan["Plan"])}
-        candidate = next(
-            (
-                item
-                for item in self.evaluator.candidates
-                if item.candidate_id == candidate_id
-            ),
-            None,
-        )
-        if candidate is None:
-            raise ValueError("candidate_id was not issued by the server")
-        plan = candidate.plain_explain
+        else:
+            candidate = next(
+                (
+                    item
+                    for item in self.evaluator.candidates
+                    if item.candidate_id == arguments.candidate_id
+                ),
+                None,
+            )
+            if candidate is None:
+                raise ValueError("candidate_id was not issued by the server")
+            plan = candidate.plain_explain
         if plan is None:
             raise ValueError("candidate has no PostgreSQL plan")
-        return {"Plan": compact_plan(plan["Plan"])}
+        return OBJECT.validate_python(
+            plan_view(plan["Plan"], node_id=arguments.node_id).model_dump(mode="json")
+        )
 
-    def execute(self, name: str, arguments: Any) -> tuple[Any, bool]:
-        if not isinstance(arguments, dict):
-            if name == ToolName.EVALUATE_CANDIDATE:
-                return self.evaluator.evaluate(arguments).feedback(), False
-            return {"error": "tool arguments must be an object"}, False
+    def execute(self, name: str, arguments: JsonValue) -> tuple[JsonObject, bool]:
+        if name == ToolName.EVALUATE_CANDIDATE:
+            if self.evaluator.kept_default:
+                return {"error": "rollout already kept the default plan"}, False
+            if len(self.evaluator.candidates) >= self.evaluator.max_candidates:
+                return {"error": "rollout candidate budget is exhausted"}, False
+            # Invalid submissions still consume an attempt through existing validation.
+            try:
+                action = CandidateArguments.model_validate(arguments).action
+            except ValidationError as error:
+                rejected = self.evaluator.reject_attempt(
+                    arguments, argument_errors(error)
+                )
+                return OBJECT.validate_python(rejected.feedback()), False
+            return OBJECT.validate_python(
+                self.evaluator.evaluate(action).feedback()
+            ), False
         try:
-            if name == ToolName.EVALUATE_CANDIDATE:
-                return self.evaluator.evaluate(
-                    arguments.get("action")
-                ).feedback(), False
             if name == ToolName.KEEP_DEFAULT:
-                return self.evaluator.keep_default(), True
+                ToolArguments.model_validate(arguments)
+                if self.evaluator.candidates:
+                    raise ValueError(
+                        "keep_default must be selected before submitting a candidate"
+                    )
+                if self.evaluator.kept_default:
+                    raise ValueError("rollout already kept the default plan")
+                return OBJECT.validate_python(self.evaluator.keep_default()), True
             if name == ToolName.FINISH:
+                ToolArguments.model_validate(arguments)
                 if not self.evaluator.candidates:
-                    raise RuntimeError(
-                        "finish requires a candidate; use keep_default to "
-                        "keep PostgreSQL's plan"
+                    raise ValueError(
+                        "finish requires a candidate; use keep_default before submitting one"
                     )
                 return {"status": ToolResultStatus.FINISHED.value}, True
-            methods = {
-                ToolName.DESCRIBE_TABLE.value: self.describe_table,
-                ToolName.LIST_INDEXES.value: self.list_indexes,
-                ToolName.GET_COLUMN_STATS.value: self.get_column_stats,
-                ToolName.GET_RELATION_SIZE.value: self.get_relation_size,
-                ToolName.GET_EXTENDED_STATS.value: self.get_extended_stats,
-                ToolName.GET_PLAN.value: self.get_plan,
-            }
-            method = methods.get(name)
-            if method is None:
-                raise ValueError("unknown tool")
-            return method(arguments), False
-        except (PostgresError, ContainerError):
-            raise
-        except (ValueError, RuntimeError, json.JSONDecodeError) as error:
-            return {"error": str(error)}, False
+            if name == ToolName.GET_PLAN:
+                return self.get_plan(PlanArguments.model_validate(arguments)), False
+            if name == ToolName.INSPECT_RELATION:
+                request = RelationArguments.model_validate(arguments)
+                table = self.table(request.relation)
+                if table not in self.metadata:
+                    self.metadata[table] = inspect_relation(
+                        self.evaluator.worker.admin_sql, table
+                    )
+                return self.relation_context(
+                    request.relation, table
+                ) | OBJECT.validate_python(
+                    self.metadata[table].model_dump(mode="json")
+                ), False
+            if name == ToolName.GET_COLUMN_STATS:
+                request = ColumnArguments.model_validate(arguments)
+                table = self.table(request.relation)
+                result = column_statistics(
+                    self.evaluator.worker.admin_sql, table, request.columns
+                )
+                return self.relation_context(
+                    request.relation, table
+                ) | OBJECT.validate_python(result.model_dump(mode="json")), False
+            raise ValueError("unknown tool")
+        except ValidationError as error:
+            return {"error": "; ".join(argument_errors(error))}, False
+        except ValueError as error:
+            return {"error": str(error)[:2048]}, False

@@ -22,7 +22,6 @@ from qorl.model.schemas import (
     Message,
     MessageRole,
     TokenUsage,
-    ToolDefinition,
 )
 from qorl.util.hashing import sha256_json
 
@@ -92,13 +91,12 @@ class QoAgentPolicy:
         trace = AgentTrace(
             agent_interface_version=AGENT_INTERFACE_VERSION,
             seed=self.seed,
-            initial_observation=JSON_OBJECT.validate_python(interface.observation),
-            tools=[ToolDefinition.model_validate(tool) for tool in interface.tools],
-            tools_sha256=sha256_json(interface.tools),
-            transcript=[
-                Message.model_validate(message)
-                for message in interface.initial_messages()
-            ],
+            initial_observation=interface.observation,
+            tools=interface.tools,
+            tools_sha256=sha256_json(
+                [tool.model_dump(mode="json") for tool in interface.tools]
+            ),
+            transcript=interface.initial_messages(),
         )
         self.trace = trace
         environment = AgentEnvironment(evaluator)
@@ -109,11 +107,7 @@ class QoAgentPolicy:
             )
             request = GenerationRequest(
                 messages=list(trace.transcript),
-                tools=[
-                    tool
-                    for tool in trace.tools
-                    if tool.function.name in available_names
-                ],
+                tools=interface.available_tools(turn, len(evaluator.candidates)),
                 seed=turn_seed(self.seed, evaluator.task.task_id, turn),
             )
             try:
@@ -160,7 +154,9 @@ class QoAgentPolicy:
                 body = JSON_OBJECT.validate_python(
                     {
                         **(result if isinstance(result, dict) else {"result": result}),
-                        TURN_BUDGET_FIELD: interface.budget(turn),
+                        TURN_BUDGET_FIELD: interface.budget(turn).model_dump(
+                            mode="json"
+                        ),
                     }
                 )
                 trace.transcript.append(

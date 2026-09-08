@@ -37,7 +37,6 @@ from qorl.model.schemas import (
     MessageRole,
     ModelProvider,
     ModelWeightIndex,
-    ToolDefinition,
 )
 
 ADAPTER_RANK = 16
@@ -370,9 +369,7 @@ def test_live_thinking_modes_complete_and_preserve_terminal_tools(
         history: list[Message] = []
         for name in (ToolName.KEEP_DEFAULT, ToolName.FINISH):
             tool = next(
-                ToolDefinition.model_validate(item)
-                for item in agent_tools(["a"])
-                if item["function"]["name"] == name.value
+                item for item in agent_tools(["a"]) if item.function.name == name.value
             )
             response = client.generate(
                 GenerationRequest(

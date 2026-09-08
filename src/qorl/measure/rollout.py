@@ -4,8 +4,6 @@ import random
 import statistics
 from threading import Event
 
-from pydantic import JsonValue
-
 from qorl.measure.protocols import QueryExecutor, SqlSource
 from qorl.measure.schemas import (
     Baseline,
@@ -120,13 +118,13 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         self.operation = "agent"
         return self.default
 
-    def evaluate(self, raw_action: JsonValue) -> Candidate:
+    def check_attempt(self) -> None:
         """Accept validation attempts only after initial timing and before finalization."""
         if self.finalization_started:
             raise RuntimeError("rollout finalization has already started")
         if self.default is None or self.default.median_execution_time_ms is None:
             raise RuntimeError("rollout baseline has not been measured")
-        return super().evaluate(raw_action)
+        super().check_attempt()
 
     def select(self, candidate_id: str | None) -> Candidate | None:
         """Auto-select a sole usable attempt; multiple choices require an explicit ID."""

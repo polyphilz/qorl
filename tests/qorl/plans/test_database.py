@@ -11,13 +11,16 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from pydantic import JsonValue
+from pydantic import JsonValue, TypeAdapter
 
+from qorl.agent.interface import AgentInterface
+from qorl.agent.tool_runtime import AgentEnvironment
 from qorl.measure.schemas import Candidate
 from qorl.measure.validation import PlanValidationEvaluator
 from qorl.plans.verify import matching_join, memoized_inner
 from qorl.postgres.client import PostgresClient
 from qorl.postgres.config import PostgresConfig
+from qorl.postgres.inspection import column_statistics, inspect_relation
 from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
 from qorl.taskset.schemas import Relation, Task
 
@@ -255,6 +258,129 @@ def record(candidate: Candidate, record_property: Callable[[str, str], None]) ->
     """Persist action, compiled hint, full plan, diagnostics, and model feedback in JUnit."""
     record_property("candidate", candidate.model_dump_json())
     record_property("feedback", json.dumps(candidate.feedback()))
+
+
+def test_live_inspection_contract(
+    database: PostgresClient, record_property: Callable[[str, str], None]
+) -> None:
+    metadata = inspect_relation(database.admin_sql, "audit_a")
+    stats = column_statistics(
+        database.admin_sql, "audit_a", ["id", "k", "payload", "absent"]
+    )
+    record_property("relation", metadata.model_dump_json())
+    record_property("statistics", stats.model_dump_json())
+    assert metadata.exists and metadata.estimated_rows == 20000
+    assert metadata.table_bytes is not None and metadata.table_bytes > 0
+    assert {item.name for item in metadata.indexes} == {
+        "audit_a_id_idx",
+        "audit_a_k_idx",
+    }
+    assert stats.columns[0].n_distinct == -1
+    original_json = database.admin_sql(
+        "SELECT to_jsonb(histogram_bounds) FROM pg_stats WHERE schemaname='public' AND tablename='audit_a' AND attname='id' AND NOT inherited;"
+    )
+    original = TypeAdapter(list[JsonValue]).validate_json(original_json)
+    record_property("original_id_histogram", original_json)
+    histogram = stats.columns[0]
+    assert histogram.histogram_bounds is not None
+    assert (
+        histogram.histogram_bounds[0] == 1 and histogram.histogram_bounds[-1] == 20000
+    )
+    assert len(histogram.histogram_bounds) == 16
+    assert histogram.histogram_bound_positions[0] == 0
+    assert histogram.histogram_bound_positions[-1] == len(original) - 1
+    assert histogram.histogram_bounds == [
+        original[index] for index in histogram.histogram_bound_positions
+    ]
+    assert histogram.histogram_bound_count == len(original)
+    assert histogram.omitted_histogram_bounds == len(original) - 16
+    assert stats.columns[1].most_common_values is not None
+    assert all(isinstance(value, int) for value in stats.columns[1].most_common_values)
+    assert stats.columns[1].most_common_frequencies is not None
+    assert stats.columns[1].omitted_common_values > 0
+    assert stats.columns[2].most_common_values == ["a" * 20]
+    assert stats.columns[3].status == "missing_column"
+    assert not inspect_relation(database.admin_sql, "absent").exists
+
+
+@pytest.mark.parametrize("alias_count", [3, 40])
+def test_live_small_and_many_alias_tool_views(
+    database: PostgresClient,
+    record_property: Callable[[str, str], None],
+    alias_count: int,
+) -> None:
+    relations = [Relation(alias=f"a{i}", table="audit_a") for i in range(alias_count)]
+    edges = (
+        ["a0:audit_a.id=a1:audit_a.id", "a1:audit_a.id=a2:audit_a.id"]
+        if alias_count == 3
+        else []
+    )
+    task = Task(
+        task_id=f"inspection-{alias_count}",
+        template_id="inspection",
+        sql_path="synthetic.sql",
+        sql_sha256="synthetic",
+        relations=relations,
+        tables=["audit_a"],
+        join_edges=edges,
+        table_count=1,
+        relation_count=alias_count,
+        join_predicate_count=len(edges),
+    )
+    sql = " UNION ALL ".join(
+        f"SELECT id FROM audit_a {relation.alias} WHERE id < 3"
+        for relation in relations
+    )
+    if alias_count == 3:
+        sql = "SELECT a0.id FROM audit_a a0 JOIN audit_a a1 ON a0.id=a1.id JOIN audit_a a2 ON a1.id=a2.id WHERE a0.id < 3"
+    run = PlanValidationEvaluator(
+        database,
+        Query(sql),
+        task,
+        default_timeout_ms=QUERY_TIMEOUT_MS,
+        max_candidates=1,
+    )
+    run.start()
+    interface = AgentInterface.from_evaluator(run, 64)
+    runtime = AgentEnvironment(run)
+    record_property("observation", interface.observation.model_dump_json())
+    record_property(
+        "messages",
+        json.dumps(
+            [
+                message.model_dump(mode="json", exclude_none=True)
+                for message in interface.initial_messages()
+            ]
+        ),
+    )
+    record_property(
+        "tools", json.dumps([tool.model_dump(mode="json") for tool in interface.tools])
+    )
+    requests: list[tuple[str, dict[str, JsonValue]]] = [
+        ("inspect_relation", {"relation": "a0"}),
+        ("get_column_stats", {"relation": "a0", "columns": ["id", "k"]}),
+        ("get_plan", {"candidate_id": "default"}),
+        ("evaluate_candidate", {"action": {"version": 1}}),
+        ("finish", {}),
+    ]
+    for name, arguments in requests:
+        result, _ = runtime.execute(name, arguments)
+        assert "error" not in result
+        record_property(name, json.dumps(result))
+    kept = PlanValidationEvaluator(
+        database,
+        Query(sql),
+        task,
+        default_timeout_ms=QUERY_TIMEOUT_MS,
+        max_candidates=1,
+    )
+    kept.start()
+    result, finished = AgentEnvironment(kept).execute("keep_default", {})
+    assert finished and result["status"] == "kept_default"
+    record_property("keep_default", json.dumps(result))
+    assert interface.observation.default_plan.nodes[0].leaf_aliases == sorted(
+        relation.alias for relation in relations
+    )
 
 
 @pytest.mark.parametrize(

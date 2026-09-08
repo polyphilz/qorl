@@ -343,6 +343,42 @@ def test_masks_and_targets_match_native_sft_processing(
     assert "TOOL CONTEXT" in rendered.requests[-1].rendered_text
 
 
+def test_retired_tools_and_exact_context_are_preserved_in_saved_conversations(
+    experiment: Path, tools: list[ToolDefinition]
+) -> None:
+    legacy = tools[0].model_copy(
+        update={
+            "function": tools[0].function.model_copy(update={"name": "describe_table"})
+        }
+    )
+    record = conversation("legacy-task", "legacy-interface", [legacy])
+    record.messages[2] = record.messages[2].model_copy(
+        update={
+            "tool_calls": [
+                ToolCall(
+                    id="call",
+                    function=FunctionCall(
+                        name="describe_table", arguments='{"alias":"t"}'
+                    ),
+                ),
+            ]
+        }
+    )
+    original = record.model_dump_json()
+    restored = Conversation.model_validate_json(original)
+    student = dataset.load_student(sft_config(experiment))
+    rendered = dataset.render_conversation(restored, student, CONTEXT_LENGTH)
+    assert rendered.rejection is None
+    assert restored.model_dump_json() == original
+    assert "describe_table" in rendered.requests[0].rendered_text
+    assert "inspect_relation" not in rendered.requests[0].rendered_text
+    assert restored.requests[0].tools == [legacy]
+    assert restored.requests[1].tools == []
+    assert "SYSTEM CONTEXT" in rendered.requests[1].rendered_text
+    assert "QUERY CONTEXT" in rendered.requests[1].rendered_text
+    assert "TOOL CONTEXT" in rendered.requests[1].rendered_text
+
+
 def test_two_conversations_have_independent_targets_and_positions(
     experiment: Path,
 ) -> None:
@@ -782,10 +818,7 @@ def test_job_queries_render_their_own_alias_schemas(
         task = next(
             task for task in benchmark_task_sets["job"].tasks if task.task_id == task_id
         )
-        tools = [
-            ToolDefinition.model_validate(tool)
-            for tool in agent_tools([relation.alias for relation in task.relations])
-        ]
+        tools = agent_tools([relation.alias for relation in task.relations])
         record = Conversation(
             conversation_id=task_id,
             task_id=task_id,
@@ -798,7 +831,7 @@ def test_job_queries_render_their_own_alias_schemas(
                         ToolCall(
                             id="inspect",
                             function=FunctionCall(
-                                name="describe_table",
+                                name="inspect_relation",
                                 arguments=json.dumps({"relation": alias}),
                             ),
                         )
@@ -834,7 +867,7 @@ def test_job_queries_render_their_own_alias_schemas(
         )[0]
         assert actual == original.requests[0].tools
         describe = next(
-            tool for tool in actual if tool.function.name == "describe_table"
+            tool for tool in actual if tool.function.name == "inspect_relation"
         )
         encoded = describe.model_dump_json()
         assert f'"{alias}"' in encoded and f'"{excluded_alias}"' not in encoded
@@ -900,7 +933,7 @@ def test_wrong_query_alias_is_rejected_by_the_recorded_schema(
         next(
             tool
             for tool in agent_tools(["ct", "it", "mc", "mi_idx", "t"])
-            if tool["function"]["name"] == "describe_table"
+            if tool.function.name == "inspect_relation"
         )
     )
     messages = list(record.messages)
@@ -910,7 +943,7 @@ def test_wrong_query_alias_is_rejected_by_the_recorded_schema(
             ToolCall(
                 id="call",
                 function=FunctionCall(
-                    name="describe_table", arguments='{"relation":"cn"}'
+                    name="inspect_relation", arguments='{"relation":"cn"}'
                 ),
             )
         ],

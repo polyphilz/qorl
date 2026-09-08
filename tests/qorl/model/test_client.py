@@ -213,10 +213,10 @@ def test_real_agent_tools_and_prompt_are_not_rewritten(
     prompt = system_prompt(1)
     request = GenerationRequest(
         messages=[Message(role=MessageRole.SYSTEM, content=prompt)],
-        tools=[ToolDefinition.model_validate(tool) for tool in definitions],
+        tools=definitions,
     )
     body = local_client(config, ScriptedTransport([])).request_body(request)
-    assert body["tools"] == definitions
+    assert body["tools"] == [tool.model_dump(mode="json") for tool in definitions]
     assert body["messages"] == [{"role": "system", "content": prompt}]
 
 

@@ -5,18 +5,24 @@ import json
 from pathlib import Path
 from typing import Any
 
+from pydantic import TypeAdapter
+
 from qorl.agent.interface import (
     INSPECTION_TURNS_PER_ALIAS,
     AgentInterface,
 )
+from qorl.agent.observation import AgentObservation
+from qorl.agent.presentation import plan_view
 from qorl.agent.prompts import system_prompt
+from qorl.agent.tool_schemas import PlanArguments
 from qorl.agent.tools import agent_tools
 from qorl.agent.types import TURN_BUDGET_FIELD, ToolName
 from qorl.measure.schemas import ToolResultStatus
+from qorl.model.schemas import ToolDefinition
 from qorl.plans.catalog import TaskCatalog
 from qorl.plans.fingerprint import plan_sha256
 from qorl.plans.schemas import PlanAction
-from qorl.plans.verify import compact_plan, verify_action
+from qorl.plans.verify import verify_action
 from qorl.sft.schemas import JSON_OBJECT_ADAPTER
 from qorl.taskset.taskset import TaskSet
 
@@ -115,7 +121,10 @@ def validate_protocol_demo(
     require(observation.get("join_edges") == task["join_edges"], "join edges mismatch")
 
     aliases = sorted(relation["alias"] for relation in task["relations"])
-    require(tools == agent_tools(aliases), "tool schemas differ from the live agent")
+    require(
+        tools == [tool.model_dump(mode="json") for tool in agent_tools(aliases)],
+        "tool schemas differ from the live agent",
+    )
     maximum_turns = metadata.get("maximum_model_turns")
     require(
         isinstance(maximum_turns, int) and maximum_turns > 0,
@@ -129,8 +138,8 @@ def validate_protocol_demo(
     interface = AgentInterface(
         maximum_model_turns=maximum_turns,
         inspection_turn_limit=inspection_limit,
-        observation=observation,
-        tools=tools,
+        observation=AgentObservation.model_validate(observation),
+        tools=TypeAdapter(list[ToolDefinition]).validate_python(tools),
     )
     require(
         observation.get("turn_budget")
@@ -197,7 +206,8 @@ def validate_protocol_demo(
         result = parse_json(tool_result.get("content"), f"turn {turn} result")
         require(isinstance(result, dict), f"turn {turn}: result must be an object")
         require(
-            result.get(TURN_BUDGET_FIELD) == interface.budget(turn),
+            result.get(TURN_BUDGET_FIELD)
+            == interface.budget(turn).model_dump(mode="json"),
             f"turn {turn}: budget mismatch",
         )
         require("error" not in result, f"turn {turn}: tool returned an error")
@@ -265,11 +275,13 @@ def validate_protocol_demo(
                 else evidence["candidates"][candidate_id]["plain_explain"]
             )
             require(
-                isinstance(expected_explain, dict)
-                and isinstance(expected_explain.get("Plan"), dict),
+                isinstance(expected_explain.get("Plan"), dict),
                 f"turn {turn}: invalid plan evidence",
             )
-            expected_plan = {"Plan": compact_plan(expected_explain["Plan"])}
+            plan_request = PlanArguments.model_validate(arguments)
+            expected_plan = plan_view(
+                expected_explain["Plan"], node_id=plan_request.node_id
+            ).model_dump(mode="json")
             actual_plan = {
                 key: value for key, value in result.items() if key != TURN_BUDGET_FIELD
             }

@@ -4,18 +4,15 @@ from typing import Protocol
 from qorl.measure.protocols import QueryExecutor
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.validation import PlanValidationEvaluator
-from qorl.postgres.schemas import PostgresSettings
+from qorl.postgres.schemas import PostgresSettings, WorkerAllocation
 
 # This internal-looking key is already model-visible and therefore wire-stable.
 TURN_BUDGET_FIELD = "_turn_budget"
 
 
 class ToolName(StrEnum):
-    DESCRIBE_TABLE = "describe_table"
-    LIST_INDEXES = "list_indexes"
+    INSPECT_RELATION = "inspect_relation"
     GET_COLUMN_STATS = "get_column_stats"
-    GET_RELATION_SIZE = "get_relation_size"
-    GET_EXTENDED_STATS = "get_extended_stats"
     GET_PLAN = "get_plan"
     EVALUATE_CANDIDATE = "evaluate_candidate"
     KEEP_DEFAULT = "keep_default"
@@ -37,6 +34,9 @@ TERMINAL_STOP_REASON = {
 
 
 class InspectionExecutor(QueryExecutor, Protocol):
+    @property
+    def allocation(self) -> WorkerAllocation | None: ...
+
     @property
     def settings(self) -> PostgresSettings: ...
 

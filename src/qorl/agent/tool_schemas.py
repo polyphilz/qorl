@@ -1,0 +1,60 @@
+"""Argument contracts shared by advertised tools and execution."""
+
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from qorl.model.schemas import JsonValue
+
+MAX_COLUMNS = 8
+Identifier = Annotated[str, Field(pattern=r"^[a-z_][a-z0-9_]*$", max_length=63)]
+
+
+class ToolArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class RelationArguments(ToolArguments):
+    relation: Identifier
+
+
+class ColumnArguments(RelationArguments):
+    columns: list[Identifier] = Field(
+        min_length=1, max_length=MAX_COLUMNS, json_schema_extra={"uniqueItems": True}
+    )
+
+    @field_validator("columns")
+    @classmethod
+    def unique_columns(cls, columns: list[str]) -> list[str]:
+        if len(set(columns)) != len(columns):
+            raise ValueError("columns must not contain duplicates")
+        return columns
+
+
+class PlanArguments(ToolArguments):
+    candidate_id: str = Field(min_length=1, max_length=64)
+    node_id: str = Field(default="0", pattern=r"^0(?:\.[0-9]+)*$", max_length=128)
+
+
+class CandidateArguments(ToolArguments):
+    action: JsonValue
+
+
+def argument_errors(error: ValidationError) -> list[str]:
+    """Field-first diagnostics without Python types or submitted-value dumps."""
+    messages: list[str] = []
+    for detail in error.errors(include_url=False, include_input=False)[:8]:
+        path = ".".join(str(part)[:64] for part in detail["loc"]) or "arguments"
+        kind = detail["type"]
+        if kind == "missing":
+            message = "required"
+        elif kind == "extra_forbidden":
+            message = "not allowed"
+        elif kind == "model_type":
+            message = "must be an object"
+        elif kind == "string_pattern_mismatch":
+            message = "must match the advertised format"
+        else:
+            message = detail["msg"].removeprefix("Value error, ")
+        messages.append(f"{path}: {message}"[:256])
+    return messages
