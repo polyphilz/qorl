@@ -96,6 +96,9 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
         no_valid_candidate_count=sum(
             outcome.kind == OutcomeKind.NO_VALID_CANDIDATE for outcome in outcomes
         ),
+        selection_failure_count=sum(
+            outcome.kind == OutcomeKind.SELECTION_FAILED for outcome in outcomes
+        ),
         geometric_mean_speedup=math.exp(
             sum(math.log(value) for value in speedups) / len(speedups)
         )
@@ -215,8 +218,11 @@ def evaluate_rollout(
                 cancel=stop,
             )
             evaluator.start()
-            policy.search(evaluator)
-            evaluator.finish(random.Random(measurement_seed))
+            policy_trace = policy.search(evaluator)
+            evaluator.finish(
+                random.Random(measurement_seed),
+                selected_candidate_id=policy_trace.selection.selected_candidate_id,
+            )
     except BaseException as caught:
         error = caught
         if not isinstance(caught, (PostgresError, ContainerError)):
@@ -278,8 +284,6 @@ def evaluate(
     pool_config: PoolConfig,
 ) -> EvaluationReport:
     """Own serving and PostgreSQL until all threads finish; never resume or overwrite."""
-    if agent.candidate_attempts != 1:
-        raise ValueError("measured evaluation requires agent.candidate_attempts=1")
     tasks = task_set.resolve(selection)
     expected = len(tasks) * settings.rollouts_per_task
     output_dir.mkdir(parents=True, exist_ok=True)

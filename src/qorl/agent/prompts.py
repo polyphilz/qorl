@@ -26,7 +26,8 @@ Read omission markers; get_plan can inspect omitted subtrees by node_id.
 Submit candidates with evaluate_candidate. Use its feedback to repair invalid
 actions and refine valid plans when useful.
 Before submitting any candidate, call keep_default if you choose PostgreSQL's
-default. Otherwise call finish when your search is complete.
+default. Otherwise finish by selecting the eligible candidate you expect to execute fastest.
+You may select an earlier candidate.
 """
 
 

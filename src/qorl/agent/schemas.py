@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from qorl.agent.observation import AgentObservation
 from qorl.agent.types import StopReason
+from qorl.measure.schemas import SelectionState
 from qorl.model.schemas import (
     GenerationResponse,
     JsonObject,
@@ -43,6 +44,7 @@ class AgentTrace(BaseModel):
     agent_interface_version: int
     seed: int | None
     stop_reason: StopReason | None = None
+    selection: SelectionState = Field(default_factory=SelectionState)
     initial_observation: AgentObservation
     tools: list[ToolDefinition]
     tools_sha256: str

@@ -7,6 +7,7 @@ from qorl.agent.presentation import plan_view
 from qorl.agent.tool_schemas import (
     CandidateArguments,
     ColumnArguments,
+    FinishArguments,
     PlanArguments,
     RelationArguments,
     ToolArguments,
@@ -82,6 +83,26 @@ class AgentEnvironment:
         )
 
     def execute(self, name: str, arguments: JsonValue) -> tuple[JsonObject, bool]:
+        if name == ToolName.FINISH:
+            try:
+                request = FinishArguments.model_validate(arguments)
+                if not self.evaluator.candidates:
+                    raise ValueError(
+                        "finish requires a candidate; use keep_default before submitting one"
+                    )
+                self.evaluator.accept_selection(request.selected_candidate_id)
+            except (ValidationError, ValueError) as error:
+                diagnostics = (
+                    argument_errors(error)
+                    if isinstance(error, ValidationError)
+                    else [str(error)]
+                )
+                self.evaluator.reject_selection(arguments, diagnostics)
+                return {"error": "; ".join(diagnostics)}, False
+            return {
+                "status": ToolResultStatus.FINISHED.value,
+                "selected_candidate_id": self.evaluator.selection.selected_candidate_id,
+            }, True
         if name == ToolName.EVALUATE_CANDIDATE:
             if self.evaluator.kept_default:
                 return {"error": "rollout already kept the default plan"}, False
@@ -115,13 +136,6 @@ class AgentEnvironment:
                 if self.evaluator.kept_default:
                     raise ValueError("rollout already kept the default plan")
                 return OBJECT.validate_python(self.evaluator.keep_default()), True
-            if name == ToolName.FINISH:
-                ToolArguments.model_validate(arguments)
-                if not self.evaluator.candidates:
-                    raise ValueError(
-                        "finish requires a candidate; use keep_default before submitting one"
-                    )
-                return {"status": ToolResultStatus.FINISHED.value}, True
             if name == ToolName.GET_PLAN:
                 return self.get_plan(PlanArguments.model_validate(arguments)), False
             if name == ToolName.INSPECT_RELATION:

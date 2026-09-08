@@ -29,6 +29,7 @@ class PerformanceSummary(BaseModel):
     failure_count: int
     timeout_count: int
     no_valid_candidate_count: int
+    selection_failure_count: int = 0
     geometric_mean_speedup: float | None
     candidate_workload_time_ms: float
     default_workload_time_ms: float

@@ -162,11 +162,6 @@ def validate_stage(config: ExperimentConfig, request: RunRequest) -> None:
     if request.number is None and request.stage != METHOD_STAGES[method][0]:
         raise ValueError(f"stage {request.stage.value} requires --run")
     if request.stage == RunStage.EVALUATE:
-        if (
-            isinstance(config, ModelExperimentConfig)
-            and config.agent.candidate_attempts != 1
-        ):
-            raise ValueError("measured evaluation requires agent.candidate_attempts=1")
         if request.split is None:
             raise ValueError("evaluation requires --split")
         if request.split not in task_inputs(config):

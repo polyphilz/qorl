@@ -25,6 +25,8 @@ from qorl.measure.schemas import (
     RolloutFailure,
     RolloutMeasurementSettings,
     RolloutRecord,
+    SelectionFailedOutcome,
+    SelectionStatus,
     TimedOutOutcome,
 )
 from qorl.measure.timeouts import candidate_timeout_ms, seconds_to_ms
@@ -252,28 +254,6 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
         if observation.plan_sha256 != candidate.plan_sha256:
             raise PostgresError("candidate plan changed during measurement")
 
-    def select(self, candidate_id: str | None) -> Candidate | None:
-        """Auto-select a sole usable attempt; multiple choices require an explicit ID."""
-        eligible = [
-            item
-            for item in self.candidates
-            if item.constraints_satisfied or item.execution_timed_out
-        ]
-        if candidate_id is not None:
-            selected = next(
-                (item for item in eligible if item.candidate_id == candidate_id), None
-            )
-            if selected is None:
-                raise ValueError(
-                    "selected_candidate_id must name a valid or timed-out attempt"
-                )
-            return selected
-        if len(eligible) > 1:
-            raise ValueError(
-                "multiple candidates require an explicit selected_candidate_id"
-            )
-        return eligible[0] if eligible else None
-
     def finish(
         self, rng: random.Random, *, selected_candidate_id: str | None = None
     ) -> Outcome:
@@ -286,7 +266,16 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             raise RuntimeError("rollout finalization has already started")
         if self.kept_default and selected_candidate_id is not None:
             raise ValueError("keep_default cannot select a candidate")
-        selected = self.select(selected_candidate_id)
+        if self.selection.status in (SelectionStatus.REJECTED, SelectionStatus.FAILED):
+            self.selection.status = SelectionStatus.FAILED
+            self.finalization_started = True
+            self.final = SelectionFailedOutcome()
+            return self.final
+        selected = self.select(
+            self.selection.selected_candidate_id
+            if selected_candidate_id is None
+            else selected_candidate_id
+        )
         self.finalization_started = True
         if self.kept_default:
             if baseline.timing_reuse_key is None:
@@ -429,6 +418,7 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             task_id=self.task.task_id,
             template_id=self.task.template_id,
             measurement=self.measurement,
+            selection=self.selection if self.selection.status != "pending" else None,
             execution_counts=self.execution_counts,
             default=self.default,
             candidates=self.candidates,

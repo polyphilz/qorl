@@ -169,7 +169,10 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 evaluator.start()
                 policy_trace = policy.search(evaluator)
                 trace.info["qorl_policy"] = policy_trace.model_dump(mode="json")
-                evaluator.finish(random.Random(trace.info["qorl_seeds"]["pairs"]))
+                evaluator.finish(
+                    random.Random(trace.info["qorl_seeds"]["pairs"]),
+                    selected_candidate_id=policy_trace.selection.selected_candidate_id,
+                )
                 store_record(evaluator.record())
             except BaseException as error:
                 if policy.trace is not None:

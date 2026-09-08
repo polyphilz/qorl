@@ -82,6 +82,7 @@ class OutcomeKind(StrEnum):
     MEASURED = "measured"
     TIMED_OUT = "timed_out"
     NO_VALID_CANDIDATE = "no_valid_candidate"
+    SELECTION_FAILED = "selection_failed"
 
 
 class Record(BaseModel):
@@ -265,11 +266,18 @@ class Candidate(Record):
     plain_explain: dict[str, JsonValue] | None = None
     compact_plan: dict[str, JsonValue] | None = None
     execution_timed_out: bool = False
+
     timeout_ms: int | None = None
     measurement_status: MeasurementStatus | None = None
     execution_feedback: ExecutionFeedback | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+
+    @property
+    def selection_eligible(self) -> bool:
+        return self.action_valid and (
+            self.constraints_satisfied or self.execution_timed_out
+        )
 
     def feedback(self) -> dict[str, JsonValue]:
         """Expose actionable validation results, not stored hashes or invented timing."""
@@ -414,12 +422,39 @@ class NoValidCandidateOutcome(Record):
     speedup: None = None
 
 
+class RejectedSelection(Record):
+    arguments: JsonValue
+    diagnostics: list[str]
+
+
+class SelectionStatus(StrEnum):
+    PENDING = "pending"
+    REJECTED = "rejected"
+    ACCEPTED = "accepted"
+    FAILED = "failed"
+
+
+class SelectionState(BaseModel):
+    status: SelectionStatus = SelectionStatus.PENDING
+    selected_candidate_id: str | None = None
+    rejections: list[RejectedSelection] = Field(default_factory=list[RejectedSelection])
+
+
+class SelectionFailedOutcome(Record):
+    kind: Literal[OutcomeKind.SELECTION_FAILED] = OutcomeKind.SELECTION_FAILED
+    selected_candidate_id: None = None
+    selected_plan_sha256: None = None
+    timing_reuse_key: None = None
+    speedup: None = None
+
+
 type Outcome = Annotated[
     KeptDefaultOutcome
     | DefaultDuplicateOutcome
     | MeasuredOutcome
     | TimedOutOutcome
-    | NoValidCandidateOutcome,
+    | NoValidCandidateOutcome
+    | SelectionFailedOutcome,
     Field(discriminator="kind"),
 ]
 
@@ -443,6 +478,9 @@ class RolloutRecord(Record):
     default: Baseline | None
     candidates: list[Candidate]
     final: Outcome | None
+    selection: SelectionState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     failure: RolloutFailure | None = None
     execution_counts: ExecutionCounts | None = Field(
         default=None, exclude_if=lambda value: value is None
@@ -513,10 +551,15 @@ class RolloutRecord(Record):
         if isinstance(final, KeptDefaultOutcome) and self.candidates:
             raise ValueError("keep_default cannot follow candidate attempts")
         if isinstance(final, NoValidCandidateOutcome) and any(
-            item.constraints_satisfied or item.execution_timed_out
-            for item in self.candidates
+            item.selection_eligible for item in self.candidates
         ):
             raise ValueError("no_valid_candidate cannot discard a usable attempt")
+        if isinstance(final, SelectionFailedOutcome) and (
+            self.selection is None or self.selection.status != "failed"
+        ):
+            raise ValueError(
+                "selection_failed requires unsuccessful selection evidence"
+            )
         if isinstance(final, MeasuredOutcome):
             if final.timing_reuse_key == baseline.timing_reuse_key:
                 raise ValueError("measured candidate must require its own timing")

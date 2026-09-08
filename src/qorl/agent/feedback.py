@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from qorl.agent.presentation import PlanView, plan_view
-from qorl.measure.schemas import Baseline, Candidate
+from qorl.measure.schemas import Baseline, Candidate, SelectionState, SelectionStatus
 
 
 class ExecutionObservation(BaseModel):
@@ -24,6 +24,67 @@ class ExecutionObservation(BaseModel):
     displayed_sample_index: int | None
     displayed_sample_execution_time_ms: float | None
     plan: PlanView | None
+
+
+class CandidateSummary(BaseModel):
+    candidate_id: str
+    action_valid: bool
+    constraints_satisfied: bool
+    selection_eligible: bool
+    timeout_phase: Literal["planning", "execution"] | None
+    timeout_ms: int | None
+    feedback_source_id: str | None
+    feedback_median_execution_time_ms: float | None
+    preliminary_ratio_to_initial_default: float | None
+
+
+class CandidateHistory(BaseModel):
+    candidates: list[CandidateSummary]
+    selectable_candidate_ids: list[str]
+    attempts_remaining: int
+    selection_status: SelectionStatus
+    selected_candidate_id: str | None
+
+
+def candidate_history(
+    candidates: list[Candidate],
+    baseline: Baseline | None,
+    attempts_remaining: int,
+    selection: SelectionState,
+) -> CandidateHistory:
+    summaries: list[CandidateSummary] = []
+    for candidate in candidates:
+        feedback = execution_observation(candidate, baseline, candidates)
+        summaries.append(
+            CandidateSummary(
+                candidate_id=candidate.candidate_id,
+                action_valid=candidate.action_valid,
+                constraints_satisfied=candidate.constraints_satisfied,
+                selection_eligible=candidate.selection_eligible,
+                timeout_phase=(
+                    "planning" if candidate.plain_explain is None else "execution"
+                )
+                if candidate.execution_timed_out
+                else None,
+                timeout_ms=candidate.timeout_ms,
+                feedback_source_id=feedback.source_id if feedback else None,
+                feedback_median_execution_time_ms=feedback.median_execution_time_ms
+                if feedback
+                else None,
+                preliminary_ratio_to_initial_default=feedback.preliminary_ratio_to_initial_default
+                if feedback
+                else None,
+            )
+        )
+    return CandidateHistory(
+        candidates=summaries,
+        selectable_candidate_ids=[
+            item.candidate_id for item in candidates if item.selection_eligible
+        ],
+        attempts_remaining=attempts_remaining,
+        selection_status=selection.status,
+        selected_candidate_id=selection.selected_candidate_id,
+    )
 
 
 def execution_observation(

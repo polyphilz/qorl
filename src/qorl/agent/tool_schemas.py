@@ -3,8 +3,9 @@
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic.json_schema import SkipJsonSchema
 
-from qorl.model.schemas import JsonValue
+from qorl.model.schemas import JsonObject, JsonValue
 
 MAX_COLUMNS = 8
 Identifier = Annotated[str, Field(pattern=r"^[a-z_][a-z0-9_]*$", max_length=63)]
@@ -38,6 +39,27 @@ class PlanArguments(ToolArguments):
 
 class CandidateArguments(ToolArguments):
     action: JsonValue
+
+
+def omit_selection_default(schema: JsonObject) -> None:
+    # Omission permits automatic selection; an explicit null is not a candidate ID.
+    schema.pop("default", None)
+
+
+class FinishArguments(ToolArguments):
+    selected_candidate_id: (
+        Annotated[str, Field(min_length=1, max_length=64)] | SkipJsonSchema[None]
+    ) = Field(
+        default=None,
+        json_schema_extra=omit_selection_default,
+    )
+
+    @field_validator("selected_candidate_id")
+    @classmethod
+    def supplied_id_is_not_null(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("must name an eligible candidate when supplied")
+        return value
 
 
 def argument_errors(error: ValidationError) -> list[str]:

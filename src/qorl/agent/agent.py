@@ -5,6 +5,7 @@ import json
 
 from pydantic import JsonValue, TypeAdapter
 
+from qorl.agent.feedback import candidate_history
 from qorl.agent.interface import AGENT_INTERFACE_VERSION, AgentInterface
 from qorl.agent.schemas import AgentSettings, AgentTrace, ToolEvent
 from qorl.agent.tool_runtime import AgentEnvironment
@@ -27,6 +28,13 @@ from qorl.util.hashing import sha256_json
 
 SEED_BYTES = 4
 JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+
+
+def parse_arguments(raw: str) -> JsonValue:
+    try:
+        return JSON_VALUE.validate_json(raw)
+    except ValueError:
+        return raw
 
 
 def turn_seed(seed: int | None, task_id: str, turn: int) -> int | None:
@@ -91,6 +99,7 @@ class QoAgentPolicy:
         trace = AgentTrace(
             agent_interface_version=AGENT_INTERFACE_VERSION,
             seed=self.seed,
+            selection=evaluator.selection,
             initial_observation=interface.observation,
             tools=interface.tools,
             tools_sha256=sha256_json(
@@ -122,6 +131,14 @@ class QoAgentPolicy:
             trace.prompt_tokens = response.prompt_tokens
             evaluator.check_cancelled()
             if response.truncated:
+                for call in response.message.tool_calls or []:
+                    if call.function.name == ToolName.FINISH:
+                        evaluator.reject_selection(
+                            parse_arguments(call.function.arguments),
+                            [
+                                "arguments: finish response exceeded the output limit; selection was not accepted"
+                            ],
+                        )
                 trace.stop_reason = StopReason.MODEL_OUTPUT_LIMIT
                 break
             calls = response.message.tool_calls or []
@@ -137,10 +154,7 @@ class QoAgentPolicy:
             for index, call in enumerate(calls):
                 evaluator.check_cancelled()
                 name = call.function.name
-                try:
-                    arguments = JSON_VALUE.validate_json(call.function.arguments)
-                except ValueError:
-                    arguments = call.function.arguments
+                arguments = parse_arguments(call.function.arguments)
                 if index != 0:
                     raw_result, finished = {"error": "call one tool at a time"}, False
                 elif name not in available_names:
@@ -150,10 +164,20 @@ class QoAgentPolicy:
                     )
                 else:
                     raw_result, finished = environment.execute(name, arguments)
+                if name == ToolName.FINISH and (
+                    index != 0 or name not in available_names
+                ):
+                    evaluator.reject_selection(arguments, [str(raw_result["error"])])
                 result = JSON_VALUE.validate_python(raw_result)
                 body = JSON_OBJECT.validate_python(
                     {
                         **(result if isinstance(result, dict) else {"result": result}),
+                        "_candidate_history": candidate_history(
+                            evaluator.candidates,
+                            evaluator.default,
+                            evaluator.max_candidates - len(evaluator.candidates),
+                            evaluator.selection,
+                        ).model_dump(mode="json"),
                         TURN_BUDGET_FIELD: interface.budget(turn).model_dump(
                             mode="json"
                         ),
@@ -186,4 +210,5 @@ class QoAgentPolicy:
                 break
         else:
             trace.stop_reason = StopReason.MODEL_TURN_LIMIT
+        evaluator.resolve_selection()
         return trace

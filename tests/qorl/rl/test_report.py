@@ -1,6 +1,7 @@
 """Join native arrival, group-credit and optimizer evidence without re-scoring."""
 
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ from verifiers.v1.episode import (
 from verifiers.v1.state import State
 from verifiers.v1.trace import Error, TraceTask
 
+from qorl.measure.schemas import OutcomeKind
 from qorl.postgres.exceptions import PostgresError
 from qorl.postgres.schemas import ExplainResult
 from qorl.rl.report import (
@@ -166,10 +168,25 @@ def test_report_counts_probe_work_on_unscored_failure(
         | run.record(caught.value).model_dump()
         | {"scalar_reward": None}
     )
+    selection_run = evaluator(Worker())
+    selection_run.start()
+    selection_run.evaluate(ACTION)
+    selection_run.reject_selection(
+        {"selected_candidate_id": "invented"}, ["not an eligible issued candidate"]
+    )
+    selection_run.resolve_selection()
+    selection_run.finish(random.Random(0))
+    selection_record = RlRolloutRecord.model_validate(
+        rl_rollout_record.model_dump()
+        | selection_run.record().model_dump()
+        | {"scalar_reward": None}
+    )
     stream = get_trace_stream(tmp_path)
     stream.mkdir(parents=True)
     episodes: list[EpisodeEvidence] = []
-    for index, record in enumerate((rl_rollout_record, failed_record)):
+    for index, record in enumerate(
+        (rl_rollout_record, failed_record, selection_record)
+    ):
         episodes.append(
             EpisodeEvidence(
                 id=f"episode-{index}",
@@ -196,6 +213,8 @@ def test_report_counts_probe_work_on_unscored_failure(
     result = write_report(tmp_path, completed=False, anchored=True)
     assert result.episode_failure_count == 1
     assert result.performance.failure_count == 1
+    assert result.performance.selection_failure_count == 1
+    assert result.outcome_counts[OutcomeKind.SELECTION_FAILED] == 1
     assert result.performance.execution_counts.candidate_feedback == 2
     assert (
         sum(rate for rate in result.outcome_rates.values() if rate is not None) == 1.0

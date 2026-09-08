@@ -7,6 +7,7 @@ from qorl.measure.schemas import (
     KeptDefaultOutcome,
     NoValidCandidateOutcome,
     RolloutRecord,
+    SelectionFailedOutcome,
     TimedOutOutcome,
 )
 from qorl.rl.schemas import ScalarRewardSettings
@@ -18,7 +19,9 @@ MAX_TRAINING_SPEEDUP = 10.0
 def training_speedup(record: RolloutRecord) -> float | None:
     """Clip observed speedup, or derive a timeout proxy from the initial baseline."""
     outcome = record.final
-    if outcome is None or isinstance(outcome, NoValidCandidateOutcome):
+    if outcome is None or isinstance(
+        outcome, (NoValidCandidateOutcome, SelectionFailedOutcome)
+    ):
         return None
     value = (
         outcome.initial_default_median_execution_time_ms / outcome.timeout_ms
@@ -33,7 +36,7 @@ def scalar_reward(record: RolloutRecord, settings: ScalarRewardSettings) -> floa
     outcome = record.final
     if outcome is None:
         raise ValueError("unscored rollout failure cannot receive a reward")
-    if isinstance(outcome, NoValidCandidateOutcome):
+    if isinstance(outcome, (NoValidCandidateOutcome, SelectionFailedOutcome)):
         return settings.no_valid_candidate_reward
     if isinstance(outcome, KeptDefaultOutcome):
         return 0.0

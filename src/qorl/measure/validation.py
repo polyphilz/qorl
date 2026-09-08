@@ -10,6 +10,9 @@ from qorl.measure.schemas import (
     Baseline,
     Candidate,
     MeasurementStatus,
+    RejectedSelection,
+    SelectionState,
+    SelectionStatus,
     ToolResultStatus,
 )
 from qorl.plans.catalog import TaskCatalog
@@ -124,6 +127,7 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         self.default: Baseline | None = None
         self.candidates: list[Candidate] = []
         self.kept_default = False
+        self.selection = SelectionState()
         self.by_structure: dict[str, str] = {}
         self.by_reuse_key: dict[str, str] = {}
         self.cancel = cancel
@@ -216,6 +220,49 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         self.check_cancelled()
         return candidate
 
+    def select(self, candidate_id: str | None) -> Candidate | None:
+        eligible = [item for item in self.candidates if item.selection_eligible]
+        if candidate_id is not None:
+            selected = next(
+                (item for item in eligible if item.candidate_id == candidate_id), None
+            )
+            if selected is None:
+                raise ValueError(
+                    "selected_candidate_id: must name an eligible issued candidate"
+                )
+            return selected
+        if len(eligible) > 1:
+            raise ValueError(
+                "selected_candidate_id: required when multiple candidates are eligible"
+            )
+        return eligible[0] if eligible else None
+
+    def reject_selection(self, arguments: JsonValue, diagnostics: list[str]) -> None:
+        self.selection.rejections.append(
+            RejectedSelection(arguments=arguments, diagnostics=diagnostics)
+        )
+        if self.selection.status == SelectionStatus.ACCEPTED:
+            return  # An ignored extra call cannot undo the first terminal decision.
+        self.selection.status = SelectionStatus.REJECTED
+        self.selection.selected_candidate_id = None
+
+    def accept_selection(self, candidate_id: str | None) -> None:
+        selected = self.select(candidate_id)
+        self.selection.selected_candidate_id = (
+            selected.candidate_id if selected else None
+        )
+        self.selection.status = SelectionStatus.ACCEPTED
+
+    def resolve_selection(self) -> None:
+        """Resolve a forced stop without overriding an unresolved rejected finish."""
+        if self.selection.status == SelectionStatus.REJECTED:
+            self.selection.status = SelectionStatus.FAILED
+        elif self.selection.status == SelectionStatus.PENDING and not self.kept_default:
+            try:
+                self.accept_selection(None)
+            except ValueError:
+                self.selection.status = SelectionStatus.FAILED
+
     def keep_default(self) -> dict[str, str]:
         """Record an explicit default decision before any candidate submission."""
         if self.default is None:
@@ -227,4 +274,6 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         if self.kept_default:
             raise RuntimeError("rollout already kept the default plan")
         self.kept_default = True
+        self.selection.status = SelectionStatus.ACCEPTED
+        self.selection.selected_candidate_id = None
         return {"status": ToolResultStatus.KEPT_DEFAULT.value}

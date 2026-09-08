@@ -141,6 +141,12 @@ class AgentInterface:
         return [tool for tool in self.tools if tool.function.name in names]
 
     def available_tool_names(self, turn: int, candidate_count: int) -> set[str]:
+        if turn == self.maximum_model_turns:
+            return (
+                {ToolName.FINISH.value}
+                if candidate_count
+                else {ToolName.KEEP_DEFAULT.value}
+            )
         if candidate_count >= self.candidate_attempts:
             return {ToolName.FINISH.value}
         if turn > self.inspection_turn_limit:

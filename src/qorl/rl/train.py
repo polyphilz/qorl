@@ -85,8 +85,6 @@ def renderer_config(config: RlExperimentConfig) -> RendererConfig:
 def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
     """Validate complete trainer, orchestrator and inference models before any launch."""
     config = RlExperimentConfig.model_validate(config.model_dump())
-    if config.agent.candidate_attempts != 1:
-        raise ValueError("RL measured workflow requires agent.candidate_attempts=1")
     inference = config.inference
     if not isinstance(inference, LocalInferenceSettings):
         raise ValueError("RL requires local inference")

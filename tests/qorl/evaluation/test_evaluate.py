@@ -449,8 +449,10 @@ def test_provider_failure_stops_queued_rollouts(
 @pytest.mark.parametrize(
     "method", [ExperimentMethod.EVAL, ExperimentMethod.SFT, ExperimentMethod.RL]
 )
+@pytest.mark.parametrize("attempts", [1, 5])
 def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
     method: ExperimentMethod,
+    attempts: int,
     tmp_path: Path,
     activity: EvaluationActivity,
     monkeypatch: pytest.MonkeyPatch,
@@ -496,6 +498,7 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
         )
     changed = config.model_copy(
         update={
+            "agent": config.agent.model_copy(update={"candidate_attempts": attempts}),
             "evaluation": EvaluationSettings(rollouts_per_task=1),
             "model": config.model
             if training
@@ -526,6 +529,8 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
     (record,) = saved_rollouts(evaluation_dir)
     selected = run.load_inputs(output).selections[role]
     assert record.rollout.task_id == selected.task_ids[0]
+    assert record.trace is not None
+    assert record.trace.selection.selected_candidate_id == "candidate-01"
     assert activity.served[0].adapter_path == adapter
     assert activity.served[0].name_or_path == "example/base"
     assert activity.served[0].revision == "a" * 40

@@ -297,7 +297,9 @@ def test_multiple_attempts_select_one_result_without_intermediate_timing() -> No
     fourth = run.evaluate(ACTION)
     assert fourth.duplicate_of == third.candidate_id
     assert sum(call.analyze for call in worker.calls) == 2
-    with pytest.raises(ValueError, match="explicit selected_candidate_id"):
+    with pytest.raises(
+        ValueError, match="selected_candidate_id: required when multiple"
+    ):
         run.finish(random.Random(0))
     final = run.finish(random.Random(0), selected_candidate_id=fourth.candidate_id)
     assert isinstance(final, MeasuredOutcome)

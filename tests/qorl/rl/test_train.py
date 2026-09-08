@@ -54,11 +54,17 @@ def run(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("max_grad_norm", [None, 0.0, 0.25, 1.0])
 @pytest.mark.parametrize("seed", [42, 91])
+@pytest.mark.parametrize("attempts", [1, 5])
 def test_complete_translation(
-    config: RlExperimentConfig, run: Path, max_grad_norm: float | None, seed: int
+    config: RlExperimentConfig,
+    run: Path,
+    max_grad_norm: float | None,
+    seed: int,
+    attempts: int,
 ) -> None:
     config = config.model_copy(
         update={
+            "agent": config.agent.model_copy(update={"candidate_attempts": attempts}),
             "experiment": config.experiment.model_copy(update={"seed": seed}),
             "training": config.training.model_copy(
                 update={"max_grad_norm": max_grad_norm}
@@ -170,7 +176,6 @@ def test_explicit_harness_settings_survive_construction(
 @pytest.mark.parametrize(
     "field,value,match",
     [
-        ("candidate_attempts", 2, "candidate_attempts"),
         ("min_p", 0.1, "sampling replay"),
         ("presence_penalty", 0.5, "sampling replay"),
         ("repetition_penalty", 1.1, "sampling replay"),
@@ -182,7 +187,7 @@ def test_reject_incompatible_workflows(
     config: RlExperimentConfig, run: Path, field: str, value: float, match: str
 ) -> None:
     doc = config.model_dump()
-    doc["agent" if field == "candidate_attempts" else "inference"][field] = value
+    doc["inference"][field] = value
     with pytest.raises(ValueError, match=match):
         train.native_config(RlExperimentConfig.model_validate(doc), run)
     assert not (run / "training").exists()

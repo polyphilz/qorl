@@ -4,6 +4,7 @@ from pydantic import TypeAdapter
 
 from qorl.agent.tool_schemas import (
     ColumnArguments,
+    FinishArguments,
     PlanArguments,
     RelationArguments,
     ToolArguments,
@@ -76,7 +77,7 @@ def agent_tools(
         ),
         function(
             ToolName.FINISH,
-            "End the search. The current one-candidate measured workflow finalizes its sole eligible candidate.",
-            OBJECT.validate_python(ToolArguments.model_json_schema()),
+            "End the search by selecting an eligible issued candidate, including an earlier one. Supply selected_candidate_id when several are eligible; omission selects the sole eligible candidate, or retains no-valid-candidate handling when none are eligible. Timed-out candidates are selectable and retain their timeout outcome without retry. Invalid selections return diagnostics for correction.",
+            OBJECT.validate_python(FinishArguments.model_json_schema()),
         ),
     ]
