@@ -1,0 +1,20 @@
+[experiment]
+name = "pg-32mb-wm-noise-baseline"
+method = "calibrate"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/002-pgconf-workmem-32mb"
+
+[pool]
+path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
+
+[data.test]
+file = "test-tasks.json"
+selection_seed = 42
+expression = "test=job"
+
+[measurement]
+max_warmup_runs = 5
+num_trials = 20
+default_timeout_seconds = 300.0
