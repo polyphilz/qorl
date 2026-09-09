@@ -410,7 +410,6 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
         "max_tokens": 32768,
         "reasoning_effort": "medium",
     }
-    assert "model stages is not implemented" in (directory / "README.md").read_text()
 
 
 def test_creation_preserves_model_api_settings(creation_request: CreateRequest) -> None:

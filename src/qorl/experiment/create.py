@@ -335,9 +335,7 @@ def readme(directory: Path, template_path: Path, config: ExperimentConfig) -> st
         )
     execution = (
         "\nEach execution allocates a numbered run and copies its config and task selections. "
-        "Calibration retains partial results on failure; resumption is not supported.\n"
-        if isinstance(config, CalibrationExperimentConfig)
-        else "\nExecution of these model stages is not implemented.\n"
+        "Calibration retains partial results on failure.\n"
     )
     return (
         f"# {directory.name}\n\n"
