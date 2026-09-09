@@ -12,7 +12,7 @@ path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
 [model]
 provider = "local"
 name_or_path = "empero-ai/Qwen3.8-4B-Distill"
-context_length = 20480
+context_length = 32768
 revision = "c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e"
 base_url = "http://127.0.0.1:8000/v1"
 request_timeout_seconds = 300
@@ -43,7 +43,7 @@ candidate_timeout_floor_seconds = 5.0
 candidate_timeout_multiplier = 3.0
 
 [inference]
-max_tokens = 2048
+max_tokens = 8192
 temperature = 1.0
 top_p = 1.0
 top_k = 20

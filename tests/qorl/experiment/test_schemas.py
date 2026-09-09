@@ -41,7 +41,7 @@ def test_default_templates_roundtrip_without_implicit_identities(
     if isinstance(config, ModelExperimentConfig):
         assert config.model.name_or_path == PLACEHOLDER
         assert config.model.revision == PLACEHOLDER
-        assert config.model.context_length == 20_480
+        assert config.model.context_length == 32_768
         assert config.model.base_url == "http://127.0.0.1:8000/v1"
         assert config.model.request_timeout_seconds == 300
         assert config.model.api_key_env is None
