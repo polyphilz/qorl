@@ -698,7 +698,19 @@ class OpenRouterModelClient:
                 message=Message(
                     role=MessageRole.ASSISTANT,
                     content=message.content,
-                    tool_calls=message.tool_calls,
+                    tool_calls=[
+                        ToolCall(
+                            id=call.id,
+                            type=call.type,
+                            function=FunctionCall(
+                                name=call.function.name,
+                                arguments=call.function.arguments,
+                            ),
+                        )
+                        for call in message.tool_calls
+                    ]
+                    if message.tool_calls is not None
+                    else None,
                     reasoning_content=reasoning,
                     continuation=OpenRouterContinuation(
                         model=self.model.name_or_path,

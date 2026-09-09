@@ -190,6 +190,82 @@ def test_openrouter_dispatch_and_paid_failure_evidence(
     assert activity.closed == activity.pools and not activity.claimed_workers
 
 
+def test_openrouter_indexed_multiple_calls_reach_harness(
+    openrouter_preset: ModelPreset,
+    tmp_path: Path,
+    activity: EvaluationActivity,
+    evaluation_config: EvaluationExperimentConfig,
+    pool_config: PoolConfig,
+    postgres_config: PostgresConfig,
+    benchmark_task_sets: dict[str, TaskSet],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = HttpTransport.request
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-key")
+
+    def request(
+        transport: HttpTransport, path: str, body: JsonObject | None = None
+    ) -> JsonObject:
+        raw = original(transport, path, body)
+        raw["model"] = openrouter_preset.model.name_or_path
+        choices = raw["choices"]
+        assert isinstance(choices, list) and isinstance(choices[0], dict)
+        message = choices[0]["message"]
+        assert isinstance(message, dict)
+        calls = message["tool_calls"]
+        assert isinstance(calls, list) and isinstance(calls[0], dict)
+        calls[0]["index"] = 0
+        if len(activity.requests) == 1:
+            calls.append(
+                {
+                    "id": "extra-call",
+                    "index": 1,
+                    "type": "function",
+                    "function": {
+                        "name": "evaluate_candidate",
+                        "arguments": '{ "action": {"version": 1} }',
+                    },
+                }
+            )
+        else:
+            calls[0]["function"] = {"name": "keep_default", "arguments": "{}"}
+        return raw
+
+    monkeypatch.setattr(HttpTransport, "request", request)
+    config = evaluation_config.model_copy(
+        update={
+            "model": openrouter_preset.model,
+            "inference": openrouter_preset.inference,
+            "resources": None,
+        }
+    )
+    output = tmp_path / "indexed"
+    report = run_evaluation(
+        output, config, pool_config, postgres_config, benchmark_task_sets["job"]
+    )
+    (record,) = saved_rollouts(output)
+    assert (
+        report.status == RunStatus.COMPLETED
+        and report.summary.performance.failure_count == 0
+    )
+    assert record.trace is not None and not record.trace.model_failures
+    calls = record.trace.model_responses[0].message.tool_calls
+    assert calls is not None and [call.id for call in calls] == ["call-0", "extra-call"]
+    assert [event.tool_call_id for event in record.trace.tool_events] == [
+        "call-0",
+        "extra-call",
+        "call-2",
+    ]
+    assert record.trace.tool_events[1].result["error"] == "call one tool at a time"
+    assert not record.rollout.candidates
+    assert (
+        record.rollout.final is not None
+        and record.rollout.final.kind == OutcomeKind.KEPT_DEFAULT
+    )
+    assert sum("ANALYZE" in query for query in activity.queries) == 2
+    assert activity.closed == activity.pools and not activity.claimed_workers
+
+
 @pytest.mark.parametrize("empty", [True, False])
 def test_openrouter_output_limit_does_not_abort_scheduled_rollout(
     empty: bool,

@@ -376,7 +376,28 @@ class ChatResponse(BaseModel):
     usage: ChatUsage | None = None
 
 
-class OpenRouterMessage(ChatMessage):
+class OpenRouterFunctionCall(FunctionCall):
+    """Validate function fields while accepting provider-only wire metadata."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+
+class OpenRouterToolCall(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str = Field(min_length=1)
+    type: Literal["function"] = "function"
+    function: OpenRouterFunctionCall
+
+
+class OpenRouterMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    role: str
+    content: str | None = None
+    reasoning: str | None = None
+    reasoning_content: str | None = None
+    tool_calls: list[OpenRouterToolCall] | None = None
     reasoning_details: list[JsonObject] | None = None
 
 

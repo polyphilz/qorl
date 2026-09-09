@@ -18,6 +18,7 @@ from qorl.model.exceptions import ModelError, ModelResponseError
 from qorl.model.schemas import (
     OPENROUTER_MODEL_ID,
     AstraInferenceSettings,
+    FunctionCall,
     GenerationRequest,
     JsonObject,
     Message,
@@ -28,9 +29,117 @@ from qorl.model.schemas import (
     OpenRouterInferenceSettings,
     ReasoningEffort,
     TokenUsage,
+    ToolCall,
 )
 
 ARGUMENTS = '{ "action": {"version": 1} }'
+
+
+def indexed_call() -> JsonObject:
+    return {
+        "id": "provider-call",
+        "type": "function",
+        "index": 0,
+        "provider_metadata": {"opaque": True},
+        "function": {
+            "name": "evaluate_candidate",
+            "arguments": ARGUMENTS,
+            "provider_metadata": "function metadata",
+        },
+    }
+
+
+def test_wire_metadata_is_not_domain_or_replayed_metadata(
+    preset: ModelPreset, turn: GenerationRequest
+) -> None:
+    first = indexed_call()
+    second = {**indexed_call(), "id": "second-call", "index": 99}
+    raw: JsonObject = {
+        **reply(),
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [first, second],
+                    "reasoning": "Keep this reasoning.",
+                    "reasoning_details": [*DETAILS],
+                },
+            }
+        ],
+    }
+    original = copy.deepcopy(raw)
+    connection = client(preset, ScriptedTransport([raw]))
+    response = connection.generate(turn)
+    assert response.raw_response == raw == original
+    calls = response.message.tool_calls
+    assert calls is not None and [call.id for call in calls] == [
+        "provider-call",
+        "second-call",
+    ]
+    assert all(
+        type(call) is ToolCall and type(call.function) is FunctionCall for call in calls
+    )
+    assert all(call.function.arguments == ARGUMENTS for call in calls)
+    assert response.message.reasoning_content == "Keep this reasoning."
+    following = connection.request_body(
+        GenerationRequest(
+            messages=[
+                *turn.messages,
+                response.message,
+                *[
+                    Message(
+                        role=MessageRole.TOOL,
+                        tool_call_id=call.id,
+                        content="recorded result",
+                    )
+                    for call in calls
+                ],
+            ],
+            tools=turn.tools[-1:],
+        )
+    )
+    messages = following["messages"]
+    assert isinstance(messages, list) and isinstance(messages[-3], dict)
+    assert messages[-3]["tool_calls"] == [
+        call.model_dump(mode="json") for call in calls
+    ]
+    assert messages[-3]["reasoning_details"] == DETAILS
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ToolCall.model_validate(first)
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        FunctionCall.model_validate(first["function"])
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"id": ""},
+        {"id": None},
+        {"type": "other"},
+        {"function": {"name": "", "arguments": "{}"}},
+        {"function": {"name": "finish", "arguments": {}}},
+    ],
+)
+def test_wire_metadata_does_not_relax_required_call_fields(
+    preset: ModelPreset, turn: GenerationRequest, change: JsonObject
+) -> None:
+    raw: JsonObject = {
+        **reply(),
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "tool_calls": [{**indexed_call(), **change}],
+                },
+            }
+        ],
+    }
+    with pytest.raises(ModelResponseError):
+        client(preset, ScriptedTransport([raw])).generate(turn)
+
+
 DETAILS: list[JsonObject] = [
     {"type": "reasoning.text", "text": "Inspect before proposing.", "index": 0},
     {
