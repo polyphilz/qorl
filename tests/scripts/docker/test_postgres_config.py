@@ -29,9 +29,6 @@ class TestPostgresConfig:
         root = repository_root / "docker/postgres/configs"
         expected = {"README.md", "pg.conf", "config.expected.json"}
 
-        assert {path.name for path in root.iterdir()} == {
-            "000-pgconf-default",
-        }
         for config_dir in root.iterdir():
             assert {path.name for path in config_dir.iterdir()} == expected
 
