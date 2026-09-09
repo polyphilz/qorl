@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    StrictBool,
     TypeAdapter,
     model_validator,
 )
@@ -229,8 +230,16 @@ class RenderedRequest(BaseModel):
         return self
 
 
+class RecordedActionValidity(BaseModel):
+    """Only explicit saved action validity determines semantic supervision eligibility."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    action_valid: StrictBool | None = None
+
+
 class SkippedRequest(BaseModel):
-    """An intact assistant reply excluded from supervision by its recorded schema."""
+    """An intact assistant reply excluded by its recorded schema or action feedback."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 

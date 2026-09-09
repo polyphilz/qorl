@@ -707,9 +707,117 @@ def test_reasoning_is_retained_and_supervised(experiment: Path) -> None:
     assert "VISIBLE REASONING" in student.tokenizer.decode(trained)
 
 
-def test_schema_invalid_multicall_reply_is_retained_only_as_context(
-    experiment: Path, tools: list[ToolDefinition]
+@pytest.mark.parametrize(
+    ("feedback", "excluded"),
+    [
+        ('{"action_valid":false}', True),
+        ('{"action_valid":true,"constraints_satisfied":false}', False),
+        ('{"action_valid":true,"execution_timed_out":true}', False),
+        ('{"action_valid":true,"duplicate_of":"default","latency_ms":99999}', False),
+        ('{"_candidate_history":{"action_valid":false}}', False),
+        ('{"constraints_satisfied":false}', False),
+        ('{"action_valid":"false"}', False),
+        ('{"action_valid":0}', False),
+        ('{"action_valid":null}', False),
+        ('[{"action_valid":false}]', False),
+        ("false", False),
+        ("action_valid=false: invalid action", False),
+        ("{", False),
+        (None, False),
+    ],
+)
+@pytest.mark.parametrize("name", ["evaluate_candidate", "inspect"])
+def test_only_explicit_candidate_validity_feedback_excludes_reply(
+    tools: list[ToolDefinition], feedback: str | None, excluded: bool, name: str
 ) -> None:
+    definition = tools[0].model_copy(
+        update={"function": tools[0].function.model_copy(update={"name": name})}
+    )
+    record = conversation("task", "feedback", [definition])
+    record.messages[2] = Message(
+        role=MessageRole.ASSISTANT,
+        tool_calls=[
+            ToolCall(
+                id="call", function=FunctionCall(name=name, arguments='{"alias":"t"}')
+            )
+        ],
+    )
+    record.messages[3] = Message(
+        role=MessageRole.TOOL,
+        tool_call_id="call",
+        name="inspect" if name == "evaluate_candidate" else "evaluate_candidate",
+        content=feedback,
+    )
+    original = record.model_dump_json()
+    skipped = dataset.validate_conversation(record)
+    assert [item.assistant_message_index for item in skipped] == (
+        [2] if excluded and name == "evaluate_candidate" else []
+    )
+    assert record.model_dump_json() == original
+
+
+@pytest.mark.parametrize("candidate_valid", [False, True])
+def test_reversed_results_use_original_call_identity(
+    tools: list[ToolDefinition], candidate_valid: bool
+) -> None:
+    candidate = tools[0].model_copy(
+        update={
+            "function": tools[0].function.model_copy(
+                update={"name": "evaluate_candidate"}
+            )
+        }
+    )
+    record = conversation("task", "reversed", [*tools, candidate])
+    record.messages[2] = Message(
+        role=MessageRole.ASSISTANT,
+        tool_calls=[
+            ToolCall(
+                id="call",
+                function=FunctionCall(
+                    name="evaluate_candidate", arguments='{"alias":"t"}'
+                ),
+            ),
+            ToolCall(
+                id="inspection",
+                function=FunctionCall(name="inspect", arguments='{"alias":"t"}'),
+            ),
+        ],
+    )
+    record.messages[3:4] = [
+        Message(
+            role=MessageRole.TOOL,
+            tool_call_id="inspection",
+            name="evaluate_candidate",
+            content=json.dumps({"action_valid": not candidate_valid}),
+        ),
+        Message(
+            role=MessageRole.TOOL,
+            tool_call_id="call",
+            name="inspect",
+            content=json.dumps({"action_valid": candidate_valid}),
+        ),
+    ]
+    record.requests[1] = record.requests[1].model_copy(
+        update={"assistant_message_index": 5}
+    )
+    assert [
+        item.assistant_message_index for item in dataset.validate_conversation(record)
+    ] == ([] if candidate_valid else [2])
+
+
+@pytest.mark.parametrize("exclusion", ["schema", "semantic", "both"])
+def test_invalid_multicall_reply_is_retained_only_as_context(
+    experiment: Path, tools: list[ToolDefinition], exclusion: str
+) -> None:
+    tools = [
+        tools[0].model_copy(
+            update={
+                "function": tools[0].function.model_copy(
+                    update={"name": "evaluate_candidate"}
+                )
+            }
+        )
+    ]
     config = sft_config(experiment)
     config = config.model_copy(
         update={
@@ -733,24 +841,35 @@ def test_schema_invalid_multicall_reply_is_retained_only_as_context(
                         ToolCall(
                             id="call",
                             function=FunctionCall(
-                                name="inspect", arguments='{"alias": 17}'
+                                name="evaluate_candidate",
+                                arguments='{"alias": "t"}'
+                                if exclusion == "semantic"
+                                else '{"alias": 17}',
                             ),
                         ),
                         ToolCall(
                             id="second",
                             function=FunctionCall(
-                                name="inspect", arguments='{"alias": "t"}'
+                                name="evaluate_candidate", arguments='{"alias": "t"}'
                             ),
                         ),
                     ],
                 ),
                 Message(
-                    role=MessageRole.TOOL, tool_call_id="call", content="ORIGINAL ERROR"
+                    role=MessageRole.TOOL,
+                    tool_call_id="second",
+                    name="misleading",
+                    content="SECOND RESULT",
                 ),
                 Message(
                     role=MessageRole.TOOL,
-                    tool_call_id="second",
-                    content="SECOND RESULT",
+                    tool_call_id="call",
+                    content=json.dumps(
+                        {
+                            "action_valid": exclusion == "schema",
+                            "error": "ORIGINAL ERROR",
+                        }
+                    ),
                 ),
                 record.messages[-1],
             ],
@@ -765,7 +884,12 @@ def test_schema_invalid_multicall_reply_is_retained_only_as_context(
     assert rendered.rejection is None
     assert record.model_dump_json() == original
     assert [item.assistant_message_index for item in rendered.skipped_requests] == [2]
-    assert "alias" in rendered.skipped_requests[0].reasons[0]
+    reasons = rendered.skipped_requests[0].reasons
+    assert len(reasons) == (2 if exclusion == "both" else 1)
+    if exclusion != "semantic":
+        assert "alias" in reasons[0]
+    if exclusion != "schema":
+        assert "action_valid=false" in reasons[-1]
     (request,) = rendered.requests
     assert request.assistant_message_index == 5
     assert all(

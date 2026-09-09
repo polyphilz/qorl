@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator, validate
 from jsonschema.exceptions import ValidationError
 from prime_rl.trainer.sft.data import CatDataset, Sample, StatefulIterableDataset
 from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import ValidationError as ModelValidationError
 from referencing import Registry
 from renderers.base import (
     Message as RendererMessage,
@@ -31,7 +32,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from qorl.experiment.schemas import SftExperimentConfig
 from qorl.model.files import resolve_model
-from qorl.model.schemas import LocalInferenceSettings, MessageRole, ToolDefinition
+from qorl.model.schemas import LocalInferenceSettings, MessageRole
 from qorl.paths import REPOSITORY_ROOT
 from qorl.sft.schemas import (
     JSON_OBJECT_ADAPTER,
@@ -43,6 +44,7 @@ from qorl.sft.schemas import (
     PackingRowMetadata,
     PreparedDatasetManifest,
     PreparedSplitReport,
+    RecordedActionValidity,
     RenderedConversation,
     RenderedRequest,
     RenderingRejection,
@@ -201,7 +203,7 @@ def load_source(
 
 
 def validate_conversation(record: Conversation) -> list[SkippedRequest]:
-    """Reject broken history; classify schema-invalid object arguments for context only."""
+    """Reject broken history; classify invalid submissions from schemas and saved feedback."""
     assistant_indices = [
         index
         for index, message in enumerate(record.messages)
@@ -213,19 +215,20 @@ def validate_conversation(record: Conversation) -> list[SkippedRequest]:
         raise ValueError(
             f"{record.conversation_id}: requests must cover each assistant message exactly once, in order"
         )
-    available: dict[int, dict[str, ToolDefinition]] = {}
+    requests_by_assistant_message_index: dict[int, ConversationRequest] = {}
     for request in record.requests:
         names = {tool.function.name: tool for tool in request.tools}
         if len(names) != len(request.tools):
             raise ValueError(
                 f"{record.conversation_id}: request tool definitions contain repeated names"
             )
-        available[request.assistant_message_index] = names
+        requests_by_assistant_message_index[request.assistant_message_index] = request
         for tool in request.tools:
             Draft202012Validator.check_schema(tool.function.parameters)
     pending: set[str] = set()
     calls: set[str] = set()
-    skipped: list[SkippedRequest] = []
+    skipped_by_assistant_message_index: dict[int, SkippedRequest] = {}
+    candidate_requests_by_tool_call_id: dict[str, ConversationRequest] = {}
     for index, message in enumerate(record.messages):
         reasons: list[str] = []
         if pending and message.role != MessageRole.TOOL:
@@ -236,13 +239,17 @@ def validate_conversation(record: Conversation) -> list[SkippedRequest]:
             raise ValueError(
                 f"{record.conversation_id}: only assistant messages can call tools"
             )
+        request = requests_by_assistant_message_index.get(index)
+        available = (
+            {tool.function.name: tool for tool in request.tools} if request else {}
+        )
         for call in message.tool_calls or []:
-            if call.id in calls or call.function.name not in available[index]:
+            if call.id in calls or call.function.name not in available:
                 raise ValueError(
                     f"{record.conversation_id}: repeated call ID or unavailable tool {call.function.name} at message {index}"
                 )
             arguments = JSON_OBJECT_ADAPTER.validate_json(call.function.arguments)
-            schema = available[index][call.function.name].function.parameters
+            schema = available[call.function.name].function.parameters
             # Exhaust validation so a schema/reference error cannot hide behind
             # an earlier argument error. Such errors propagate, never become skips.
             try:
@@ -261,17 +268,45 @@ def validate_conversation(record: Conversation) -> list[SkippedRequest]:
                 )
             calls.add(call.id)
             pending.add(call.id)
+            if call.function.name == "evaluate_candidate":
+                candidate_requests_by_tool_call_id[call.id] = (
+                    requests_by_assistant_message_index[index]
+                )
         if message.role == MessageRole.TOOL:
             if message.tool_call_id not in pending:
                 raise ValueError(
                     f"{record.conversation_id}: tool result has no unanswered call"
                 )
             pending.remove(message.tool_call_id)
+            origin = candidate_requests_by_tool_call_id.get(message.tool_call_id)
+            if origin is not None and message.content is not None:
+                try:
+                    feedback = RecordedActionValidity.model_validate_json(
+                        message.content
+                    )
+                except ModelValidationError:
+                    pass  # Arbitrary text or non-boolean flags do not establish invalidity.
+                else:
+                    if feedback.action_valid is False:
+                        previous = skipped_by_assistant_message_index.get(
+                            origin.assistant_message_index
+                        )
+                        skipped_by_assistant_message_index[
+                            origin.assistant_message_index
+                        ] = SkippedRequest(
+                            assistant_message_index=origin.assistant_message_index,
+                            reasons=[
+                                *(previous.reasons if previous else []),
+                                "evaluate_candidate: recorded action_valid=false",
+                            ],
+                        )
         if reasons:
-            skipped.append(
-                SkippedRequest(assistant_message_index=index, reasons=reasons)
+            skipped_by_assistant_message_index[index] = SkippedRequest(
+                assistant_message_index=index, reasons=reasons
             )
-    return skipped
+    return [
+        skipped for _, skipped in sorted(skipped_by_assistant_message_index.items())
+    ]
 
 
 def load_student(config: SftExperimentConfig) -> StudentRenderer:

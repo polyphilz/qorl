@@ -423,20 +423,22 @@ def test_preparation_failure_preserves_paid_work_and_input_changes_are_rejected(
         generate.generate_dataset(changed, selections, tmp_path / "generation")
 
 
-@pytest.mark.parametrize("schema_invalid", [False, True])
+@pytest.mark.parametrize("invalidity", ["constraints", "schema", "action"])
 def test_feedback_repair_and_earlier_selection_use_recorded_requests(
-    schema_invalid: bool,
+    invalidity: str,
     configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, selections = configured
+    schema_invalid = invalidity == "schema"
+    excluded = invalidity != "constraints"
     calls: list[tuple[str, JsonObject]] = [
         (
             "evaluate_candidate",
             {"action": {"version": 1, "settings": {"seq_page_cost": 2.0}}},
         ),
-        # A schema-valid but impossible join subtree: retain recovery supervision.
+        # A valid action whose constraint PostgreSQL does not satisfy stays supervised.
         (
             "evaluate_candidate",
             {
@@ -459,6 +461,17 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
                 "action": {"version": 1},
                 "joins": [{"relations": ["ci", "n"], "force": "nestloop"}],
                 "row_corrections": [],
+            },
+        )
+    elif invalidity == "action":
+        # Both aliases are allowed, but n and rt have no direct join edge.
+        calls[1] = (
+            "evaluate_candidate",
+            {
+                "action": {
+                    "version": 1,
+                    "joins": [{"relations": ["n", "rt"], "force": "nestloop"}],
+                }
             },
         )
 
@@ -501,12 +514,12 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
     assert (
         report.training.accepted_requests
         == report.validation.accepted_requests
-        == (3 if schema_invalid else 4)
+        == (3 if excluded else 4)
     )
     assert (
         report.training.skipped_requests
         == report.validation.skipped_requests
-        == int(schema_invalid)
+        == int(excluded)
     )
     generated_attempts = attempts(tmp_path / "generation")
     for attempt in generated_attempts:
@@ -514,6 +527,7 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
         assert attempt.trace.selection.selected_candidate_id == "candidate-01"
         assert len(attempt.rollout.candidates) == 3
         assert not attempt.rollout.candidates[1].constraints_satisfied
+        assert attempt.rollout.candidates[1].action_valid is (not excluded)
         proposal = attempt.trace.model_requests[1]
         definition = next(
             tool
@@ -545,13 +559,13 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
             (tmp_path / "dataset" / split / "rendered/000000.json").read_bytes()
         )
         assert [item.assistant_message_index for item in rendered.skipped_requests] == (
-            [4] if schema_invalid else []
+            [4] if excluded else []
         )
         assert [item.assistant_message_index for item in rendered.requests] == (
-            [2, 6, 8] if schema_invalid else [2, 4, 6, 8]
+            [2, 6, 8] if excluded else [2, 4, 6, 8]
         )
         assert len(conversation.requests) == 4
-        if schema_invalid:
+        if excluded:
             assert conversation.messages[4].reasoning_content == "REASONING TURN 1"
             assert conversation.messages[4].tool_calls is not None
             assert conversation.messages[4].tool_calls[
@@ -571,7 +585,7 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
                     sample.target_message_indices, sample.sample.loss_mask, strict=True
                 )
             )
-            if schema_invalid and sample.assistant_message_index > 4:
+            if excluded and sample.assistant_message_index > 4:
                 assert (
                     4 in sample.target_message_indices
                     and 5 in sample.target_message_indices
