@@ -4,7 +4,7 @@ method = "eval"
 seed = 42
 
 [postgres]
-path = "docker/postgres/configs/000-pgconf-default"
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
 
 [pool]
 path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
