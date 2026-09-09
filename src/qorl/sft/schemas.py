@@ -229,6 +229,15 @@ class RenderedRequest(BaseModel):
         return self
 
 
+class SkippedRequest(BaseModel):
+    """An intact assistant reply excluded from supervision by its recorded schema."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    assistant_message_index: int = Field(ge=0)
+    reasons: list[str] = Field(min_length=1)
+
+
 class RenderedConversation(BaseModel):
     """A conversation's request-level samples, accepted or rejected together."""
 
@@ -238,6 +247,7 @@ class RenderedConversation(BaseModel):
     conversation_id: str
     task_id: str
     requests: list[RenderedRequest]
+    skipped_requests: list[SkippedRequest] = Field(default_factory=list[SkippedRequest])
     rejection: RenderingRejection | None = None
 
 
@@ -275,6 +285,7 @@ class PreparedSplitReport(BaseModel):
     source_conversations: int
     accepted_conversations: int
     accepted_requests: int
+    skipped_requests: int = Field(default=0, ge=0)
     accepted_tasks: int
     rejections: dict[RenderingRejection, int]
     packed_rows: int

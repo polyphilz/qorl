@@ -10,11 +10,10 @@ from typing import Protocol
 
 import renderers.base as rendering
 from jsonschema import Draft202012Validator, validate
-from jsonschema.exceptions import SchemaError, ValidationError
+from jsonschema.exceptions import ValidationError
 from prime_rl.trainer.sft.data import CatDataset, Sample, StatefulIterableDataset
 from pydantic import BaseModel, JsonValue, TypeAdapter
 from referencing import Registry
-from referencing.exceptions import Unresolvable
 from renderers.base import (
     Message as RendererMessage,
 )
@@ -47,6 +46,7 @@ from qorl.sft.schemas import (
     RenderedConversation,
     RenderedRequest,
     RenderingRejection,
+    SkippedRequest,
     TrainingRow,
 )
 from qorl.taskset.schemas import TaskRole, TaskSelection
@@ -56,6 +56,7 @@ from qorl.util.io import write_json
 RENDERER_CONFIG: TypeAdapter[RendererConfig] = TypeAdapter(RendererConfig)
 SPLIT_NAMES = {TaskRole.TRAIN: "training", TaskRole.VALIDATION: "validation"}
 RECORD_NUMBER_WIDTH = 6
+SKIPPED_REASON_CHARACTERS = 300
 
 
 class TokenizerLoader(Protocol):
@@ -199,8 +200,8 @@ def load_source(
     return ConversationSource(directory, manifest, conversations, files)
 
 
-def validate_conversation(record: Conversation) -> None:
-    """Require request-specific tools and answered calls before advancing history."""
+def validate_conversation(record: Conversation) -> list[SkippedRequest]:
+    """Reject broken history; classify schema-invalid object arguments for context only."""
     assistant_indices = [
         index
         for index, message in enumerate(record.messages)
@@ -220,9 +221,13 @@ def validate_conversation(record: Conversation) -> None:
                 f"{record.conversation_id}: request tool definitions contain repeated names"
             )
         available[request.assistant_message_index] = names
+        for tool in request.tools:
+            Draft202012Validator.check_schema(tool.function.parameters)
     pending: set[str] = set()
     calls: set[str] = set()
+    skipped: list[SkippedRequest] = []
     for index, message in enumerate(record.messages):
+        reasons: list[str] = []
         if pending and message.role != MessageRole.TOOL:
             raise ValueError(
                 f"{record.conversation_id}: outstanding tool calls require results before message {index}"
@@ -238,6 +243,8 @@ def validate_conversation(record: Conversation) -> None:
                 )
             arguments = JSON_OBJECT_ADAPTER.validate_json(call.function.arguments)
             schema = available[index][call.function.name].function.parameters
+            # Exhaust validation so a schema/reference error cannot hide behind
+            # an earlier argument error. Such errors propagate, never become skips.
             try:
                 validate(
                     arguments,
@@ -245,10 +252,13 @@ def validate_conversation(record: Conversation) -> None:
                     cls=Draft202012Validator,
                     registry=Registry[JsonValue](),
                 )
-            except (SchemaError, ValidationError, Unresolvable) as error:
-                raise ValueError(
-                    f"{record.conversation_id}: {call.function.name} arguments or request schema are invalid: {error}"
-                ) from error
+            except ValidationError as error:
+                field = ".".join(str(part) for part in error.absolute_path)
+                reasons.append(
+                    f"{call.function.name} arguments{'.' + field if field else ''}: {error.message}"[
+                        :SKIPPED_REASON_CHARACTERS
+                    ]
+                )
             calls.add(call.id)
             pending.add(call.id)
         if message.role == MessageRole.TOOL:
@@ -257,6 +267,11 @@ def validate_conversation(record: Conversation) -> None:
                     f"{record.conversation_id}: tool result has no unanswered call"
                 )
             pending.remove(message.tool_call_id)
+        if reasons:
+            skipped.append(
+                SkippedRequest(assistant_message_index=index, reasons=reasons)
+            )
+    return skipped
 
 
 def load_student(config: SftExperimentConfig) -> StudentRenderer:
@@ -378,16 +393,27 @@ def render_conversation(
     record: Conversation, student: StudentRenderer, context_length: int
 ) -> RenderedConversation:
     """Keep all request samples together when rejecting an overlong conversation."""
-    requests = [render_request(record, request, student) for request in record.requests]
+    skipped = validate_conversation(record)
+    skipped_indices = {item.assistant_message_index for item in skipped}
+    # Keep the existing full-conversation length check, including skipped replies.
+    rendered = [render_request(record, request, student) for request in record.requests]
+    requests = [
+        request
+        for request in rendered
+        if request.assistant_message_index not in skipped_indices
+    ]
     rejection = None
-    if any(len(request.sample.input_ids) > context_length for request in requests):
+    if not requests:
+        rejection = RenderingRejection.NO_TARGETS
+    elif any(len(request.sample.input_ids) > context_length for request in rendered):
         rejection = RenderingRejection.OVER_CONTEXT
-    elif not requests or any(not any(request.sample.loss_mask) for request in requests):
+    elif any(not any(request.sample.loss_mask) for request in requests):
         rejection = RenderingRejection.NO_TARGETS
     return RenderedConversation(
         conversation_id=record.conversation_id,
         task_id=record.task_id,
         requests=requests,
+        skipped_requests=skipped,
         rejection=rejection,
     )
 
@@ -592,6 +618,7 @@ def prepare_dataset(
             source_conversations=len(records),
             accepted_conversations=len(accepted),
             accepted_requests=sum(len(record.requests) for record in accepted),
+            skipped_requests=sum(len(record.skipped_requests) for record in records),
             accepted_tasks=len({record.task_id for record in accepted}),
             rejections={
                 reason: sum(record.rejection == reason for record in records)

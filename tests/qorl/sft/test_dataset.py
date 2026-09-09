@@ -15,12 +15,14 @@ import tomli_w
 import torch
 import verifiers.v1 as vf
 from datasets import Dataset
+from jsonschema.exceptions import SchemaError
 from openai import AsyncOpenAI
 from prime_rl.orchestrator import trajectories
 from prime_rl.orchestrator.algo import routing
 from prime_rl.trainer.sft.data import Sample, SFTDataset, cat_collate
 from prime_rl.transports.batch import TrainingSample
 from pydantic import TypeAdapter, ValidationError
+from referencing.exceptions import Unresolvable
 from renderers.configs import (
     AutoRendererConfig,
     Qwen3RendererConfig,
@@ -705,6 +707,226 @@ def test_reasoning_is_retained_and_supervised(experiment: Path) -> None:
     assert "VISIBLE REASONING" in student.tokenizer.decode(trained)
 
 
+def test_schema_invalid_multicall_reply_is_retained_only_as_context(
+    experiment: Path, tools: list[ToolDefinition]
+) -> None:
+    config = sft_config(experiment)
+    config = config.model_copy(
+        update={
+            "training": config.training.model_copy(
+                update={"renderer": Qwen35RendererConfig()}
+            ),
+            "inference": config.inference.model_copy(update={"thinking": True}),
+        }
+    )
+    student = dataset.load_student(config)
+    record = conversation("task", "multicall", tools)
+    record = record.model_copy(
+        update={
+            "messages": [
+                *record.messages[:2],
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    content="ORIGINAL TEXT",
+                    reasoning_content="ORIGINAL REASONING",
+                    tool_calls=[
+                        ToolCall(
+                            id="call",
+                            function=FunctionCall(
+                                name="inspect", arguments='{"alias": 17}'
+                            ),
+                        ),
+                        ToolCall(
+                            id="second",
+                            function=FunctionCall(
+                                name="inspect", arguments='{"alias": "t"}'
+                            ),
+                        ),
+                    ],
+                ),
+                Message(
+                    role=MessageRole.TOOL, tool_call_id="call", content="ORIGINAL ERROR"
+                ),
+                Message(
+                    role=MessageRole.TOOL,
+                    tool_call_id="second",
+                    content="SECOND RESULT",
+                ),
+                record.messages[-1],
+            ],
+            "requests": [
+                record.requests[0],
+                record.requests[1].model_copy(update={"assistant_message_index": 5}),
+            ],
+        }
+    )
+    original = record.model_dump_json()
+    rendered = dataset.render_conversation(record, student, CONTEXT_LENGTH)
+    assert rendered.rejection is None
+    assert record.model_dump_json() == original
+    assert [item.assistant_message_index for item in rendered.skipped_requests] == [2]
+    assert "alias" in rendered.skipped_requests[0].reasons[0]
+    (request,) = rendered.requests
+    assert request.assistant_message_index == 5
+    assert all(
+        text in request.rendered_text
+        for text in (
+            "ORIGINAL TEXT",
+            "ORIGINAL REASONING",
+            "ORIGINAL ERROR",
+            "SECOND RESULT",
+        )
+    )
+    assert {2, 3, 4, 5} <= set(request.target_message_indices)
+    assert any(request.sample.loss_mask)
+    assert all(
+        not mask or index == 5
+        for index, mask in zip(
+            request.target_message_indices, request.sample.loss_mask, strict=True
+        )
+    )
+    rows, metadata = dataset.pack_conversations([rendered], CONTEXT_LENGTH, 42)
+    assert metadata[0].assistant_message_indices == [5]
+    length = len(request.sample.loss_mask)
+    assert rows[0].loss_mask[:length] == request.sample.loss_mask
+    assert not any(rows[0].loss_mask[length:])
+    all_invalid = record.model_copy(
+        update={"messages": record.messages[:5], "requests": record.requests[:1]}
+    )
+    rejected = dataset.render_conversation(all_invalid, student, CONTEXT_LENGTH)
+    assert rejected.rejection == RenderingRejection.NO_TARGETS and not rejected.requests
+    assert dataset.pack_conversations([rejected], CONTEXT_LENGTH, 42) == ([], [])
+
+
+def test_skipped_final_reply_cannot_rescue_overlong_conversation(
+    experiment: Path, tools: list[ToolDefinition]
+) -> None:
+    student = dataset.load_student(sft_config(experiment))
+    record = conversation("task", "long-skipped", tools)
+    record.messages[-1] = Message(
+        role=MessageRole.ASSISTANT,
+        content="long " * 5000,
+        tool_calls=[
+            ToolCall(
+                id="last",
+                function=FunctionCall(name="inspect", arguments='{"alias": 17}'),
+            )
+        ],
+    )
+    record.requests[-1] = record.requests[-1].model_copy(update={"tools": tools})
+    rendered = dataset.render_conversation(record, student, CONTEXT_LENGTH)
+    assert rendered.rejection == RenderingRejection.OVER_CONTEXT
+    assert [item.assistant_message_index for item in rendered.requests] == [2]
+    assert [item.assistant_message_index for item in rendered.skipped_requests] == [4]
+    assert dataset.pack_conversations([rendered], CONTEXT_LENGTH, 42) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "broken_json",
+        "array",
+        "null",
+        "number",
+        "unavailable",
+        "bad_schema",
+        "reference",
+    ],
+)
+def test_invalid_first_call_does_not_hide_fatal_second_call(
+    experiment: Path,
+    tools: list[ToolDefinition],
+    monkeypatch: pytest.MonkeyPatch,
+    problem: str,
+) -> None:
+    record = conversation("task", "fatal", tools)
+    definitions = list(tools)
+    if problem in {"bad_schema", "reference"}:
+        definitions.append(
+            ToolDefinition(
+                function=ToolFunction(
+                    name="other",
+                    description="fatal schema",
+                    parameters={"type": "invalid-type"}
+                    if problem == "bad_schema"
+                    else {"$ref": "https://example.invalid/schema"},
+                )
+            )
+        )
+    second = ToolCall(
+        id="second",
+        function=FunctionCall(
+            name="missing"
+            if problem == "unavailable"
+            else "other"
+            if problem in {"bad_schema", "reference"}
+            else "inspect",
+            arguments={
+                "broken_json": "{",
+                "array": "[]",
+                "null": "null",
+                "number": "7",
+            }.get(problem, "{}"),
+        ),
+    )
+    record = record.model_copy(
+        update={
+            "messages": [
+                *record.messages[:2],
+                Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=[
+                        ToolCall(
+                            id="call",
+                            function=FunctionCall(
+                                name="inspect", arguments='{"alias": 17}'
+                            ),
+                        ),
+                        second,
+                    ],
+                ),
+            ],
+            "requests": [record.requests[0].model_copy(update={"tools": definitions})],
+        }
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("must fail before rendering")
+
+    monkeypatch.setattr(dataset, "render_request", forbidden)
+    error = (
+        SchemaError
+        if problem == "bad_schema"
+        else Unresolvable
+        if problem == "reference"
+        else ValueError
+    )
+    with pytest.raises(error):
+        dataset.render_conversation(
+            record, dataset.load_student(sft_config(experiment)), CONTEXT_LENGTH
+        )
+
+
+def test_reference_error_after_argument_error_is_fatal(
+    tools: list[ToolDefinition],
+) -> None:
+    record = conversation("task", "mixed-errors", tools)
+    record.requests[0].tools[0] = ToolDefinition(
+        function=ToolFunction(
+            name="inspect",
+            description="bad reference",
+            parameters={
+                "allOf": [
+                    {"required": ["missing"]},
+                    {"$ref": "https://example.invalid/schema"},
+                ]
+            },
+        )
+    )
+    with pytest.raises(Unresolvable):
+        dataset.validate_conversation(record)
+
+
 def test_context_boundary_is_the_shifted_sequence_length(experiment: Path) -> None:
     config = sft_config(experiment)
     source = dataset.load_source(config, run.load_inputs(experiment).selections)
@@ -728,19 +950,31 @@ def test_context_boundary_is_the_shifted_sequence_length(experiment: Path) -> No
     assert dataset.pack_conversations([rejected], length - 1, SHUFFLE_SEED) == ([], [])
 
 
+@pytest.mark.parametrize("schema_invalid", [False, True])
 def test_empty_validation_is_reported_and_stays_failed_on_resume(
     experiment: Path,
+    schema_invalid: bool,
 ) -> None:
     config = sft_config(experiment)
     assert config.data.dataset_from is not None
     path = config.data.dataset_from / "validation.jsonl"
     record = load_json_lines(path, Conversation)[0]
+    if schema_invalid:
+        record.messages[2] = Message(
+            role=MessageRole.ASSISTANT,
+            tool_calls=[
+                ToolCall(
+                    id="call",
+                    function=FunctionCall(name="inspect", arguments='{"alias": 17}'),
+                )
+            ],
+        )
     record = record.model_copy(
         update={
-            "messages": [
-                Message(role=MessageRole.USER, content="No assistant targets")
-            ],
-            "requests": [],
+            "messages": record.messages[:4]
+            if schema_invalid
+            else [Message(role=MessageRole.USER, content="No assistant targets")],
+            "requests": record.requests[:1] if schema_invalid else [],
         }
     )
     dataset.write_records(path, [record])
@@ -753,6 +987,10 @@ def test_empty_validation_is_reported_and_stays_failed_on_resume(
     )
     assert report.validation.rejections[RenderingRejection.NO_TARGETS] == 1
     assert report.validation.packed_rows == 0
+    assert report.validation.skipped_requests == int(schema_invalid)
+    assert (
+        report.validation.accepted_requests == report.validation.supervised_tokens == 0
+    )
     with pytest.raises(ValueError, match="empty training or validation"):
         run.run_experiment(
             experiment, RunRequest(RunStage.PREPARE, number=0, resume=True)
@@ -998,7 +1236,7 @@ def test_each_reply_uses_only_its_own_request_tools(experiment: Path) -> None:
         dataset.validate_conversation(invalid)
 
 
-def test_wrong_query_alias_is_rejected_by_the_recorded_schema(
+def test_wrong_query_alias_is_context_only_under_the_recorded_schema(
     tools: list[ToolDefinition],
 ) -> None:
     record = conversation("job-02a", "bad-schema", tools)
@@ -1032,8 +1270,9 @@ def test_wrong_query_alias_is_rejected_by_the_recorded_schema(
             ],
         }
     )
-    with pytest.raises(ValueError, match=r"cn.*not one of"):
-        dataset.validate_conversation(record)
+    (skipped,) = dataset.validate_conversation(record)
+    assert skipped.assistant_message_index == 2
+    assert "cn" in skipped.reasons[0] and "not one of" in skipped.reasons[0]
 
 
 @pytest.mark.parametrize(
@@ -1440,7 +1679,7 @@ def test_recorded_schema_references_are_not_fetched(
     monkeypatch.setattr(
         "urllib.request.urlopen", Mock(side_effect=AssertionError("must not fetch"))
     )
-    with pytest.raises(ValueError, match="arguments or request schema are invalid"):
+    with pytest.raises(Unresolvable):
         dataset.validate_conversation(record)
 
 

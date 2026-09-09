@@ -7,6 +7,8 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 from jsonschema import validate
+from jsonschema.exceptions import SchemaError
+from referencing.exceptions import Unresolvable
 from renderers.configs import Qwen35RendererConfig
 from tests.qorl.evaluation.conftest import EvaluationActivity
 from tests.qorl.evaluation.conftest import activity as activity
@@ -38,7 +40,10 @@ from qorl.sft.schemas import (
     GenerationReport,
     GenerationSettings,
     ImportedGenerationSeeds,
+    PackingRowMetadata,
     RenderedConversation,
+    TrainingRow,
+    load_json_lines,
 )
 from qorl.taskset.schemas import TaskRole, TaskSelection
 from qorl.util.hashing import sha256_file
@@ -342,7 +347,7 @@ def test_generate_prepare_and_reuse_original_evidence(
     [
         ("keep", 1),
         ("duplicate", 1),
-        ("invalid", 0),
+        ("invalid", 1),
         ("candidate_timeout", 1),
         ("provider_failure", 0),
         ("provider_failure_after_candidate", 1),
@@ -418,13 +423,15 @@ def test_preparation_failure_preserves_paid_work_and_input_changes_are_rejected(
         generate.generate_dataset(changed, selections, tmp_path / "generation")
 
 
-def test_feedback_semantic_repair_and_earlier_selection_use_recorded_requests(
+@pytest.mark.parametrize("schema_invalid", [False, True])
+def test_feedback_repair_and_earlier_selection_use_recorded_requests(
+    schema_invalid: bool,
     configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config, selections = configured
-    calls = [
+    calls: list[tuple[str, JsonObject]] = [
         (
             "evaluate_candidate",
             {"action": {"version": 1, "settings": {"seq_page_cost": 2.0}}},
@@ -445,6 +452,15 @@ def test_feedback_semantic_repair_and_earlier_selection_use_recorded_requests(
         ),
         ("finish", {"selected_candidate_id": "candidate-01"}),
     ]
+    if schema_invalid:
+        calls[1] = (
+            "evaluate_candidate",
+            {
+                "action": {"version": 1},
+                "joins": [{"relations": ["ci", "n"], "force": "nestloop"}],
+                "row_corrections": [],
+            },
+        )
 
     def request(
         transport: HttpTransport, path: str, body: JsonObject | None = None
@@ -464,19 +480,36 @@ def test_feedback_semantic_repair_and_earlier_selection_use_recorded_requests(
             "status": "completed",
             "output": [
                 {
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": f"REASONING TURN {index}"}
+                    ],
+                    "encrypted_content": f"opaque-{index}",
+                },
+                {
                     "type": "function_call",
                     "call_id": f"call-{index}",
                     "name": name,
                     "arguments": json.dumps(arguments),
-                }
+                },
             ],
             "usage": {"input_tokens": 100, "output_tokens": 10},
         }
 
     monkeypatch.setattr(HttpTransport, "request", request)
     report = dataset.prepare_dataset(config, selections, tmp_path / "dataset")
-    assert report.training.accepted_requests == report.validation.accepted_requests == 4
-    for attempt in attempts(tmp_path / "generation"):
+    assert (
+        report.training.accepted_requests
+        == report.validation.accepted_requests
+        == (3 if schema_invalid else 4)
+    )
+    assert (
+        report.training.skipped_requests
+        == report.validation.skipped_requests
+        == int(schema_invalid)
+    )
+    generated_attempts = attempts(tmp_path / "generation")
+    for attempt in generated_attempts:
         assert attempt.trace is not None and attempt.rollout is not None
         assert attempt.trace.selection.selected_candidate_id == "candidate-01"
         assert len(attempt.rollout.candidates) == 3
@@ -487,11 +520,161 @@ def test_feedback_semantic_repair_and_earlier_selection_use_recorded_requests(
             for tool in proposal.tools
             if tool.function.name == "evaluate_candidate"
         )
-        validate(calls[1][1], definition.function.parameters)
+        if not schema_invalid:
+            validate(calls[1][1], definition.function.parameters)
         assert attempt.rollout.candidates[0].execution_feedback is not None
         for index, actual in enumerate(attempt.trace.model_requests):
             assert actual.messages == attempt.trace.transcript[: 2 + index * 2]
             assert "paired_measurements" not in actual.model_dump_json()
+    for split in ("training", "validation"):
+        conversation = Conversation.model_validate_json(
+            (tmp_path / "dataset" / f"{split}.jsonl").read_bytes()
+        )
+        original = next(
+            item for item in generated_attempts if item.task_id == conversation.task_id
+        )
+        converted = generate.conversation_from_attempt(
+            original,
+            source=tmp_path / "generation",
+            identity_sha256=sha256_file(tmp_path / "generation/identity.json"),
+        )
+        assert conversation.messages == converted.messages
+        assert conversation.requests == converted.requests
+        assert conversation.metadata == converted.metadata
+        rendered = RenderedConversation.model_validate_json(
+            (tmp_path / "dataset" / split / "rendered/000000.json").read_bytes()
+        )
+        assert [item.assistant_message_index for item in rendered.skipped_requests] == (
+            [4] if schema_invalid else []
+        )
+        assert [item.assistant_message_index for item in rendered.requests] == (
+            [2, 6, 8] if schema_invalid else [2, 4, 6, 8]
+        )
+        assert len(conversation.requests) == 4
+        if schema_invalid:
+            assert conversation.messages[4].reasoning_content == "REASONING TURN 1"
+            assert conversation.messages[4].tool_calls is not None
+            assert conversation.messages[4].tool_calls[
+                0
+            ].function.arguments == json.dumps(calls[1][1])
+            assert "REASONING TURN 1" in rendered.requests[-1].rendered_text
+            feedback = conversation.messages[5].content
+            assert (
+                feedback is not None and feedback in rendered.requests[-1].rendered_text
+            )
+        samples = {item.assistant_message_index: item for item in rendered.requests}
+        for sample in samples.values():
+            assert any(sample.sample.loss_mask)
+            assert all(
+                not mask or index == sample.assistant_message_index
+                for index, mask in zip(
+                    sample.target_message_indices, sample.sample.loss_mask, strict=True
+                )
+            )
+            if schema_invalid and sample.assistant_message_index > 4:
+                assert (
+                    4 in sample.target_message_indices
+                    and 5 in sample.target_message_indices
+                )
+        rows = load_json_lines(
+            tmp_path / "dataset" / split / "packed.jsonl", TrainingRow
+        )
+        metadata = load_json_lines(
+            tmp_path / "dataset" / split / "packing.jsonl", PackingRowMetadata
+        )
+        split_report = report.training if split == "training" else report.validation
+        assert split_report.supervised_tokens == sum(sum(row.loss_mask) for row in rows)
+        for row, packing in zip(rows, metadata, strict=True):
+            offset = 0
+            for index, length in zip(
+                packing.assistant_message_indices, packing.request_lengths, strict=True
+            ):
+                sample = samples[index]
+                assert (
+                    row.loss_mask[offset : offset + length] == sample.sample.loss_mask
+                )
+                assert (
+                    row.target_ids[offset : offset + length] == sample.sample.target_ids
+                )
+                offset += length
+            assert not any(row.loss_mask[offset:])
+    reuse = config.model_copy(
+        update={
+            "data": config.data.model_copy(
+                update={
+                    "generation": None,
+                    "dataset_from": tmp_path / "dataset",
+                    "imported_generation_seeds": ImportedGenerationSeeds(
+                        training=config.experiment.seed,
+                        validation=config.experiment.seed,
+                    ),
+                }
+            )
+        }
+    )
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("reuse must not generate or execute SQL")
+
+    monkeypatch.setattr(generate, "generate_dataset", forbidden)
+    reused = dataset.prepare_dataset(reuse, selections, tmp_path / "reused")
+    assert reused.training.accepted_requests == report.training.accepted_requests
+    assert reused.validation.skipped_requests == report.validation.skipped_requests
+    for split in ("training", "validation"):
+        reused_split = reused.training if split == "training" else reused.validation
+        reused_rows = load_json_lines(
+            tmp_path / "reused" / split / "packed.jsonl", TrainingRow
+        )
+        assert reused_split.supervised_tokens == sum(
+            sum(row.loss_mask) for row in reused_rows
+        )
+        assert (tmp_path / "reused" / f"{split}.jsonl").read_bytes() == (
+            tmp_path / "dataset" / f"{split}.jsonl"
+        ).read_bytes()
+        assert (tmp_path / "reused" / split / "packed.jsonl").read_bytes() == (
+            tmp_path / "dataset" / split / "packed.jsonl"
+        ).read_bytes()
+
+
+@pytest.mark.parametrize("reference", [False, True])
+def test_bad_schema_is_fatal_in_conversion_and_artifact_save(
+    reference: bool,
+    configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
+    tmp_path: Path,
+) -> None:
+    config, selections = configured
+    output = tmp_path / "generation"
+    generate.generate_dataset(config, selections, output)
+    records = attempts(output)
+    attempt = next(item for item in records if item.split == TaskRole.TRAIN)
+    assert attempt.trace is not None
+    request = attempt.trace.model_requests[0]
+    tool = next(tool for tool in request.tools if tool.function.name == "get_plan")
+    request.tools[request.tools.index(tool)] = tool.model_copy(
+        update={
+            "function": tool.function.model_copy(
+                update={
+                    "parameters": {"$ref": "https://example.invalid/schema"}
+                    if reference
+                    else {"type": "invalid-type"}
+                }
+            )
+        }
+    )
+    error = Unresolvable if reference else SchemaError
+    with pytest.raises(error):
+        generate.conversation_from_attempt(
+            attempt, source=output, identity_sha256="recorded"
+        )
+    identity = GenerationIdentity.model_validate_json(
+        (output / "identity.json").read_bytes()
+    )
+    fresh = tmp_path / "invalid-artifact"
+    fresh.mkdir()
+    (fresh / "identity.json").write_bytes((output / "identity.json").read_bytes())
+    with pytest.raises(error):
+        generate.save_artifact(identity, records, fresh, None)
+    assert not (fresh / "report.json").exists()
 
 
 def test_generation_uses_existing_transport_retries_without_replacement(
