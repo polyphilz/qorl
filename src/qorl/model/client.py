@@ -613,13 +613,20 @@ class OpenRouterModelClient:
             "max_tokens": self.inference.max_tokens,
             "temperature": self.inference.temperature,
             "top_p": self.inference.top_p,
-            "top_k": self.inference.top_k,
             "reasoning": {"effort": self.inference.reasoning_effort, "exclude": False},
             "plugins": [{"id": "context-compression", "enabled": False}],
             "provider": {"require_parameters": True},
             "stream": False,
         }
-        if request.seed is not None:
+        if self.inference.provider is not None:
+            body["provider"] = {
+                "require_parameters": True,
+                "only": [*self.inference.provider.only],
+                "allow_fallbacks": self.inference.provider.allow_fallbacks,
+            }
+        if self.inference.top_k is not None:
+            body["top_k"] = self.inference.top_k
+        if self.inference.send_seed and request.seed is not None:
             body["seed"] = request.seed
         return body
 

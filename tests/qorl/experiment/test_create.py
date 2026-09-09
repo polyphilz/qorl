@@ -418,7 +418,9 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
             "reasoning_effort": "medium",
             "temperature": 1.0,
             "top_p": 0.95,
-            "top_k": 20,
+            "top_k": None,
+            "send_seed": False,
+            "provider": {"only": ["modal"], "allow_fallbacks": False},
         }
         if openrouter
         else {

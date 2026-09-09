@@ -27,6 +27,7 @@ from qorl.model.schemas import (
     ModelProvider,
     OpenRouterContinuation,
     OpenRouterInferenceSettings,
+    OpenRouterProviderSettings,
     ReasoningEffort,
     TokenUsage,
     ToolCall,
@@ -212,9 +213,13 @@ def test_current_tools_and_exact_continuation(
     body = response.request
     assert body["reasoning"] == {"effort": "medium", "exclude": False}
     assert body["plugins"] == [{"id": "context-compression", "enabled": False}]
-    assert body["provider"] == {"require_parameters": True}
-    assert body["seed"] == 42
-    assert body["top_k"] == 20 and body["top_p"] == 0.95
+    assert body["provider"] == {
+        "require_parameters": True,
+        "only": ["modal"],
+        "allow_fallbacks": False,
+    }
+    assert turn.seed == 42 and "seed" not in body
+    assert "top_k" not in body and body["top_p"] == 0.95
     assert body["tool_choice"] == "auto" and "parallel_tool_calls" not in body
     following = GenerationRequest(
         messages=[
@@ -392,6 +397,57 @@ def test_inference_rejections(preset: ModelPreset, change: JsonObject) -> None:
         OpenRouterInferenceSettings.model_validate(
             {**preset.inference.model_dump(), **change}
         )
+
+
+@pytest.mark.parametrize("top_k", [0, 20])
+@pytest.mark.parametrize("seed", [None, 42])
+def test_explicit_alternative_routing_and_sampling(
+    preset: ModelPreset, turn: GenerationRequest, top_k: int, seed: int | None
+) -> None:
+    inference = OpenRouterInferenceSettings.model_validate(
+        {
+            **preset.inference.model_dump(),
+            "top_k": top_k,
+            "send_seed": True,
+            "provider": {"only": ["another-backend"], "allow_fallbacks": True},
+        }
+    )
+    body = OpenRouterModelClient(
+        preset.model, inference, transport=ScriptedTransport([])
+    ).request_body(turn.model_copy(update={"seed": seed}))
+    assert body["top_k"] == top_k
+    assert body.get("seed") == seed and ("seed" in body) == (seed is not None)
+    assert body["provider"] == {
+        "only": ["another-backend"],
+        "allow_fallbacks": True,
+        "require_parameters": True,
+    }
+    assert (
+        OpenRouterInferenceSettings.model_validate_json(inference.model_dump_json())
+        == inference
+    )
+
+
+def test_unrestricted_routing_sends_configured_top_k_and_seed(
+    preset: ModelPreset, turn: GenerationRequest
+) -> None:
+    document = preset.inference.model_dump(exclude={"provider", "send_seed"})
+    document["top_k"] = 20
+    inference = OpenRouterInferenceSettings.model_validate(document)
+    body = OpenRouterModelClient(
+        preset.model, inference, transport=ScriptedTransport([])
+    ).request_body(turn)
+    assert body["provider"] == {"require_parameters": True}
+    assert body["top_k"] == 20 and body["seed"] == turn.seed
+
+
+@pytest.mark.parametrize(
+    "document",
+    [{"only": []}, {"only": [""]}, {"only": ["modal"], "require_parameters": False}],
+)
+def test_invalid_routing_rejected(document: JsonObject) -> None:
+    with pytest.raises(ValidationError):
+        OpenRouterProviderSettings.model_validate(document)
 
 
 def test_factory_and_continuation_guards(

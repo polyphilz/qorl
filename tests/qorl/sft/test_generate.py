@@ -165,6 +165,13 @@ def test_generate_prepare_and_reuse_original_evidence(
         response = original_request(transport, path, body)
         if openrouter:
             assert path == "chat/completions"
+            assert body is not None
+            assert body["provider"] == {
+                "only": ["modal"],
+                "allow_fallbacks": False,
+                "require_parameters": True,
+            }
+            assert "seed" not in body and "top_k" not in body
             choices = response["choices"]
             assert isinstance(choices, list) and isinstance(choices[0], dict)
             message = choices[0]["message"]

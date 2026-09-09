@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -116,6 +116,15 @@ class AstraInferenceSettings(BaseModel):
     reasoning_summary: Literal["auto"] | None = None
 
 
+class OpenRouterProviderSettings(BaseModel):
+    """Explicit backend routing, independent of model identity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    only: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    allow_fallbacks: bool = True
+
+
 class OpenRouterInferenceSettings(BaseModel):
     """Qwen requires reasoning; these are the supported effort levels."""
 
@@ -124,7 +133,9 @@ class OpenRouterInferenceSettings(BaseModel):
     max_tokens: int = Field(gt=0, le=OPENROUTER_OUTPUT_LIMIT)
     temperature: float = Field(ge=0, le=2)
     top_p: float = Field(gt=0, le=1)
-    top_k: int = Field(ge=0)
+    top_k: int | None = Field(default=None, ge=0)
+    send_seed: bool = True
+    provider: OpenRouterProviderSettings | None = None
     reasoning_effort: Literal[
         ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.XHIGH
     ]
