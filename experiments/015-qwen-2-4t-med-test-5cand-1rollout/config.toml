@@ -1,0 +1,55 @@
+[experiment]
+name = "qwen-2-4t-med-test-5cand-1rollout"
+method = "eval"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
+
+[pool]
+path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
+
+[model]
+provider = "openrouter"
+name_or_path = "qwen/qwen3.8-2.4t-a95b"
+context_length = 1000000
+base_url = "https://openrouter.ai/api/v1"
+request_timeout_seconds = 600
+api_key_env = "OPENROUTER_API_KEY"
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[agent]
+candidate_attempts = 5
+maximum_model_turns = 64
+inspection_turns_per_alias = 3
+
+[evaluation]
+rollouts_per_task = 1
+
+[measurement]
+default_warmups = 1
+default_measurements = 1
+candidate_feedback_warmups = 1
+candidate_feedback_measurements = 1
+paired_warmups = 1
+paired_measurements = 3
+default_timeout_seconds = 300.0
+candidate_timeout_floor_seconds = 5.0
+candidate_timeout_multiplier = 3.0
+
+[inference]
+max_tokens = 32768
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+reasoning_effort = "medium"
+
+[data.test]
+file = "test-tasks.json"
+selection_seed = 42
+expression = "test=job[01:1,02:1,03:1,04:1,05:1,06:1,07:1,08:1,09:1,10:1]"

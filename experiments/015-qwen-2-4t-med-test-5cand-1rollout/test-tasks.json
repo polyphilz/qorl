@@ -1,0 +1,15 @@
+{
+  "benchmark_id": "job",
+  "task_ids": [
+    "job-01d",
+    "job-02a",
+    "job-03c",
+    "job-04b",
+    "job-05c",
+    "job-06f",
+    "job-07b",
+    "job-08d",
+    "job-09a",
+    "job-10c"
+  ]
+}
