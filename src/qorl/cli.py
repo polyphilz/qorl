@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from qorl import __version__
 from qorl.adapters.merge import merge
 from qorl.adapters.schemas import MergeLoraConfig
@@ -19,6 +21,7 @@ from qorl.experiment.schemas import (
 )
 from qorl.model.files import resolve_model
 from qorl.model.schemas import ModelProvider, ModelSettings
+from qorl.paths import REPOSITORY_ROOT
 
 
 def parser() -> argparse.ArgumentParser:
@@ -104,6 +107,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    load_dotenv(REPOSITORY_ROOT / ".env", override=False)
     root = parser()
     arguments = root.parse_args()
     if arguments.command is None:
