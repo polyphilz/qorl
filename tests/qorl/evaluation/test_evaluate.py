@@ -163,6 +163,7 @@ def test_queries_run_concurrently_and_seeds_do_not_depend_on_output_names(
     pool_config: PoolConfig,
     postgres_config: PostgresConfig,
     benchmark_task_sets: dict[str, TaskSet],
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     activity.barrier = Barrier(len(pool_config.workers))
     for name in ("first", "second"):
@@ -186,6 +187,11 @@ def test_queries_run_concurrently_and_seeds_do_not_depend_on_output_names(
         saved_rollouts(tmp_path / "first"),
         saved_rollouts(tmp_path / "second"),
     )
+    console = capsys.readouterr().out
+    for record in first:
+        label = f"{record.rollout.task_id} rollout={record.rollout_index}"
+        assert f"[{label}] turn-01: get_plan" in console
+        assert f"[{label}] candidate-01: validated" in console
     assert [(record.model_seed, record.measurement_seed) for record in first] == [
         (record.model_seed, record.measurement_seed) for record in second
     ]

@@ -212,13 +212,20 @@ def policy(
     )
 
 
+@pytest.mark.parametrize("log_label", [None, "job-02a rollout=0"])
 def test_request_goldens(
     evaluator: PlanValidationEvaluator[InspectionExecutor],
+    log_label: str | None,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     transport = ScriptedTransport(
         [reply("evaluate_candidate", '{"action":{"version":1}}'), reply("finish")]
     )
-    policy(transport).search(evaluator)
+    trace = policy(transport).search(evaluator, log_label=log_label)
+    expected_label = evaluator.task.task_id if log_label is None else log_label
+    assert capsys.readouterr().out == f"[{expected_label}] candidate-01: validated\n"
+    if log_label is not None:
+        assert log_label not in trace.model_dump_json()
     # Final combined interface-v6 request bytes, including the committed prompt line break.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()

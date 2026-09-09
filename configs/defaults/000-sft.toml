@@ -41,6 +41,7 @@ plan_only = false
 [data.generation.inference]
 max_tokens = 8192
 reasoning_effort = "medium"
+reasoning_summary = "auto"
 
 [training]
 epochs = 1

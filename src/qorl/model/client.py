@@ -433,7 +433,14 @@ class AstraModelClient:
             ],
             "tool_choice": "required" if request.tools else "none",
             "parallel_tool_calls": False,
-            "reasoning": {"effort": self.inference.reasoning_effort.value},
+            "reasoning": {
+                "effort": self.inference.reasoning_effort.value,
+                **(
+                    {"summary": self.inference.reasoning_summary}
+                    if self.inference.reasoning_summary is not None
+                    else {}
+                ),
+            },
             "max_output_tokens": self.inference.max_tokens,
             "store": False,
             "truncation": "disabled",

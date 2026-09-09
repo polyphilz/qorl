@@ -15,3 +15,4 @@ maximum_delay_seconds = 30.0
 [inference]
 max_tokens = 32768
 reasoning_effort = "medium"
+reasoning_summary = "auto"

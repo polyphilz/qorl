@@ -409,6 +409,7 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     assert config.inference.model_dump() == {
         "max_tokens": 32768,
         "reasoning_effort": "medium",
+        "reasoning_summary": "auto",
     }
 
 
@@ -602,6 +603,7 @@ def test_astra_creation_preserves_preset_inference_without_serving(
     assert document["inference"] == {
         "max_tokens": CUSTOM_ASTRA_MAX_TOKENS,
         "reasoning_effort": "high",
+        "reasoning_summary": "auto",
     }
     assert "resources" not in document
 

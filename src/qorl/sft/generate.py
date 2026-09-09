@@ -137,7 +137,10 @@ def generate_attempt(
                         cancel=stop,
                     )
                 evaluator.start()
-                trace = policy.search(evaluator)
+                trace = policy.search(
+                    evaluator,
+                    log_label=f"{task.task_id} attempt={attempt.attempt_id}",
+                )
                 if isinstance(evaluator, RolloutEvaluator):
                     evaluator.finish(
                         random.Random(attempt.measurement_seed),

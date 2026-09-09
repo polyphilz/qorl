@@ -103,6 +103,25 @@ def astra(preset: ModelPreset, transport: ScriptedTransport) -> AstraModelClient
     return AstraModelClient(preset.model, preset.inference, transport=transport)
 
 
+@pytest.mark.parametrize("summary", [None, "auto"])
+def test_optional_summary_request(
+    preset: ModelPreset, turn: GenerationRequest, summary: str | None
+) -> None:
+    inference = AstraInferenceSettings.model_validate(
+        {"max_tokens": 1024, "reasoning_effort": "medium", "reasoning_summary": summary}
+    )
+    transport = ScriptedTransport([{"input_tokens": PROMPT_TOKENS}, reply()])
+    model = AstraModelClient(preset.model, inference, transport=transport)
+    response = model.generate(turn)
+    expected = {"effort": "medium"}
+    if summary is not None:
+        expected["summary"] = summary
+    assert response.request["reasoning"] == expected
+    assert response.message.reasoning_content is None
+    assert response.message.continuation is not None
+    assert response.message.continuation.output == reply()["output"]
+
+
 def test_preserves_full_responses_output_and_argument_bytes(
     preset: ModelPreset, turn: GenerationRequest
 ) -> None:
@@ -143,7 +162,8 @@ def test_preserves_full_responses_output_and_argument_bytes(
     assert second.request["truncation"] == "disabled"
     assert second.request["parallel_tool_calls"] is False
     assert second.request["tool_choice"] == "required"
-    assert second.request["reasoning"] == {"effort": "medium"}
+    assert second.request["reasoning"] == {"effort": "medium", "summary": "auto"}
+    assert first.message.reasoning_content is None
     for field in (
         "seed",
         "temperature",

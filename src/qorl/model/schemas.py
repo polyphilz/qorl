@@ -97,12 +97,17 @@ class ReasoningEffort(StrEnum):
 
 
 class AstraInferenceSettings(BaseModel):
-    """Astra supports reasoning effort, not custom sampling or thinking-off knobs."""
+    """Astra effort and optional provider-generated summaries, not full reasoning.
+
+    Summaries cannot recover missing reasoning text in previously saved traces.
+    Student thinking settings are independent of these provider options.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_tokens: int = Field(gt=0)
     reasoning_effort: ReasoningEffort
+    reasoning_summary: Literal["auto"] | None = None
 
 
 type InferenceSettings = LocalInferenceSettings | AstraInferenceSettings

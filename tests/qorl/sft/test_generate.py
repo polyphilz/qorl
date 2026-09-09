@@ -101,12 +101,15 @@ def attempts(output: Path) -> list[GenerationAttempt]:
 
 
 @pytest.mark.parametrize("plan_only", [False, True])
+@pytest.mark.parametrize("summary_enabled", [False, True])
 def test_generate_prepare_and_reuse_original_evidence(
     configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
     activity: EvaluationActivity,
     tmp_path: Path,
     plan_only: bool,
+    summary_enabled: bool,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     config, selections = configured
     assert config.data.generation is not None
@@ -115,17 +118,64 @@ def test_generate_prepare_and_reuse_original_evidence(
             "data": config.data.model_copy(
                 update={
                     "generation": config.data.generation.model_copy(
-                        update={"plan_only": plan_only}
+                        update={
+                            "plan_only": plan_only,
+                            "inference": config.data.generation.inference.model_copy(
+                                update={
+                                    "reasoning_summary": "auto"
+                                    if summary_enabled
+                                    else None
+                                }
+                            ),
+                        }
                     )
                 }
             )
         }
     )
+    summary = "PROVIDER SUMMARY: inspect estimates before proposing."
+    encrypted = "OPAQUE ENCRYPTED CONTINUATION"
+    original_request = HttpTransport.request
+
+    def summarized_request(
+        transport: HttpTransport, path: str, body: JsonObject | None = None
+    ) -> JsonObject:
+        response = original_request(transport, path, body)
+        if path == "responses" and summary_enabled:
+            output_items = response["output"]
+            assert isinstance(output_items, list)
+            return {
+                **response,
+                "output": [
+                    {
+                        "type": "reasoning",
+                        "summary": [{"type": "summary_text", "text": summary}],
+                        "encrypted_content": encrypted,
+                    },
+                    *output_items,
+                ],
+            }
+        return response
+
+    monkeypatch.setattr(HttpTransport, "request", summarized_request)
     # Two concurrent conversations each make strictly sequential requests.
     activity.barrier = Barrier(2)
     output = tmp_path / "run"
     report = dataset.prepare_dataset(config, selections, output / "dataset")
     raw = attempts(output / "generation")
+    console = capsys.readouterr().out
+    for attempt in raw:
+        label = f"{attempt.task_id} attempt={attempt.attempt_id}"
+        assert f"[{label}] turn-01: get_plan" in console
+        assert f"[{label}] candidate-01: validated" in console
+        assert attempt.trace is not None
+        assert label not in attempt.trace.model_dump_json()
+    identity = GenerationIdentity.model_validate_json(
+        (output / "generation/identity.json").read_bytes()
+    )
+    assert identity.generation.inference.reasoning_summary == (
+        "auto" if summary_enabled else None
+    )
     assert len(raw) == 2
     assert all(item.status == RunStatus.COMPLETED for item in raw)
     assert all((item.plan_only is not None) == plan_only for item in raw)
@@ -155,6 +205,39 @@ def test_generate_prepare_and_reuse_original_evidence(
         (output / "dataset/training/rendered/000000.json").read_bytes()
     )
     assert len(rendered.requests) == len(record.requests)
+    student = dataset.load_student(config)
+    for index, response in enumerate(saved.trace.model_responses):
+        assert response.message.reasoning_content == (
+            summary if summary_enabled else None
+        )
+        assert response.message.continuation is not None
+        assert response.message.continuation.output == response.raw_response["output"]
+        reasoning = response.request["reasoning"]
+        assert isinstance(reasoning, dict)
+        assert reasoning.get("summary") == ("auto" if summary_enabled else None)
+        assert ("summary" in reasoning) == summary_enabled
+        # Prior provider items are replayed once, without rebuilding summary text.
+        assert json.dumps(response.request["input"]).count(summary) == (
+            index if summary_enabled else 0
+        )
+    for request in rendered.requests:
+        assert encrypted not in request.rendered_text
+        targets = [
+            token
+            for token, mask in zip(
+                request.sample.target_ids, request.sample.loss_mask, strict=True
+            )
+            if mask
+        ]
+        assert (summary in student.tokenizer.decode(targets)) == summary_enabled
+        assert all(
+            not mask or message_index == request.assistant_message_index
+            for mask, message_index in zip(
+                request.sample.loss_mask, request.target_message_indices, strict=True
+            )
+        )
+        message = record.messages[request.assistant_message_index]
+        assert message.reasoning_content == (summary if summary_enabled else None)
     before = len(activity.requests), len(activity.queries)
     assert (
         dataset.prepare_dataset(config, selections, output / "dataset", resume=True)

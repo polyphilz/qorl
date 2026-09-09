@@ -84,9 +84,15 @@ class QoAgentPolicy:
         self.seed = seed
         self.trace: AgentTrace | None = None
 
-    def search(self, evaluator: AgentEvaluator) -> AgentTrace:
+    def search(
+        self,
+        evaluator: AgentEvaluator,
+        *,
+        log_label: str | None = None,
+    ) -> AgentTrace:
         """Retain completed turns and tool results even if the rollout is interrupted."""
         self.trace = None
+        progress_label = evaluator.task.task_id if log_label is None else log_label
         if self.settings.candidate_attempts != evaluator.max_candidates:
             raise ValueError("agent and evaluator candidate limits must agree")
         interface = AgentInterface.from_evaluator(
@@ -200,9 +206,12 @@ class QoAgentPolicy:
                         label = (
                             "validated" if body["constraints_satisfied"] else "invalid"
                         )
-                        print(f"  {body['candidate_id']}: {label}", flush=True)
+                        print(
+                            f"[{progress_label}] {body['candidate_id']}: {label}",
+                            flush=True,
+                        )
                     elif name != ToolName.FINISH:
-                        print(f"  turn-{turn:02d}: {name}", flush=True)
+                        print(f"[{progress_label}] turn-{turn:02d}: {name}", flush=True)
                 if finished:
                     terminal_tool = ToolName(name)
                 evaluator.check_cancelled()

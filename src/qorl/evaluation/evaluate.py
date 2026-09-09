@@ -235,7 +235,10 @@ def evaluate_rollout(
                 cancel=stop,
             )
             evaluator.start()
-            policy_trace = policy.search(evaluator)
+            policy_trace = policy.search(
+                evaluator,
+                log_label=f"{item.task.task_id} rollout={item.rollout_index}",
+            )
             evaluator.finish(
                 random.Random(measurement_seed),
                 selected_candidate_id=policy_trace.selection.selected_candidate_id,
