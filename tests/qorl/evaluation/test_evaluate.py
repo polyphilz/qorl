@@ -11,6 +11,7 @@ import pytest
 import tomli_w
 from tests.qorl.evaluation.conftest import EvaluationActivity
 
+from qorl.agent.types import StopReason
 from qorl.evaluation import evaluate
 from qorl.evaluation.evaluate import summarize_performance
 from qorl.evaluation.schemas import (
@@ -36,12 +37,16 @@ from qorl.measure.schemas import (
     RolloutRecord,
     RunStatus,
 )
-from qorl.model.exceptions import ModelRequestError
+from qorl.model.client import HttpTransport
+from qorl.model.exceptions import ModelRequestError, ModelResponseError
 from qorl.model.schemas import (
     AstraInferenceSettings,
+    JsonObject,
+    ModelPreset,
     ModelProvider,
     ModelSettings,
     ReasoningEffort,
+    TokenUsage,
 )
 from qorl.postgres.config import PostgresConfig
 from qorl.taskset.schemas import BenchmarkId, TaskRole, TaskSelection
@@ -84,6 +89,174 @@ def saved_rollouts(output: Path) -> list[EvaluationRollout]:
         EvaluationRollout.model_validate_json(path.read_bytes())
         for path in sorted((output / "rollouts").glob("*/*.json"))
     ]
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "budget", "missing_usage", "malformed_choices", "invalid_usage"]
+)
+def test_openrouter_dispatch_and_paid_failure_evidence(
+    failure: str | None,
+    openrouter_preset: ModelPreset,
+    tmp_path: Path,
+    activity: EvaluationActivity,
+    evaluation_config: EvaluationExperimentConfig,
+    pool_config: PoolConfig,
+    postgres_config: PostgresConfig,
+    benchmark_task_sets: dict[str, TaskSet],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = HttpTransport.request
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-key")
+
+    def request(
+        transport: HttpTransport, path: str, body: JsonObject | None = None
+    ) -> JsonObject:
+        assert path == "chat/completions"
+        raw = original(transport, path, body)
+        raw["model"] = openrouter_preset.model.name_or_path
+        raw["provider"] = "scripted"
+        if failure == "budget":
+            raw["usage"] = {"prompt_tokens": 999999, "completion_tokens": 5}
+        elif failure == "missing_usage":
+            raw["usage"] = {"completion_tokens": 5}
+        elif failure == "malformed_choices":
+            raw["choices"] = []
+            raw["usage"] = {
+                "prompt_tokens": 100,
+                "completion_tokens": 5,
+                "completion_tokens_details": {"reasoning_tokens": 3},
+                "prompt_tokens_details": {"cached_tokens": 20},
+            }
+        elif failure == "invalid_usage":
+            raw["choices"] = []
+            raw["usage"] = {"prompt_tokens": -1, "completion_tokens": 5}
+        return raw
+
+    monkeypatch.setattr(HttpTransport, "request", request)
+    config = evaluation_config.model_copy(
+        update={
+            "model": openrouter_preset.model,
+            "inference": openrouter_preset.inference,
+            "resources": None,
+        }
+    )
+    output = tmp_path / "openrouter"
+    if failure:
+        with pytest.raises(ModelResponseError):
+            run_evaluation(
+                output, config, pool_config, postgres_config, benchmark_task_sets["job"]
+            )
+        report = EvaluationReport.model_validate_json(
+            (output / "evaluation.json").read_bytes()
+        )
+    else:
+        report = run_evaluation(
+            output, config, pool_config, postgres_config, benchmark_task_sets["job"]
+        )
+    assert not activity.served
+    (record,) = saved_rollouts(output)
+    assert record.trace is not None
+    if failure:
+        assert report.summary.performance.failure_count == 1
+        assert record.rollout.final is None and record.rollout.failure is not None
+        assert not record.trace.tool_events and not record.rollout.candidates
+        assert not record.trace.model_responses
+        (evidence,) = record.trace.model_failures
+        assert evidence.request == activity.requests[0]
+        assert evidence.raw_response["provider"] == "scripted"
+        assert record.trace.usage == evidence.usage
+        assert report.summary.usage == evidence.usage
+        if failure == "invalid_usage":
+            assert evidence.usage == TokenUsage()
+        elif failure == "malformed_choices":
+            assert evidence.usage == TokenUsage(
+                prompt_tokens=100,
+                completion_tokens=5,
+                reasoning_tokens=3,
+                cached_tokens=20,
+            )
+        else:
+            assert record.trace.usage.completion_tokens == 5
+            assert record.trace.usage.prompt_tokens == (
+                999999 if failure == "budget" else None
+            )
+        assert sum("ANALYZE" in query for query in activity.queries) == 2
+    else:
+        assert report.summary.performance.failure_count == 0
+        assert record.rollout.final is not None
+        assert record.rollout.final.kind == OutcomeKind.MEASURED
+        assert len(record.trace.model_responses) == 3
+        assert "model_failures" not in record.trace.model_dump()
+    assert activity.closed == activity.pools and not activity.claimed_workers
+
+
+@pytest.mark.parametrize("empty", [True, False])
+def test_openrouter_output_limit_does_not_abort_scheduled_rollout(
+    empty: bool,
+    openrouter_preset: ModelPreset,
+    tmp_path: Path,
+    activity: EvaluationActivity,
+    evaluation_config: EvaluationExperimentConfig,
+    pool_config: PoolConfig,
+    postgres_config: PostgresConfig,
+    benchmark_task_sets: dict[str, TaskSet],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = HttpTransport.request
+    monkeypatch.setenv("OPENROUTER_API_KEY", "mock-key")
+
+    def request(
+        transport: HttpTransport, path: str, body: JsonObject | None = None
+    ) -> JsonObject:
+        raw = original(transport, path, body)
+        raw["model"] = openrouter_preset.model.name_or_path
+        if len(activity.requests) == 1:
+            choices = raw["choices"]
+            assert isinstance(choices, list) and isinstance(choices[0], dict)
+            choices[0]["finish_reason"] = "length"
+            if empty:
+                choices[0]["message"] = {"role": "assistant", "content": None}
+        return raw
+
+    monkeypatch.setattr(HttpTransport, "request", request)
+    config = evaluation_config.model_copy(
+        update={
+            "model": openrouter_preset.model.model_copy(
+                update={"max_concurrent_requests": 1}
+            ),
+            "inference": openrouter_preset.inference,
+            "resources": None,
+        }
+    )
+    output = tmp_path / "output-limit"
+    report = run_evaluation(
+        output,
+        config,
+        replace(pool_config, workers=pool_config.workers[:1]),
+        postgres_config,
+        benchmark_task_sets["job"],
+        rollouts=2,
+    )
+    first, second = saved_rollouts(output)
+    assert report.status == RunStatus.COMPLETED
+    assert report.summary.performance.failure_count == 0
+    assert report.summary.stop_reason_counts[StopReason.MODEL_OUTPUT_LIMIT] == 1
+    assert first.trace is not None and second.trace is not None
+    assert first.trace.stop_reason == StopReason.MODEL_OUTPUT_LIMIT
+    assert first.trace.model_responses[0].truncated
+    assert not first.trace.tool_events and not first.trace.model_failures
+    assert not first.rollout.candidates and first.rollout.failure is None
+    assert (
+        first.rollout.final is not None
+        and first.rollout.final.kind == OutcomeKind.NO_VALID_CANDIDATE
+    )
+    assert (
+        second.rollout.final is not None
+        and second.rollout.final.kind == OutcomeKind.MEASURED
+    )
+    assert len(second.trace.tool_events) == 3
+    assert sum("ANALYZE" in query for query in activity.queries) == 14
+    assert activity.closed == activity.pools and not activity.claimed_workers
 
 
 @pytest.mark.parametrize(
@@ -506,9 +679,13 @@ def test_created_entrypoint_reaches_evaluation_with_explicit_model_and_split(
         update={
             "agent": config.agent.model_copy(update={"candidate_attempts": attempts}),
             "evaluation": EvaluationSettings(rollouts_per_task=1),
-            "model": config.model
-            if training
-            else config.model.model_copy(update={"adapter_path": adapter}),
+            "model": config.model.model_copy(
+                update={
+                    "context_length": 20_480,
+                    **({} if training else {"adapter_path": adapter}),
+                }
+            ),
+            "inference": config.inference.model_copy(update={"max_tokens": 2048}),
         }
     )
     (directory / "config.toml").write_text(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import runpy
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 import pytest
 
 from qorl.measure.schemas import RolloutRecord
+from qorl.model.schemas import ModelPreset
 from qorl.postgres.config import PostgresConfig
 from qorl.postgres.schemas import PostgresIndexes, PostgresSettings
 from qorl.rl.schemas import RlRolloutRecord
@@ -22,6 +24,17 @@ ROOT = Path(__file__).resolve().parents[1]
 @pytest.fixture(scope="session")
 def repository_root() -> Path:
     return ROOT
+
+
+@pytest.fixture
+def openrouter_preset(repository_root: Path) -> ModelPreset:
+    return ModelPreset.model_validate(
+        tomllib.loads(
+            (
+                repository_root / "configs/defaults/models/000-qwen3.8-2.4t-a95b.toml"
+            ).read_text()
+        )
+    )
 
 
 @pytest.fixture(scope="session")

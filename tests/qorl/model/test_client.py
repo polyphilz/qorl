@@ -66,7 +66,14 @@ def config() -> EvaluationExperimentConfig:
     result = load_config(latest_template(ExperimentMethod.EVAL))
     assert isinstance(result, EvaluationExperimentConfig)
     return result.model_copy(
-        update={"model": result.model.model_copy(update={"name_or_path": "test-model"})}
+        update={
+            "model": result.model.model_copy(
+                update={"name_or_path": "test-model", "context_length": CONTEXT_LENGTH}
+            ),
+            "inference": result.inference.model_copy(
+                update={"max_tokens": OUTPUT_TOKENS}
+            ),
+        }
     )
 
 

@@ -1,0 +1,20 @@
+[model]
+provider = "openrouter"
+name_or_path = "qwen/qwen3.8-2.4t-a95b"
+context_length = 1000000
+base_url = "https://openrouter.ai/api/v1"
+request_timeout_seconds = 600
+api_key_env = "OPENROUTER_API_KEY"
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[inference]
+max_tokens = 32768
+temperature = 1.0
+top_p = 0.95
+top_k = 20
+reasoning_effort = "medium"

@@ -272,16 +272,26 @@ def configure(
             update={"data": EvaluationData(test=selected.inputs[TaskRole.TEST])}
         )
     if not isinstance(config, CalibrationExperimentConfig):
-        if request.model_provider == ModelProvider.OPENAI:
+        if request.model_provider != ModelProvider.LOCAL:
             if request.method != ExperimentMethod.EVAL:
                 raise ValueError(
                     "hosted base models are only valid for standalone evaluation"
                 )
-            if request.base_model_name_or_path != "gpt-6-astra":
-                raise ValueError("hosted evaluation supports only gpt-6-astra")
-            preset_path = latest_config(
-                DEFAULTS_DIRECTORY / "models", request.base_model_name_or_path
+            presets = {
+                (ModelProvider.OPENAI, "gpt-6-astra"): "gpt-6-astra",
+                (
+                    ModelProvider.OPENROUTER,
+                    "qwen/qwen3.8-2.4t-a95b",
+                ): "qwen3.8-2.4t-a95b",
+            }
+            preset_name = presets.get(
+                (request.model_provider, request.base_model_name_or_path or "")
             )
+            if preset_name is None:
+                raise ValueError(
+                    f"unsupported hosted provider/model: {request.model_provider.value}/{request.base_model_name_or_path}"
+                )
+            preset_path = latest_config(DEFAULTS_DIRECTORY / "models", preset_name)
             preset = ModelPreset.model_validate(tomllib.loads(preset_path.read_text()))
             if (
                 preset.model.provider != request.model_provider

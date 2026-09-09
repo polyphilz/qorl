@@ -16,7 +16,7 @@ from qorl.measure.schemas import (
 )
 from qorl.measure.timeouts import seconds_to_ms
 from qorl.measure.validation import PlanValidationEvaluator
-from qorl.model.client import AstraModelClient, ModelClient
+from qorl.model.client import ModelClient, model_client
 from qorl.model.schemas import ModelSettings
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
@@ -258,7 +258,7 @@ def generate_dataset(
             "configure data.generation.model and generations_per_task before preparation"
         )
     model = generation.model
-    client = AstraModelClient(model, generation.inference)
+    client = model_client(model, generation.inference)
     postgres = PostgresConfig.load(config.postgres.path)
     pool_config = load_pool_config(config.pool.path)
     selected = {

@@ -17,7 +17,7 @@ from qorl.agent.types import (
     ToolName,
 )
 from qorl.model.client import JSON_OBJECT, ModelClient
-from qorl.model.exceptions import ContextBudgetError
+from qorl.model.exceptions import ContextBudgetError, ModelResponseError
 from qorl.model.schemas import (
     GenerationRequest,
     Message,
@@ -132,6 +132,15 @@ class QoAgentPolicy:
                 trace.stop_reason = StopReason.CONTEXT_BUDGET
                 trace.prompt_tokens = error.prompt_tokens
                 break
+            except ModelResponseError as error:
+                trace.model_failures.append(error.evidence)
+                trace.usage = total_usage(
+                    [
+                        *(item.usage for item in trace.model_responses),
+                        error.evidence.usage,
+                    ]
+                )
+                raise
             trace.model_responses.append(response)
             trace.transcript.append(response.message)
             trace.usage = total_usage([item.usage for item in trace.model_responses])

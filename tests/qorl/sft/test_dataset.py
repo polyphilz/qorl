@@ -304,6 +304,7 @@ def experiment(
     config = config.model_copy(
         update={
             "model": config.model.model_copy(update={"context_length": CONTEXT_LENGTH}),
+            "inference": config.inference.model_copy(update={"max_tokens": 2048}),
             "training": config.training.model_copy(
                 update={"renderer": Qwen3RendererConfig()}
             ),

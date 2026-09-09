@@ -27,10 +27,12 @@ from qorl.measure.schemas import (
     SelectionState,
 )
 from qorl.model.schemas import (
+    OPENROUTER_MODEL_ID,
     AstraInferenceSettings,
     Message,
     ModelProvider,
     ModelSettings,
+    OpenRouterInferenceSettings,
     ToolDefinition,
 )
 from qorl.plans.fingerprint import PLAN_FINGERPRINT_VERSION
@@ -47,6 +49,7 @@ type JsonObject = dict[str, JsonValue]
 JSON_OBJECT_ADAPTER: TypeAdapter[JsonObject] = TypeAdapter(JsonObject)
 GENERATOR_MODELS = {
     ModelProvider.OPENAI: "gpt-6-astra",
+    ModelProvider.OPENROUTER: OPENROUTER_MODEL_ID,
 }
 
 
@@ -88,7 +91,7 @@ class GenerationSettings(BaseModel):
 
     model: ModelSettings | Literal["FILL_ME_IN"]
     generations_per_task: Annotated[int, Field(ge=1)] | Literal["FILL_ME_IN"]
-    inference: AstraInferenceSettings
+    inference: AstraInferenceSettings | OpenRouterInferenceSettings
     plan_only: bool = False
 
     @model_validator(mode="after")
@@ -96,9 +99,17 @@ class GenerationSettings(BaseModel):
         """Generation uses a hosted model, never the trainee or a local adapter."""
         if isinstance(self.model, ModelSettings):
             if self.model.provider == ModelProvider.LOCAL:
-                raise ValueError("SFT generation requires GPT-6 Astra through OpenAI")
+                raise ValueError("SFT generation requires a supported hosted teacher")
             if self.model.name_or_path != GENERATOR_MODELS[self.model.provider]:
-                raise ValueError("SFT generation supports only GPT-6 Astra")
+                raise ValueError(
+                    "SFT generation supports only GPT-6 Astra or the configured OpenRouter Qwen"
+                )
+            if self.model.provider == ModelProvider.OPENROUTER:
+                if not isinstance(self.inference, OpenRouterInferenceSettings):
+                    raise ValueError("OpenRouter teacher requires OpenRouter inference")
+                self.inference.validate_model(self.model)
+            elif not isinstance(self.inference, AstraInferenceSettings):
+                raise ValueError("Astra teacher requires Astra inference")
             if self.model.revision is not None or self.model.adapter_path is not None:
                 raise ValueError(
                     "hosted generators do not accept revisions or adapters"

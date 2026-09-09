@@ -15,6 +15,12 @@ type JsonObject = dict[str, JsonValue]
 class ModelProvider(StrEnum):
     LOCAL = "local"
     OPENAI = "openai"
+    OPENROUTER = "openrouter"
+
+
+OPENROUTER_MODEL_ID = "qwen/qwen3.8-2.4t-a95b"
+OPENROUTER_CONTEXT_LIMIT = 1_000_000
+OPENROUTER_OUTPUT_LIMIT = 131_072
 
 
 class RetrySettings(BaseModel):
@@ -110,7 +116,45 @@ class AstraInferenceSettings(BaseModel):
     reasoning_summary: Literal["auto"] | None = None
 
 
-type InferenceSettings = LocalInferenceSettings | AstraInferenceSettings
+class OpenRouterInferenceSettings(BaseModel):
+    """Qwen requires reasoning; these are the supported effort levels."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    max_tokens: int = Field(gt=0, le=OPENROUTER_OUTPUT_LIMIT)
+    temperature: float = Field(ge=0, le=2)
+    top_p: float = Field(gt=0, le=1)
+    top_k: int = Field(ge=0)
+    reasoning_effort: Literal[
+        ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.XHIGH
+    ]
+
+    def validate_model(self, model: ModelSettings) -> None:
+        """Apply the same hosted identity/capacity contract in configs and clients."""
+        if (
+            model.provider != ModelProvider.OPENROUTER
+            or model.name_or_path != OPENROUTER_MODEL_ID
+        ):
+            raise ValueError(f"OpenRouter supports only {OPENROUTER_MODEL_ID}")
+        if model.adapter_path is not None or model.revision is not None:
+            raise ValueError("hosted models do not accept revisions or adapters")
+        if (
+            not model.base_url
+            or not model.request_timeout_seconds
+            or not model.api_key_env
+        ):
+            raise ValueError(
+                "hosted models require base_url, request_timeout_seconds, and api_key_env"
+            )
+        if model.context_length > OPENROUTER_CONTEXT_LIMIT:
+            raise ValueError("model.context_length exceeds OpenRouter model capacity")
+        if self.max_tokens > model.context_length:
+            raise ValueError("inference.max_tokens exceeds model.context_length")
+
+
+type InferenceSettings = (
+    LocalInferenceSettings | AstraInferenceSettings | OpenRouterInferenceSettings
+)
 
 
 class ModelPreset(BaseModel):
@@ -155,6 +199,15 @@ class ResponsesContinuation(BaseModel):
     output: list[JsonObject]
 
 
+class OpenRouterContinuation(BaseModel):
+    """Provider-owned reasoning blocks; replay without converting or stripping keys."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str
+    reasoning_details: list[JsonObject] | None
+
+
 class Message(BaseModel):
     """Text/tool conversation shared with the agent and local chat template."""
 
@@ -166,7 +219,7 @@ class Message(BaseModel):
     tool_call_id: str | None = None
     name: str | None = None
     reasoning_content: str | None = None
-    continuation: ResponsesContinuation | None = None
+    continuation: ResponsesContinuation | OpenRouterContinuation | None = None
 
 
 class ToolFunction(BaseModel):
@@ -218,6 +271,17 @@ class GenerationResponse(BaseModel):
     requested_max_tokens: int = Field(gt=0)
     request: JsonObject
     raw_response: JsonObject
+
+
+class ModelResponseFailure(BaseModel):
+    """A received reply that cannot be used, retained before propagating failure."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request: JsonObject
+    raw_response: JsonObject
+    error: str
+    usage: TokenUsage = TokenUsage()
 
 
 class AdvertisedModel(BaseModel):
@@ -310,6 +374,28 @@ class ChatResponse(BaseModel):
 
     choices: list[ChatChoice] = Field(min_length=1, max_length=1)
     usage: ChatUsage | None = None
+
+
+class OpenRouterMessage(ChatMessage):
+    reasoning_details: list[JsonObject] | None = None
+
+
+class OpenRouterChoice(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    message: OpenRouterMessage
+    finish_reason: str
+    error: JsonObject | None = None
+
+
+class OpenRouterReply(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    model: str = Field(min_length=1)
+    provider: str | None = None
+    choices: list[OpenRouterChoice] = Field(min_length=1, max_length=1)
+    usage: ChatUsage | None = None
+    error: JsonObject | None = None
 
 
 class InputTokenCount(BaseModel):

@@ -170,7 +170,10 @@ def evaluation_config() -> EvaluationExperimentConfig:
     assert isinstance(config, EvaluationExperimentConfig)
     return config.model_copy(
         update={
-            "model": config.model.model_copy(update={"name_or_path": "example/base"})
+            "model": config.model.model_copy(
+                update={"name_or_path": "example/base", "context_length": 20_480}
+            ),
+            "inference": config.inference.model_copy(update={"max_tokens": 2048}),
         }
     )
 

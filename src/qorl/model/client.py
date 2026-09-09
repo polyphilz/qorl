@@ -1,4 +1,4 @@
-"""Local and Astra tool calling, exact input budgets, and bounded HTTP retries."""
+"""Local and hosted tool calling, provider-aware budgets, and bounded HTTP retries."""
 
 import json
 import math
@@ -25,6 +25,7 @@ from qorl.model.exceptions import (
     ContextBudgetError,
     ModelError,
     ModelRequestError,
+    ModelResponseError,
     TransientModelError,
 )
 from qorl.model.schemas import (
@@ -43,7 +44,11 @@ from qorl.model.schemas import (
     MessageRole,
     ModelList,
     ModelProvider,
+    ModelResponseFailure,
     ModelSettings,
+    OpenRouterContinuation,
+    OpenRouterInferenceSettings,
+    OpenRouterReply,
     ResponseItem,
     ResponsesContinuation,
     ResponsesReply,
@@ -392,6 +397,8 @@ class AstraModelClient:
         inputs: list[JsonValue] = []
         for message in request.messages:
             if message.continuation is not None:
+                if not isinstance(message.continuation, ResponsesContinuation):
+                    raise ModelError("OpenRouter continuation cannot be sent to Astra")
                 if (
                     message.role != MessageRole.ASSISTANT
                     or message.continuation.model != self.model.name_or_path
@@ -542,6 +549,178 @@ class AstraModelClient:
         )
 
 
+class OpenRouterModelClient:
+    """Chat tool calls with native post-generation usage, never estimated preflight."""
+
+    def __init__(
+        self,
+        model: ModelSettings,
+        inference: OpenRouterInferenceSettings,
+        *,
+        transport: ModelTransport | None = None,
+    ) -> None:
+        inference.validate_model(model)
+        self.model = model
+        self.inference = inference
+        self.transport = transport or HttpTransport(model)
+
+    def request_body(self, request: GenerationRequest) -> JsonObject:
+        messages: list[JsonValue] = []
+        for message in request.messages:
+            continuation = message.continuation
+            if continuation is not None and (
+                not isinstance(continuation, OpenRouterContinuation)
+                or continuation.model != self.model.name_or_path
+                or message.role != MessageRole.ASSISTANT
+            ):
+                raise ModelError(
+                    "OpenRouter continuation belongs to another provider, model or role"
+                )
+            if message.role == MessageRole.ASSISTANT and continuation is None:
+                raise ModelError(
+                    "OpenRouter assistant history requires its original continuation"
+                )
+            if message.role == MessageRole.TOOL and (
+                message.tool_call_id is None or message.content is None
+            ):
+                raise ModelError("tool results require a call ID and content")
+            item = JSON_OBJECT.validate_python(
+                message.model_dump(
+                    mode="json",
+                    exclude_none=True,
+                    exclude={"continuation", "reasoning_content"},
+                )
+            )
+            if message.content is None:
+                item["content"] = None
+            if isinstance(continuation, OpenRouterContinuation):
+                if continuation.reasoning_details is not None:
+                    item["reasoning_details"] = [*continuation.reasoning_details]
+                if (
+                    not continuation.reasoning_details
+                    and message.reasoning_content is not None
+                ):
+                    item["reasoning"] = message.reasoning_content
+            messages.append(item)
+        body: JsonObject = {
+            "model": self.model.name_or_path,
+            "messages": messages,
+            "tools": [
+                JSON_OBJECT.validate_python(tool.model_dump(mode="json"))
+                for tool in request.tools
+            ],
+            "tool_choice": "auto" if request.tools else "none",
+            "max_tokens": self.inference.max_tokens,
+            "temperature": self.inference.temperature,
+            "top_p": self.inference.top_p,
+            "top_k": self.inference.top_k,
+            "reasoning": {"effort": self.inference.reasoning_effort, "exclude": False},
+            "plugins": [{"id": "context-compression", "enabled": False}],
+            "provider": {"require_parameters": True},
+            "stream": False,
+        }
+        if request.seed is not None:
+            body["seed"] = request.seed
+        return body
+
+    def generate(self, request: GenerationRequest) -> GenerationResponse:
+        """Reject unusable replies before tools run; this cannot avoid their API cost."""
+        body = self.request_body(request)
+        raw = self.transport.request("chat/completions", body)
+        usage = TokenUsage()
+        try:
+            try:
+                native_usage = (
+                    ChatUsage.model_validate(raw["usage"], strict=True)
+                    if raw.get("usage") is not None
+                    else None
+                )
+            except ValidationError:
+                raise ModelError("OpenRouter returned invalid usage") from None
+            if native_usage is not None:
+                usage = TokenUsage(
+                    prompt_tokens=native_usage.prompt_tokens,
+                    completion_tokens=native_usage.completion_tokens,
+                    reasoning_tokens=native_usage.completion_tokens_details.reasoning_tokens
+                    if native_usage.completion_tokens_details
+                    else None,
+                    cached_tokens=native_usage.prompt_tokens_details.cached_tokens
+                    if native_usage.prompt_tokens_details
+                    else None,
+                )
+            try:
+                reply = OpenRouterReply.model_validate(raw)
+            except ValidationError:
+                raise ModelError("OpenRouter returned an invalid chat reply") from None
+            choice = reply.choices[0]
+            if reply.error is not None or choice.error is not None:
+                raise ModelError("OpenRouter returned a provider error")
+            if reply.model != self.model.name_or_path:
+                raise ModelError("OpenRouter returned a different model than requested")
+            if choice.message.role != MessageRole.ASSISTANT:
+                raise ModelError("OpenRouter returned a non-assistant message")
+            if choice.finish_reason not in {"stop", "tool_calls", "length"}:
+                raise ModelError("OpenRouter completion did not finish successfully")
+            if usage.prompt_tokens is None:
+                raise ModelError(
+                    "OpenRouter omitted prompt usage; context budget cannot be checked"
+                )
+            if (
+                usage.prompt_tokens + self.inference.max_tokens
+                > self.model.context_length
+            ):
+                raise ModelError(
+                    f"OpenRouter post-generation context budget exceeded: prompt={usage.prompt_tokens} completion={self.inference.max_tokens} context={self.model.context_length}"
+                )
+            message = choice.message
+            reasoning = message.reasoning or message.reasoning_content
+            if not reasoning and message.reasoning_details:
+                parts: list[str] = []
+                for detail in message.reasoning_details:
+                    value = (
+                        detail.get("text")
+                        if detail.get("type") == "reasoning.text"
+                        else detail.get("summary")
+                        if detail.get("type") == "reasoning.summary"
+                        else None
+                    )
+                    if isinstance(value, str):
+                        parts.append(value)
+                reasoning = "".join(parts) or None
+            if (
+                choice.finish_reason != "length"
+                and not message.content
+                and not reasoning
+                and not message.tool_calls
+            ):
+                raise ModelError("OpenRouter returned an empty assistant response")
+            return GenerationResponse(
+                message=Message(
+                    role=MessageRole.ASSISTANT,
+                    content=message.content,
+                    tool_calls=message.tool_calls,
+                    reasoning_content=reasoning,
+                    continuation=OpenRouterContinuation(
+                        model=self.model.name_or_path,
+                        reasoning_details=message.reasoning_details,
+                    ),
+                ),
+                usage=usage,
+                finish_reason=choice.finish_reason,
+                truncated=choice.finish_reason == "length",
+                prompt_tokens=usage.prompt_tokens,
+                requested_max_tokens=self.inference.max_tokens,
+                request=body,
+                raw_response=raw,
+            )
+        except ModelError as error:
+            raise ModelResponseError(
+                ModelResponseFailure(
+                    request=body, raw_response=raw, error=str(error), usage=usage
+                )
+            ) from None
+
+
 def model_client(model: ModelSettings, inference: InferenceSettings) -> ModelClient:
     """Select a supported connection without starting a server or making an API call."""
     if model.provider == ModelProvider.LOCAL and isinstance(
@@ -552,4 +731,8 @@ def model_client(model: ModelSettings, inference: InferenceSettings) -> ModelCli
         inference, AstraInferenceSettings
     ):
         return AstraModelClient(model, inference)
+    if model.provider == ModelProvider.OPENROUTER and isinstance(
+        inference, OpenRouterInferenceSettings
+    ):
+        return OpenRouterModelClient(model, inference)
     raise ValueError("inference settings do not match the model provider")

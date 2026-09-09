@@ -17,6 +17,7 @@ from qorl.model.schemas import (
     LocalInferenceSettings,
     ModelProvider,
     ModelSettings,
+    OpenRouterInferenceSettings,
 )
 from qorl.rl.schemas import RlSettings, RlTrainingSettings
 from qorl.sft.schemas import (
@@ -196,6 +197,14 @@ class ModelExperimentConfig(BaseExperimentConfig):
                 )
             if self.resources.serving_gpu_ids is None:
                 raise ValueError("local serving requires resources.serving_gpu_ids")
+        elif self.model.provider == ModelProvider.OPENROUTER:
+            if self.resources is not None or not isinstance(
+                self.inference, OpenRouterInferenceSettings
+            ):
+                raise ValueError(
+                    "OpenRouter evaluation requires OpenRouter inference without local resources"
+                )
+            self.inference.validate_model(self.model)
         else:
             if self.resources is not None or not isinstance(
                 self.inference, AstraInferenceSettings

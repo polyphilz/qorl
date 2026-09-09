@@ -1,5 +1,7 @@
 """Errors raised by model connections and context-budget checks."""
 
+from qorl.model.schemas import ModelResponseFailure
+
 
 class ModelError(RuntimeError):
     """The model request failed independently of the agent's plan decision."""
@@ -7,6 +9,14 @@ class ModelError(RuntimeError):
 
 class ModelRequestError(ModelError):
     """A non-rate-limit client error; retrying the same request cannot fix it."""
+
+
+class ModelResponseError(ModelError):
+    """A completed HTTP exchange failed validation; preserve its paid evidence."""
+
+    def __init__(self, evidence: ModelResponseFailure) -> None:
+        self.evidence = evidence
+        super().__init__(evidence.error)
 
 
 class TransientModelError(ModelError):

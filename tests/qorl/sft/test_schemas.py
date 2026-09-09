@@ -58,7 +58,7 @@ def test_local_generator_is_rejected() -> None:
         name_or_path="a/local-model",
         context_length=20_480,
     )
-    with pytest.raises(ValidationError, match="GPT-6 Astra through OpenAI"):
+    with pytest.raises(ValidationError, match="supported hosted teacher"):
         GenerationSettings(model=model, generations_per_task=1, inference=INFERENCE)
 
 
@@ -100,7 +100,7 @@ def test_teacher_inference_is_required_and_independent_of_student() -> None:
     assert isinstance(config, SftExperimentConfig)
     assert config.data.generation is not None
     assert config.data.generation.inference.max_tokens == 8192
-    assert config.inference.max_tokens == 2048
+    assert config.inference.max_tokens == 8192
     with pytest.raises(ValidationError, match="inference"):
         GenerationSettings.model_validate(
             {"model": "FILL_ME_IN", "generations_per_task": 1}

@@ -8,6 +8,7 @@ from qorl.cli import parser
 from qorl.experiment import create
 from qorl.experiment.schemas import (
     CalibrationExperimentConfig,
+    EvaluationExperimentConfig,
     RunRequest,
     RunStage,
     load_config,
@@ -76,7 +77,9 @@ def test_running_requires_an_explicit_stage() -> None:
     assert error.value.code == 2
 
 
+@pytest.mark.parametrize("openrouter", [False, True])
 def test_experiment_create_cli_writes_files_without_running(
+    openrouter: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -93,7 +96,17 @@ def test_experiment_create_cli_writes_files_without_running(
             "--name",
             "small-calibration",
             "--method",
-            "calibrate",
+            "eval" if openrouter else "calibrate",
+            *(
+                [
+                    "--model-provider",
+                    "openrouter",
+                    "--base-model-name-or-path",
+                    "qwen/qwen3.8-2.4t-a95b",
+                ]
+                if openrouter
+                else []
+            ),
             "--tasksets",
             "test=ceb[2a:1]",
             "--seed",
@@ -107,7 +120,12 @@ def test_experiment_create_cli_writes_files_without_running(
     assert cli.main() == 0
     directory = tmp_path / "experiments/000-small-calibration"
     config = load_config(directory / "config.toml")
-    assert isinstance(config, CalibrationExperimentConfig)
+    if openrouter:
+        assert isinstance(config, EvaluationExperimentConfig)
+        assert config.model.provider.value == "openrouter"
+        assert config.model.name_or_path == "qwen/qwen3.8-2.4t-a95b"
+    else:
+        assert isinstance(config, CalibrationExperimentConfig)
     assert config.experiment.seed == 123
     assert "experiment created" in capsys.readouterr().out
     execute.assert_not_called()

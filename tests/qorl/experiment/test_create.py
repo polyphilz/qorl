@@ -382,6 +382,7 @@ def test_adapter_only_directory_is_not_a_model(
     "provider,model",
     [
         (ModelProvider.OPENAI, "gpt-6-astra"),
+        (ModelProvider.OPENROUTER, "qwen/qwen3.8-2.4t-a95b"),
     ],
 )
 def test_hosted_evaluation_does_not_copy_local_knobs(
@@ -402,15 +403,30 @@ def test_hosted_evaluation_does_not_copy_local_knobs(
     config = load_config(directory / "config.toml")
     assert isinstance(config, EvaluationExperimentConfig)
     assert config.model.provider == provider
-    assert config.model.base_url == "https://api.openai.com/v1"
+    openrouter = provider == ModelProvider.OPENROUTER
+    assert config.model.base_url == (
+        "https://openrouter.ai/api/v1" if openrouter else "https://api.openai.com/v1"
+    )
     assert config.model.request_timeout_seconds == 600
-    assert config.model.api_key_env == "OPENAI_API_KEY"
+    assert config.model.api_key_env == (
+        "OPENROUTER_API_KEY" if openrouter else "OPENAI_API_KEY"
+    )
     assert config.resources is None
-    assert config.inference.model_dump() == {
-        "max_tokens": 32768,
-        "reasoning_effort": "medium",
-        "reasoning_summary": "auto",
-    }
+    assert config.inference.model_dump() == (
+        {
+            "max_tokens": 32768,
+            "reasoning_effort": "medium",
+            "temperature": 1.0,
+            "top_p": 0.95,
+            "top_k": 20,
+        }
+        if openrouter
+        else {
+            "max_tokens": 32768,
+            "reasoning_effort": "medium",
+            "reasoning_summary": "auto",
+        }
+    )
 
 
 def test_creation_preserves_model_api_settings(creation_request: CreateRequest) -> None:

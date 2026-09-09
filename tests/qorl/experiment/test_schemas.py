@@ -26,7 +26,69 @@ from qorl.experiment.schemas import (
     SftExperimentConfig,
     load_config,
 )
+from qorl.model.schemas import JsonObject, ModelPreset, OpenRouterInferenceSettings
+from qorl.sft.schemas import GenerationSettings
 from qorl.training.schemas import CheckpointSettings, OptimizerSettings
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"model": {"name_or_path": "qwen/max"}},
+        {"model": {"context_length": 1000001}},
+        {"model": {"context_length": 100}},
+        {"model": {"revision": "abc"}},
+        {"model": {"adapter_path": "/tmp/adapter"}},
+        {"model": {"api_key_env": None}},
+        {"model": {"provider": "openai"}},
+        {"inference": {"max_tokens": 100, "reasoning_effort": "medium"}},
+        {"resources": {"serving_gpu_ids": [0]}},
+    ],
+)
+def test_openrouter_configuration_rejections(
+    openrouter_preset: ModelPreset, change: JsonObject
+) -> None:
+    template = load_config(latest_template(ExperimentMethod.EVAL))
+    document = template.model_dump(mode="json")
+    document.update(
+        model=openrouter_preset.model.model_dump(mode="json"),
+        inference=openrouter_preset.inference.model_dump(mode="json"),
+        resources=None,
+    )
+    for key, value in change.items():
+        if key == "model":
+            assert isinstance(value, dict)
+            document[key].update(value)
+        else:
+            document[key] = value
+    with pytest.raises(ValidationError):
+        type(template).model_validate(document)
+
+
+def test_openrouter_teacher_separate_from_local_training(
+    openrouter_preset: ModelPreset,
+) -> None:
+    assert isinstance(openrouter_preset.inference, OpenRouterInferenceSettings)
+    generation = GenerationSettings(
+        model=openrouter_preset.model,
+        inference=openrouter_preset.inference,
+        generations_per_task=1,
+    )
+    assert (
+        GenerationSettings.model_validate_json(generation.model_dump_json())
+        == generation
+    )
+    for method in (ExperimentMethod.SFT, ExperimentMethod.RL):
+        template = load_config(latest_template(method))
+        with pytest.raises(ValidationError):
+            type(template).model_validate(
+                {
+                    **template.model_dump(),
+                    "model": openrouter_preset.model,
+                    "inference": openrouter_preset.inference,
+                    "resources": None,
+                }
+            )
 
 
 @pytest.mark.parametrize("method", list(ExperimentMethod))

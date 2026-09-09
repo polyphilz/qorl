@@ -25,7 +25,10 @@ from qorl.model.schemas import (
     AstraInferenceSettings,
     JsonObject,
     ModelPreset,
+    OpenRouterContinuation,
+    OpenRouterInferenceSettings,
     ReasoningEffort,
+    ResponsesContinuation,
 )
 from qorl.sft import dataset, generate
 from qorl.sft.schemas import (
@@ -102,25 +105,44 @@ def attempts(output: Path) -> list[GenerationAttempt]:
 
 @pytest.mark.parametrize("plan_only", [False, True])
 @pytest.mark.parametrize("summary_enabled", [False, True])
+@pytest.mark.parametrize("openrouter", [False, True])
 def test_generate_prepare_and_reuse_original_evidence(
     configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
     activity: EvaluationActivity,
     tmp_path: Path,
     plan_only: bool,
     summary_enabled: bool,
+    openrouter: bool,
+    openrouter_preset: ModelPreset,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     config, selections = configured
     assert config.data.generation is not None
+    generation = config.data.generation
+    if openrouter:
+        monkeypatch.setenv("OPENROUTER_API_KEY", "mock-key")
+        assert isinstance(openrouter_preset.inference, OpenRouterInferenceSettings)
+        generation = generation.model_copy(
+            update={
+                "model": openrouter_preset.model.model_copy(
+                    update={"max_concurrent_requests": 2}
+                ),
+                "inference": openrouter_preset.inference.model_copy(
+                    update={"max_tokens": 1024}
+                ),
+            }
+        )
     config = config.model_copy(
         update={
             "data": config.data.model_copy(
                 update={
-                    "generation": config.data.generation.model_copy(
+                    "generation": generation.model_copy(
                         update={
                             "plan_only": plan_only,
-                            "inference": config.data.generation.inference.model_copy(
+                            "inference": generation.inference
+                            if openrouter
+                            else generation.inference.model_copy(
                                 update={
                                     "reasoning_summary": "auto"
                                     if summary_enabled
@@ -141,6 +163,29 @@ def test_generate_prepare_and_reuse_original_evidence(
         transport: HttpTransport, path: str, body: JsonObject | None = None
     ) -> JsonObject:
         response = original_request(transport, path, body)
+        if openrouter:
+            assert path == "chat/completions"
+            choices = response["choices"]
+            assert isinstance(choices, list) and isinstance(choices[0], dict)
+            message = choices[0]["message"]
+            assert isinstance(message, dict)
+            message["reasoning"] = summary if summary_enabled else ""
+            message["reasoning_details"] = [
+                {
+                    "type": "reasoning.encrypted",
+                    "data": encrypted,
+                },
+                *(
+                    [{"type": "reasoning.text", "text": summary}]
+                    if summary_enabled
+                    else []
+                ),
+            ]
+            return {
+                **response,
+                "model": openrouter_preset.model.name_or_path,
+                "provider": "scripted",
+            }
         if path == "responses" and summary_enabled:
             output_items = response["output"]
             assert isinstance(output_items, list)
@@ -173,9 +218,14 @@ def test_generate_prepare_and_reuse_original_evidence(
     identity = GenerationIdentity.model_validate_json(
         (output / "generation/identity.json").read_bytes()
     )
-    assert identity.generation.inference.reasoning_summary == (
-        "auto" if summary_enabled else None
-    )
+    if openrouter:
+        assert identity.generation.inference == generation.inference
+        assert identity.generation.model == generation.model
+    else:
+        assert isinstance(identity.generation.inference, AstraInferenceSettings)
+        assert identity.generation.inference.reasoning_summary == (
+            "auto" if summary_enabled else None
+        )
     assert len(raw) == 2
     assert all(item.status == RunStatus.COMPLETED for item in raw)
     assert all((item.plan_only is not None) == plan_only for item in raw)
@@ -210,7 +260,17 @@ def test_generate_prepare_and_reuse_original_evidence(
         assert response.message.reasoning_content == (
             summary if summary_enabled else None
         )
-        assert response.message.continuation is not None
+        if openrouter:
+            assert isinstance(response.message.continuation, OpenRouterContinuation)
+            assert (
+                response.message.continuation.model
+                == openrouter_preset.model.name_or_path
+            )
+            assert json.dumps(response.request["messages"]).count(summary) == (
+                index if summary_enabled else 0
+            )
+            continue
+        assert isinstance(response.message.continuation, ResponsesContinuation)
         assert response.message.continuation.output == response.raw_response["output"]
         reasoning = response.request["reasoning"]
         assert isinstance(reasoning, dict)

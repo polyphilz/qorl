@@ -11,6 +11,7 @@ from qorl.model.schemas import (
     GenerationResponse,
     JsonObject,
     Message,
+    ModelResponseFailure,
     TokenUsage,
     ToolDefinition,
 )
@@ -179,3 +180,6 @@ class AgentTrace(BaseModel):
     tool_events: list[ToolEvent] = Field(default_factory=list[ToolEvent])
     usage: TokenUsage = TokenUsage()
     prompt_tokens: int | None = None
+    model_failures: list[ModelResponseFailure] = Field(
+        default_factory=list[ModelResponseFailure], exclude_if=lambda value: not value
+    )
