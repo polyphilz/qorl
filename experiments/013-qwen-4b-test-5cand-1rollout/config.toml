@@ -1,0 +1,75 @@
+[experiment]
+name = "qwen-4b-test-5cand-1rollout"
+method = "eval"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
+
+[pool]
+path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
+
+[model]
+provider = "local"
+name_or_path = "empero-ai/Qwen3.8-4B-Distill"
+context_length = 32768
+revision = "c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e"
+base_url = "http://127.0.0.1:8000/v1"
+request_timeout_seconds = 300
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[agent]
+candidate_attempts = 5
+maximum_model_turns = 64
+inspection_turns_per_alias = 3
+
+[evaluation]
+rollouts_per_task = 1
+
+[measurement]
+default_warmups = 1
+default_measurements = 1
+candidate_feedback_warmups = 1
+candidate_feedback_measurements = 1
+paired_warmups = 1
+paired_measurements = 3
+default_timeout_seconds = 300.0
+candidate_timeout_floor_seconds = 5.0
+candidate_timeout_multiplier = 3.0
+
+[inference]
+max_tokens = 8192
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repetition_penalty = 1.0
+thinking = true
+
+[inference.serving]
+host = "127.0.0.1"
+port = 8000
+dtype = "bfloat16"
+tool_call_parser = "qwen3_coder"
+reasoning_parser = "qwen3"
+max_num_seqs = 4
+gpu_memory_utilization = 0.9
+enable_prefix_caching = true
+use_flashinfer_sampler = false
+startup_timeout_seconds = 600
+
+[resources]
+serving_gpu_ids = [
+    0,
+]
+
+[data.test]
+file = "test-tasks.json"
+selection_seed = 42
+expression = "test=job[01:1,02:1,03:1,04:1,05:1,06:1,07:1,08:1,09:1,10:1]"
