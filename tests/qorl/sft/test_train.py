@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 import pytest
+import tomli_w
 import torch
 from prime_rl.configs.sft import SFTConfig
 from prime_rl.configs.trainer import CosineSchedulerConfig
@@ -60,6 +61,9 @@ def config(tmp_path: Path, repository_root: Path) -> SftExperimentConfig:
     (base / "model.safetensors").write_bytes(b"test base")
     return loaded.model_copy(
         update={
+            "inference": loaded.inference.model_copy(
+                update={"max_tokens": CONTEXT_LENGTH}
+            ),
             "model": loaded.model.model_copy(
                 update={
                     "name_or_path": str(base),
@@ -237,6 +241,155 @@ def test_existing_training_is_not_overwritten(
 
 
 @pytest.fixture
+def continuation(
+    config: SftExperimentConfig,
+    prepared: Path,
+    trained: SftTrainingReport,
+    tmp_path: Path,
+) -> tuple[SftExperimentConfig, Path, Path]:
+    (prepared / "config.toml").write_text(
+        tomli_w.dumps(config.model_dump(mode="json", exclude_none=True))
+    )
+    destination = tmp_path / "destination"
+    shutil.copytree(prepared / "dataset", destination / "dataset")
+    changed = config.model_copy(
+        update={"training": config.training.model_copy(update={"epochs": 3})}
+    )
+    identity_path = destination / "dataset/preparation.json"
+    identity = DatasetPreparationIdentity.model_validate_json(
+        identity_path.read_bytes()
+    )
+    write_json(
+        identity_path,
+        identity.model_copy(
+            update={"config_sha256": sha256_json(changed.model_dump(mode="json"))}
+        ).model_dump(mode="json"),
+    )
+    return changed, destination, trained.checkpoints[-1].parent
+
+
+def test_continue_completed_epochs_exports_only_destination(
+    continuation: tuple[SftExperimentConfig, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config, destination, checkpoint = continuation
+    before = {
+        path: sha256_file(path)
+        for path in checkpoint.parent.parent.parent.rglob("*")
+        if path.is_file()
+    }
+
+    def launch(
+        command: list[str], *, check: bool, env: dict[str, str], cwd: Path
+    ) -> subprocess.CompletedProcess[str]:
+        native = SFTConfig.model_validate_json(Path(command[-1]).read_bytes())
+        assert native.resume is not None and native.resume.dir is not None
+        assert native.max_steps in (6, 8)
+        assert native.ckpt is not None and native.ckpt.output_dir is None
+        shutil.copytree(
+            native.resume.dir / "trainer",
+            native.run_dir / f"checkpoints/step_{native.max_steps}/trainer",
+        )
+        metrics = native.run_dir / "monitors/file/metrics.jsonl"
+        metrics.parent.mkdir(parents=True)
+        metrics.write_text(
+            "".join(
+                f'{{"step":{step},"val/loss":1.0}}\n'
+                for step in (native.resume.dir_step, native.max_steps)
+            )
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(train.subprocess, "run", launch)
+    result = train.train(config, destination, resume_from=checkpoint)
+    assert result.starting_step == 4 and result.optimizer_updates == 6
+    assert [loss.step for loss in result.validation_losses] == [4, 6]
+    assert result.final_adapter == destination / "training/checkpoints/step_6/adapter"
+    assert before == {path: sha256_file(path) for path in before}
+    assert (
+        train.checkpoint_model(
+            config.model, destination / "training", result.checkpoints[-1]
+        ).adapter_path
+        == result.final_adapter
+    )
+    (destination / "config.toml").write_text(
+        tomli_w.dumps(config.model_dump(mode="json", exclude_none=True))
+    )
+    next_run = destination.parent / "next-destination"
+    shutil.copytree(destination / "dataset", next_run / "dataset")
+    next_config = config.model_copy(
+        update={"training": config.training.model_copy(update={"epochs": 4})}
+    )
+    identity_path = next_run / "dataset/preparation.json"
+    identity = DatasetPreparationIdentity.model_validate_json(
+        identity_path.read_bytes()
+    )
+    write_json(
+        identity_path,
+        identity.model_copy(
+            update={"config_sha256": sha256_json(next_config.model_dump(mode="json"))}
+        ).model_dump(mode="json"),
+    )
+    chained = train.train(
+        next_config, next_run, resume_from=result.checkpoints[-1].parent
+    )
+    assert chained.starting_step == 6 and chained.optimizer_updates == 8
+    assert [loss.step for loss in chained.validation_losses] == [6, 8]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        "rows",
+        "optimizer",
+        "epochs",
+        "dropout",
+        "seed",
+        "checkpoint",
+        "adapter",
+        "symlink",
+    ],
+)
+def test_continuation_rejects_incompatible_source(
+    continuation: tuple[SftExperimentConfig, Path, Path], change: str
+) -> None:
+    config, destination, checkpoint = continuation
+    report = train.prepared_report(config, destination / "dataset")
+    native = train.trainer_config(config, destination, report)
+    if change == "rows":
+        (destination / "dataset/training/packed.jsonl").write_text("changed")
+    elif change == "optimizer":
+        native.optim.lr *= 2
+    elif change == "epochs":
+        config = config.model_copy(
+            update={"training": config.training.model_copy(update={"epochs": 2})}
+        )
+    elif change == "dropout":
+        config = config.model_copy(
+            update={
+                "training": config.training.model_copy(
+                    update={
+                        "lora": config.training.lora.model_copy(update={"dropout": 0.1})
+                    }
+                )
+            }
+        )
+    elif change == "seed":
+        native.data.seed += 1
+    elif change == "checkpoint":
+        next((checkpoint / "trainer").glob("*.distcp")).write_bytes(b"changed")
+    elif change == "adapter":
+        (checkpoint / "adapter/adapter_model.safetensors").write_bytes(b"changed")
+    elif change == "symlink":
+        alias = destination.parent / "source-alias"
+        alias.symlink_to(checkpoint.parent.parent.parent, target_is_directory=True)
+        destination = (alias / "nested-destination").resolve()
+    with pytest.raises(ValueError):
+        train.continuation_source(config, destination, native, checkpoint)
+    assert not (destination / "training").exists()
+
+
+@pytest.fixture
 def trained(
     config: SftExperimentConfig,
     prepared: Path,
@@ -250,7 +403,14 @@ def trained(
                 "model": {
                     "layer.q_proj.lora_A.0": torch.ones(LORA_RANK, CONTEXT_LENGTH),
                     "layer.q_proj.lora_B.0": torch.ones(CONTEXT_LENGTH, LORA_RANK),
-                }
+                },
+                "optimizers": {
+                    "state.weight.step": torch.tensor(4),
+                    "state.weight.exp_avg": torch.ones(1),
+                    "state.weight.exp_avg_sq": torch.ones(1),
+                },
+                "scheduler": {"last_epoch": torch.tensor(4)},
+                "progress": {"step": torch.tensor(4)},
             }
         },
         checkpoint_id=checkpoint,

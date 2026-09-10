@@ -316,6 +316,17 @@ class DatasetPreparationReport(BaseModel):
     files: dict[str, str]
 
 
+class SftContinuation(BaseModel):
+    """Read-only completed checkpoint supplying optimizer state and absolute data position."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    checkpoint: Path
+    checkpoint_sha256: str
+    completed_steps: int = Field(gt=0)
+    historical_rng_restored: Literal[False] = False
+
+
 class TrainingIdentity(BaseModel):
     """Recorded training inputs and the base used to export its adapters."""
 
@@ -327,6 +338,7 @@ class TrainingIdentity(BaseModel):
     base_weights_sha256: str
     trainer_source: str
     trainer_config_sha256: str
+    continuation: SftContinuation | None = None
 
 
 class TrainerMetric(BaseModel):
@@ -355,6 +367,7 @@ class SftTrainingReport(BaseModel):
     batch_size: int
     steps_per_epoch: int
     optimizer_updates: int
+    starting_step: int = Field(default=0, ge=0)
     validation_losses: list[ValidationLoss]
     checkpoints: list[Path]
     final_adapter: Path

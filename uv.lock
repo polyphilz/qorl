@@ -2239,7 +2239,7 @@ requires-dist = [{ name = "torch", specifier = ">=2.9.0" }]
 [[package]]
 name = "prime-pydantic-config"
 version = "0.4.3"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fpydantic-config&rev=f7f5e89#f7f5e89401e4a6673b99015e90370c71f61756f3" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fpydantic-config&rev=a42621e#a42621ed08b6ff434df3f764bbd251a76dc70a82" }
 dependencies = [
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
 ]
@@ -2252,7 +2252,7 @@ toml = [
 [[package]]
 name = "prime-rl"
 version = "0.9.0"
-source = { git = "https://github.com/polyphilz/prime-rl.git?rev=f7f5e89#f7f5e89401e4a6673b99015e90370c71f61756f3" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?rev=a42621e#a42621ed08b6ff434df3f764bbd251a76dc70a82" }
 dependencies = [
     { name = "aiolimiter", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "beartype", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -2311,7 +2311,7 @@ kernels = [
 [[package]]
 name = "prime-rl-configs"
 version = "0.4.0"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=packages%2Fprime-rl-configs&rev=f7f5e89#f7f5e89401e4a6673b99015e90370c71f61756f3" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=packages%2Fprime-rl-configs&rev=a42621e#a42621ed08b6ff434df3f764bbd251a76dc70a82" }
 dependencies = [
     { name = "prime-pydantic-config", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "pydantic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -2763,8 +2763,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "jsonschema", specifier = ">=4.23,<5" },
-    { name = "prime-rl", git = "https://github.com/polyphilz/prime-rl.git?rev=f7f5e89" },
-    { name = "prime-rl", extras = ["gpu", "flash-attn", "kernels"], marker = "sys_platform == 'linux' and extra == 'gpu'", git = "https://github.com/polyphilz/prime-rl.git?rev=f7f5e89" },
+    { name = "prime-rl", git = "https://github.com/polyphilz/prime-rl.git?rev=a42621e" },
+    { name = "prime-rl", extras = ["gpu", "flash-attn", "kernels"], marker = "sys_platform == 'linux' and extra == 'gpu'", git = "https://github.com/polyphilz/prime-rl.git?rev=a42621e" },
     { name = "pydantic", specifier = ">=2.13.5,<3" },
     { name = "python-dotenv", specifier = ">=1.2.3,<2" },
     { name = "referencing", specifier = ">=0.37,<1" },
@@ -2841,7 +2841,7 @@ wheels = [
 [[package]]
 name = "renderers"
 version = "0.1.12.dev2"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Frenderers&rev=f7f5e89#f7f5e89401e4a6673b99015e90370c71f61756f3" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Frenderers&rev=a42621e#a42621ed08b6ff434df3f764bbd251a76dc70a82" }
 dependencies = [
     { name = "jinja2", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -3673,7 +3673,7 @@ wheels = [
 [[package]]
 name = "verifiers"
 version = "0.3.2.dev53"
-source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fverifiers&rev=f7f5e89#f7f5e89401e4a6673b99015e90370c71f61756f3" }
+source = { git = "https://github.com/polyphilz/prime-rl.git?subdirectory=deps%2Fverifiers&rev=a42621e#a42621ed08b6ff434df3f764bbd251a76dc70a82" }
 dependencies = [
     { name = "aiohttp", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "anthropic", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },

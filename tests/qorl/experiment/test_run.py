@@ -360,6 +360,7 @@ def test_launch_executes_the_experiment_entrypoint_and_forwards_flags(
         split=TaskRole.VALIDATION,
         checkpoint=checkpoint,
         resume=True,
+        resume_from=checkpoint,
     )
     assert run.launch_experiment(calibration_experiment, request) == 7
     execute.assert_called_once_with(
@@ -375,10 +376,31 @@ def test_launch_executes_the_experiment_entrypoint_and_forwards_flags(
             "--split",
             "validation",
             "--resume",
+            "--resume-from",
+            str(checkpoint),
         ],
         cwd=run.REPOSITORY_ROOT,
         start_new_session=True,
     )
+
+
+@pytest.mark.parametrize("method", list(ExperimentMethod))
+@pytest.mark.parametrize("stage", list(RunStage))
+def test_resume_from_only_supports_sft_train(
+    method: ExperimentMethod, stage: RunStage, repository_root: Path
+) -> None:
+    name = "calibration" if method == ExperimentMethod.CALIBRATE else method.value
+    config = load_config(repository_root / f"configs/defaults/000-{name}.toml")
+    request = RunRequest(
+        stage=stage, number=0, resume_from=Path("source/checkpoints/step_2")
+    )
+    if method == ExperimentMethod.SFT and stage == RunStage.TRAIN:
+        run.validate_stage(config, request)
+        with pytest.raises(ValueError, match="separately from --resume"):
+            run.validate_stage(config, replace(request, resume=True))
+    else:
+        with pytest.raises(ValueError, match="only valid for SFT train"):
+            run.validate_stage(config, request)
 
 
 def test_launch_forwards_interrupt_and_waits_for_child_cleanup(

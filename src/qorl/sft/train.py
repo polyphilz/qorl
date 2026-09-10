@@ -13,7 +13,7 @@ from prime_rl.configs.sft import (
     SFTValConfig,
     SingleNodeDeploymentConfig,
 )
-from prime_rl.configs.shared import RunConfig
+from prime_rl.configs.shared import ResumeConfig, RunConfig
 from prime_rl.configs.trainer import (
     AdamWConfig,
     CheckpointConfig,
@@ -22,6 +22,7 @@ from prime_rl.configs.trainer import (
     ModelConfig,
 )
 from safetensors.torch import load as load_tensors
+from torch.distributed.checkpoint.filesystem import FileSystemReader
 
 from qorl.adapters.config import adapter_config
 from qorl.adapters.export import (
@@ -31,7 +32,7 @@ from qorl.adapters.export import (
 )
 from qorl.adapters.schemas import AdapterExportManifest, LoraSettings
 from qorl.adapters.verify import verify_adapter_base
-from qorl.experiment.schemas import SftExperimentConfig
+from qorl.experiment.schemas import SftExperimentConfig, load_config
 from qorl.model.files import model_weights_sha256, resolve_model
 from qorl.model.schemas import ModelSettings
 from qorl.paths import REPOSITORY_ROOT
@@ -39,6 +40,7 @@ from qorl.sft.dataset import require_both_splits, source_file
 from qorl.sft.schemas import (
     DatasetPreparationIdentity,
     DatasetPreparationReport,
+    SftContinuation,
     SftTrainingReport,
     TrainerMetric,
     TrainingIdentity,
@@ -217,9 +219,148 @@ def checkpoint_model(
     )
 
 
+def continuation_source(
+    config: SftExperimentConfig, run: Path, native: SFTConfig, checkpoint: Path
+) -> SftContinuation:
+    """Verify a completed run without writing or exporting anything in its tree."""
+    run = run.resolve()
+    checkpoint = checkpoint.expanduser().resolve()
+    source_training = checkpoint.parent.parent
+    source_run = source_training.parent
+    if run.is_relative_to(source_run) or source_run.is_relative_to(run):
+        raise ValueError("continuation source and destination runs must not overlap")
+    if source_training.name != "training" or checkpoint.parent.name != "checkpoints":
+        raise ValueError("--resume-from requires a QORL native step directory")
+    source_config = load_config(source_run / "config.toml")
+    if not isinstance(source_config, SftExperimentConfig):
+        raise ValueError("continuation requires an SFT source")
+    source_report = SftTrainingReport.model_validate_json(
+        (source_training / "report.json").read_bytes()
+    )
+    source_identity = TrainingIdentity.model_validate_json(
+        (source_training / TRAINING_IDENTITY).read_bytes()
+    )
+    source_native = SFTConfig.model_validate_json(
+        (source_training / TRAINER_CONFIG).read_bytes()
+    )
+    if source_identity.experiment_sha256 != sha256_json(
+        source_config.model_dump(mode="json")
+    ):
+        raise ValueError("source experiment configuration changed")
+    if source_identity.trainer_config_sha256 != sha256_json(
+        source_native.model_dump(mode="json")
+    ):
+        raise ValueError("source trainer configuration changed")
+    source_prepared = prepared_report(source_config, source_run / "dataset")
+    if source_identity.preparation_sha256 != sha256_file(
+        source_run / "dataset/report.json"
+    ):
+        raise ValueError("source preparation report changed")
+    for split in ("training", "validation"):
+        relative = Path(split) / "packed.jsonl"
+        if sha256_file(source_run / "dataset" / relative) != sha256_file(
+            run / "dataset" / relative
+        ):
+            raise ValueError(f"continuation {split} packed rows differ from source")
+    source_preparation = DatasetPreparationIdentity.model_validate_json(
+        (source_run / "dataset/preparation.json").read_bytes()
+    )
+    preparation = DatasetPreparationIdentity.model_validate_json(
+        (run / "dataset/preparation.json").read_bytes()
+    )
+    if (source_preparation.tokenizer_sha256, source_preparation.renderer) != (
+        preparation.tokenizer_sha256,
+        preparation.renderer,
+    ):
+        raise ValueError("continuation tokenizer or renderer identity differs")
+    completed = source_report.optimizer_updates
+    steps_per_epoch = math.ceil(
+        source_prepared.training.packed_rows / source_config.training.batch_size
+    )
+    if (
+        completed != source_config.training.epochs * steps_per_epoch
+        or source_report.steps_per_epoch != steps_per_epoch
+        or source_report.epochs != source_config.training.epochs
+        or source_report.training != source_prepared.training
+        or source_report.validation != source_prepared.validation
+        or source_native.max_steps != completed
+        or checkpoint.name != f"step_{completed}"
+        or checkpoint / "trainer" not in checkpoint_paths(source_training)
+        or not source_report.validation_losses
+        or source_report.validation_losses[-1].step != completed
+        or source_report.final_adapter.resolve() != checkpoint / "adapter"
+    ):
+        raise ValueError(
+            "continuation requires the completed run's final epoch checkpoint"
+        )
+    if config.training.epochs <= source_config.training.epochs:
+        raise ValueError("continuation requires additional total epochs")
+    if native.scheduler.type != "constant" or config.training.lora.dropout != 0:
+        raise ValueError(
+            "continuation requires constant scheduling and zero LoRA dropout"
+        )
+    if source_native.data.type != "prepared" or native.data.type != "prepared":
+        raise ValueError("continuation requires prepared data")
+    if (
+        source_native.model != native.model
+        or source_native.optim != native.optim
+        or source_native.scheduler != native.scheduler
+        or source_native.renderer != native.renderer
+        or source_native.tokenizer != native.tokenizer
+        or source_native.deployment != native.deployment
+        or source_native.matmul_precision != native.matmul_precision
+        or (
+            source_native.val.model_dump(exclude={"data": {"path"}})
+            if source_native.val
+            else None
+        )
+        != (native.val.model_dump(exclude={"data": {"path"}}) if native.val else None)
+        or source_native.data.model_dump(exclude={"path", "epochs"})
+        != native.data.model_dump(exclude={"path", "epochs"})
+    ):
+        raise ValueError("continuation training parameters differ from source")
+    if (
+        model_weights_sha256(Path(native.model.name))
+        != source_identity.base_weights_sha256
+    ):
+        raise ValueError("continuation base weights differ from source")
+    checksum = checkpoint_sha256(checkpoint / "trainer")
+    keys = FileSystemReader(checkpoint / "trainer").read_metadata().state_dict_metadata
+    if not {"app.progress.step", "app.scheduler.last_epoch"} <= keys.keys() or any(
+        not any(
+            key.startswith("app.optimizers.state.") and key.endswith(suffix)
+            for key in keys
+        )
+        for suffix in (".step", ".exp_avg", ".exp_avg_sq")
+    ):
+        raise ValueError(
+            "source checkpoint lacks AdamW, scheduler or completed progress state"
+        )
+    adapter = checkpoint / "adapter"
+    exported = AdapterExportManifest.model_validate_json(
+        (adapter / "qorl-manifest.json").read_bytes()
+    )
+    if exported.checkpoint_sha256 != checksum:
+        raise ValueError("source checkpoint differs from its exported identity")
+    if sha256_file(adapter / "adapter_model.safetensors") != exported.adapter_sha256:
+        raise ValueError("source adapter weights changed")
+    verify_adapter_base(adapter, Path(native.model.name))
+    if adapter_config(adapter) != export_configuration(
+        Path(native.model.name),
+        source_config.training.lora,
+        load_tensors((adapter / "adapter_model.safetensors").read_bytes()),
+    ):
+        raise ValueError("source adapter LoRA settings changed")
+    return SftContinuation(
+        checkpoint=checkpoint, checkpoint_sha256=checksum, completed_steps=completed
+    )
+
+
 def train(
     config: SftExperimentConfig,
     run: Path,
+    *,
+    resume_from: Path | None = None,
 ) -> SftTrainingReport:
     """Run a fixed prepared schedule without replacing an existing training attempt."""
     run = run.resolve()
@@ -230,12 +371,21 @@ def train(
         raise ValueError("training output exists; start a new run")
     report = prepared_report(config, run / "dataset")
     native = trainer_config(config, run, report)
+    continuation = (
+        continuation_source(config, run, native, resume_from)
+        if resume_from is not None
+        else None
+    )
+    starting_step = continuation.completed_steps if continuation else 0
+    if continuation:
+        native.resume = ResumeConfig(step=None, dir=continuation.checkpoint)
     identity = TrainingIdentity(
         experiment_sha256=sha256_json(config.model_dump(mode="json")),
         preparation_sha256=sha256_file(run / "dataset/report.json"),
         base_weights_sha256=model_weights_sha256(Path(native.model.name)),
         trainer_source=distribution("prime-rl").read_text("direct_url.json") or "",
         trainer_config_sha256=sha256_json(native.model_dump(mode="json")),
+        continuation=continuation,
     )
     write_json(training / TRAINING_IDENTITY, identity.model_dump(mode="json"))
     write_json(training / TRAINER_CONFIG, native.model_dump(mode="json"))
@@ -267,7 +417,7 @@ def train(
         report.training.packed_rows / config.training.batch_size
     )
     updates = steps_per_epoch * config.training.epochs
-    if set(losses) != set(range(0, updates + 1, steps_per_epoch)):
+    if set(losses) != set(range(starting_step, updates + 1, steps_per_epoch)):
         raise RuntimeError(
             "trainer did not record validation at each required weight step"
         )
@@ -283,6 +433,7 @@ def train(
         batch_size=config.training.batch_size,
         steps_per_epoch=steps_per_epoch,
         optimizer_updates=updates,
+        starting_step=starting_step,
         validation_losses=[losses[step] for step in sorted(losses)],
         checkpoints=checkpoints,
         final_adapter=evaluated_model.adapter_path,

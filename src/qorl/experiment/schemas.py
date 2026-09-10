@@ -54,6 +54,7 @@ class RunRequest:
     checkpoint: Path | None = None
     split: TaskRole | None = None
     resume: bool = False
+    resume_from: Path | None = None
 
 
 @dataclass(frozen=True)
