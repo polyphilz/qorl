@@ -21,9 +21,12 @@ context set to the demonstrated 49,152-token limit. It uses Astra medium with
 `reasoning_summary = "auto"`, one rollout per query, up to five candidate
 attempts, execution feedback and three initial default measurements. Astra has
 a 262,144-token context and 32,768 output-token limit per request. The PostgreSQL
-profile has 2 GiB shared buffers; the pool is Lambda's four-worker CPU layout.
+profile has 2 GiB shared buffers; the pool is FLOPper's four-worker CPU layout.
+Generation and database measurements stay on FLOPper after calibration 022 found
+higher estimated no-op error rates on Lambda. Lambda remains suitable for the
+subsequent GPU training on the prepared dataset.
 
-After these changes are available on Lambda, from its QORL checkout with
+After these changes are available on FLOPper, from its QORL checkout with
 `OPENAI_API_KEY` set and the existing model/IMDB assets present:
 
 ```bash
@@ -61,7 +64,7 @@ uv run --frozen --no-sync qorl experiment create \
     'validation=ceb[5a:10,8a:10]' 'test=job' \
   --exclude-tasks-from experiments/025-sft-astra-ceb-300/excluded-tasks-000.json \
   --postgres-config docker/postgres/configs/001-pgconf-2gb-sb \
-  --pool-config docker/worker_pool/configs/003-poolconf-lambda-4x8
+  --pool-config docker/worker_pool/configs/002-poolconf-4x8
 ```
 
 Creation copies the current defaults; set the resulting student context to
