@@ -1,0 +1,157 @@
+[experiment]
+name = "sft-astra-ceb-300"
+method = "sft"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
+
+[pool]
+path = "docker/worker_pool/configs/003-poolconf-lambda-4x8/poolconf.json"
+
+[model]
+provider = "local"
+name_or_path = "empero-ai/Qwen3.8-4B-Distill"
+context_length = 49152
+revision = "c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e"
+base_url = "http://127.0.0.1:8000/v1"
+request_timeout_seconds = 300
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[agent]
+candidate_attempts = 5
+maximum_model_turns = 64
+inspection_turns_per_alias = 3
+
+[evaluation]
+rollouts_per_task = 1
+
+[measurement]
+default_warmups = 1
+default_measurements = 3
+candidate_feedback_warmups = 1
+candidate_feedback_measurements = 1
+paired_warmups = 1
+paired_measurements = 3
+default_timeout_seconds = 300.0
+candidate_timeout_floor_seconds = 5.0
+candidate_timeout_multiplier = 3.0
+
+[inference]
+max_tokens = 8192
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repetition_penalty = 1.0
+thinking = true
+
+[inference.serving]
+host = "127.0.0.1"
+port = 8000
+dtype = "bfloat16"
+tool_call_parser = "qwen3_coder"
+reasoning_parser = "qwen3"
+max_num_seqs = 4
+gpu_memory_utilization = 0.9
+enable_prefix_caching = true
+use_flashinfer_sampler = false
+startup_timeout_seconds = 600
+
+[resources]
+training_gpu_ids = [
+    0,
+]
+serving_gpu_ids = [
+    0,
+]
+
+[data.training]
+file = "training-tasks.json"
+selection_seed = 42
+expression = "train=ceb[1a:30,2a:30,3a:30,4a:30,6a:30,7a:30,9a:30,10a:30,11a:30,11b:30]"
+
+[data.validation]
+file = "validation-tasks.json"
+selection_seed = 42
+expression = "validation=ceb[5a:10,8a:10]"
+
+[data.test]
+file = "test-tasks.json"
+selection_seed = 42
+expression = "test=job"
+
+[data.generation]
+generations_per_task = 1
+plan_only = false
+
+[data.generation.model]
+provider = "openai"
+name_or_path = "gpt-6-astra"
+context_length = 262144
+base_url = "https://api.openai.com/v1"
+request_timeout_seconds = 600
+api_key_env = "OPENAI_API_KEY"
+max_concurrent_requests = 8
+
+[data.generation.model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[data.generation.inference]
+max_tokens = 32768
+reasoning_effort = "medium"
+reasoning_summary = "auto"
+
+[training]
+epochs = 1
+batch_size = 1
+micro_batch_size = 1
+num_workers = 1
+max_grad_norm = 1.0
+
+[training.runtime]
+implementation = "custom"
+attention = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+compile = false
+
+[training.lora]
+rank = 16
+alpha = 32.0
+dropout = 0.0
+target_modules = [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+[training.optimizer]
+type = "adamw"
+lr = 0.0001
+weight_decay = 0.0
+betas1 = 0.9
+betas2 = 0.999
+
+[training.optimizer.scheduler]
+type = "constant"
+
+[training.checkpoints]
+type = "final"
+
+[training.renderer]
+name = "qwen3.5"
+add_vision_id = false
+image_cache_max = 256

@@ -72,6 +72,7 @@ class CreateRequest:
     model_provider: ModelProvider = ModelProvider.LOCAL
     adapter_path: Path | None = None
     dataset_from: Path | None = None
+    exclude_tasks_from: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,6 +82,7 @@ class ResolvedSelections:
     selections: dict[TaskRole, TaskSelection]
     inputs: dict[TaskRole, TaskSelectionInput]
     imported_generation_seeds: ImportedGenerationSeeds | None
+    exclusions: tuple[TaskSelection, ...] = ()
 
 
 class ExperimentSettings(BaseModel):

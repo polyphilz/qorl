@@ -152,6 +152,77 @@ def test_rejects_excessive_counts(benchmark_task_sets: dict[str, TaskSet]) -> No
         select_tasks([f"train=ceb[2a:{available + 1}]"], benchmark_task_sets, seed=42)
 
 
+def test_excludes_before_sampling_with_full_counts_and_stable_other_templates(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    expressions = ["train=ceb[2a:20]", "validation=ceb[4a:10]"]
+    original = select_tasks(expressions, benchmark_task_sets, 42)
+    excluded = original[TaskRole.TRAIN]
+    selected = select_tasks(expressions, benchmark_task_sets, 42, exclude=[excluded])
+    assert len(selected[TaskRole.TRAIN].task_ids) == 20
+    assert not set(selected[TaskRole.TRAIN].task_ids) & set(excluded.task_ids)
+    assert selected[TaskRole.VALIDATION] == original[TaskRole.VALIDATION]
+    reordered = {
+        key: replace(value, tasks=list(reversed(value.tasks)))
+        for key, value in benchmark_task_sets.items()
+    }
+    assert selected == select_tasks(expressions, reordered, 42, exclude=[excluded])
+
+
+def test_excludes_identical_sql_under_a_different_task_id(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    catalog = benchmark_task_sets["ceb"]
+    first, second, *remaining = [t for t in catalog.tasks if t.template_id == "ceb-2a"]
+    alias = second.model_copy(update={"sql_sha256": first.sql_sha256})
+    modified = replace(catalog, tasks=[first, alias, *remaining])
+    exclusion = TaskSelection(benchmark_id=BenchmarkId.CEB, task_ids=[first.task_id])
+    selected = select_tasks(["test=ceb"], {"ceb": modified}, 42, exclude=[exclusion])
+    assert selected[TaskRole.TEST].task_ids == sorted(t.task_id for t in remaining)
+
+
+def test_multiple_exclusions_are_unioned_and_counts_use_remaining_queries(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    tasks = [
+        t.task_id for t in benchmark_task_sets["ceb"].tasks if t.template_id == "ceb-2a"
+    ]
+    exclusions = [
+        TaskSelection(benchmark_id=BenchmarkId.CEB, task_ids=tasks[:-1]),
+        TaskSelection(benchmark_id=BenchmarkId.CEB, task_ids=tasks[:1]),
+    ]
+    selected = select_tasks(
+        ["test=ceb[2a:1]"], benchmark_task_sets, 42, exclude=exclusions
+    )
+    assert selected[TaskRole.TEST].task_ids == tasks[-1:]
+    with pytest.raises(TaskSetError, match="only 1 are available after exclusions"):
+        select_tasks(["test=ceb[2a:2]"], benchmark_task_sets, 42, exclude=exclusions)
+
+
+def test_rejects_unknown_excluded_tasks(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    excluded = TaskSelection(benchmark_id=BenchmarkId.CEB, task_ids=["ceb-missing"])
+    with pytest.raises(TaskSetError, match="unknown selected task"):
+        select_tasks(["test=ceb"], benchmark_task_sets, 42, exclude=[excluded])
+
+
+def test_rejects_unused_excluded_benchmark(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    excluded = select_tasks(["test=job[01:1]"], benchmark_task_sets, 42)[TaskRole.TEST]
+    with pytest.raises(TaskSetError, match="excluded benchmark job is not selected"):
+        select_tasks(["test=ceb"], benchmark_task_sets, 42, exclude=[excluded])
+
+
+def test_rejects_fully_excluded_benchmark(
+    benchmark_task_sets: dict[str, TaskSet],
+) -> None:
+    excluded = select_tasks(["test=job"], benchmark_task_sets, 42)[TaskRole.TEST]
+    with pytest.raises(TaskSetError, match="no queries remain after exclusions"):
+        select_tasks(["test=job"], benchmark_task_sets, 42, exclude=[excluded])
+
+
 @pytest.mark.parametrize(
     ("train_template", "other_template"),
     [("1a", "2c"), ("2a", "2b"), ("3a", "3b"), ("9a", "9b"), ("1a", "1a")],

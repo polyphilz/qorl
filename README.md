@@ -64,6 +64,12 @@ Without reuse, generator identity and generation count remain explicit placehold
 Creation checks artifact metadata and file presence. Calibration and live evaluation
 are executable.
 
+For a fresh batch, `--exclude-tasks-from experiments/NNN-name/training-tasks.json`
+excludes that selection's IDs and identical SQL hashes before sampling. The flag
+is repeatable; requested counts must fit the remaining queries. Creation saves
+frozen `excluded-tasks-*.json` inputs alongside the resolved selections. The flag
+cannot be combined with `--dataset-from`, which preserves its original selections.
+
 ## Run a calibration experiment
 
 On the database host, run the experiment directory printed by creation:

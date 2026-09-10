@@ -61,31 +61,46 @@ def select_tasks(
     expressions: Sequence[str],
     task_sets: Mapping[str, TaskSet],
     seed: int,
+    *,
+    exclude: Sequence[TaskSelection] = (),
 ) -> dict[TaskRole, TaskSelection]:
-    """Sample each template independently, then reject overlap between named roles."""
+    """Exclude prior IDs/SQL hashes before sampling, then enforce split topology."""
     if not expressions:
         raise TaskSetError("at least one selection expression is required")
+    excluded_ids: set[str] = set()
+    excluded_sql: set[str] = set()
+    for selection in exclude:
+        tasks = _benchmark(task_sets, selection.benchmark_id).resolve(selection)
+        excluded_ids.update(task.task_id for task in tasks)
+        excluded_sql.update(task.sql_sha256 for task in tasks)
     selections: dict[TaskRole, TaskSelection] = {}
     for expression in expressions:
         parsed = parse_selection(expression)
         if parsed.role in selections:
             raise TaskSetError(f"duplicate selection role: {parsed.role.value}")
         task_set = _benchmark(task_sets, parsed.benchmark_id)
+        available = [
+            task
+            for task in task_set.tasks
+            if task.task_id not in excluded_ids and task.sql_sha256 not in excluded_sql
+        ]
         task_ids: list[str] = []
         if not parsed.templates:
-            task_ids = [task.task_id for task in task_set.tasks]
+            task_ids = [task.task_id for task in available]
         else:
             by_template: dict[str, list[str]] = defaultdict(list)
-            for task in task_set.tasks:
+            for task in available:
                 by_template[task.template_id].append(task.task_id)
             for sample in parsed.templates:
                 metadata = task_set.tasks_metadata.get(sample.template_id)
                 if metadata is None:
                     raise TaskSetError(f"unknown template: {sample.template_id}")
-                if sample.count > metadata.query_count:
+                available_count = len(by_template[sample.template_id])
+                if sample.count > available_count:
                     raise TaskSetError(
                         f"{sample.template_id}: requested {sample.count} queries, "
-                        f"but only {metadata.query_count} are available"
+                        f"but only {available_count} are available"
+                        + (" after exclusions" if exclude else "")
                     )
                 rng = random.Random(
                     derive_seed(
@@ -98,9 +113,17 @@ def select_tasks(
                 task_ids.extend(
                     rng.sample(sorted(by_template[sample.template_id]), sample.count)
                 )
+        if not task_ids:
+            raise TaskSetError(f"{expression}: no queries remain after exclusions")
         selections[parsed.role] = TaskSelection(
             benchmark_id=parsed.benchmark_id, task_ids=sorted(task_ids)
         )
+    selected_benchmarks = {selection.benchmark_id for selection in selections.values()}
+    for selection in exclude:
+        if selection.benchmark_id not in selected_benchmarks:
+            raise TaskSetError(
+                f"excluded benchmark {selection.benchmark_id.value} is not selected"
+            )
     validate_splits(selections, task_sets)
     return selections
 

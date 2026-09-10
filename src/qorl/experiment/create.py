@@ -184,6 +184,12 @@ def resolve_selections(request: CreateRequest) -> ResolvedSelections:
     selections: dict[TaskRole, TaskSelection] = {}
     inputs: dict[TaskRole, TaskSelectionInput] = {}
     generation_seeds = None
+    if request.dataset_from is not None and request.exclude_tasks_from:
+        raise ValueError("--exclude-tasks-from cannot change --dataset-from selections")
+    exclusions = tuple(
+        TaskSelection.model_validate_json(local_path(path).read_bytes())
+        for path in request.exclude_tasks_from
+    )
     if request.dataset_from is not None:
         source = local_path(request.dataset_from)
         manifest = PreparedDatasetManifest.model_validate_json(
@@ -216,7 +222,9 @@ def resolve_selections(request: CreateRequest) -> ResolvedSelections:
             expression=expression,
         )
     if request.tasksets:
-        selections.update(select_tasks(request.tasksets, catalogs, request.seed))
+        selections.update(
+            select_tasks(request.tasksets, catalogs, request.seed, exclude=exclusions)
+        )
     if request.method in (ExperimentMethod.SFT, ExperimentMethod.RL):
         if not {TaskRole.TRAIN, TaskRole.VALIDATION}.issubset(selections):
             raise ValueError(
@@ -225,7 +233,7 @@ def resolve_selections(request: CreateRequest) -> ResolvedSelections:
     elif set(selections) != {TaskRole.TEST}:
         raise ValueError("evaluation and calibration require only a test taskset")
     validate_splits(selections, catalogs)
-    return ResolvedSelections(selections, inputs, generation_seeds)
+    return ResolvedSelections(selections, inputs, generation_seeds, exclusions)
 
 
 def configure(
@@ -406,8 +414,28 @@ def create_experiment(request: CreateRequest) -> Path:
             (directory / TASK_FILES[role]).write_text(
                 selection.model_dump_json(indent=2) + "\n", encoding="utf-8"
             )
+        exclusion_notes = ""
+        for index, (source_path, selection) in enumerate(
+            zip(request.exclude_tasks_from, selected.exclusions, strict=True)
+        ):
+            filename = f"excluded-tasks-{index:03d}.json"
+            (directory / filename).write_text(
+                selection.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            exclusion_notes += (
+                f"- `{filename}`: frozen exclusion input from "
+                f"`{recorded_path(local_path(source_path))}`.\n"
+            )
+        if exclusion_notes:
+            exclusion_notes = (
+                "\nTask IDs and identical SQL hashes in the following inputs were "
+                "excluded before sampling. Recreating the selection requires these "
+                "inputs via `--exclude-tasks-from`, along with the recorded seed "
+                "and expressions. Exclusions are already reflected in the resolved "
+                "task files; execution does not resample them.\n\n" + exclusion_notes
+            )
         (directory / "README.md").write_text(
-            readme(directory, template_path, config), encoding="utf-8"
+            readme(directory, template_path, config) + exclusion_notes, encoding="utf-8"
         )
         (directory / "run.py").write_text(RUN_SCRIPT, encoding="utf-8")
     except BaseException:

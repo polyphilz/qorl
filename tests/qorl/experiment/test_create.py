@@ -116,6 +116,52 @@ def test_optional_training_test_split(creation_request: CreateRequest) -> None:
     assert len(selection.task_ids) == 113
 
 
+def test_creation_freezes_exclusions_without_changing_source(
+    creation_request: CreateRequest, tmp_path: Path
+) -> None:
+    original = create.resolve_selections(creation_request)
+    excluded = original.selections[create.TaskRole.TRAIN]
+    source = tmp_path / "prior-training-tasks.json"
+    source.write_text(excluded.model_dump_json(indent=2) + "\n")
+    before = source.read_bytes()
+    directory = create.create_experiment(
+        replace(creation_request, exclude_tasks_from=(source,))
+    )
+    selected = TaskSelection.model_validate_json(
+        (directory / "training-tasks.json").read_bytes()
+    )
+    assert len(selected.task_ids) == len(excluded.task_ids)
+    assert not set(selected.task_ids) & set(excluded.task_ids)
+    assert source.read_bytes() == before
+    assert (
+        TaskSelection.model_validate_json(
+            (directory / "excluded-tasks-000.json").read_bytes()
+        )
+        == excluded
+    )
+    assert (
+        TaskSelection.model_validate_json(
+            (directory / "validation-tasks.json").read_bytes()
+        )
+        == original.selections[create.TaskRole.VALIDATION]
+    )
+    assert "--exclude-tasks-from" in (directory / "README.md").read_text()
+
+
+def test_creation_rejects_exclusions_with_reused_dataset(
+    creation_request: CreateRequest, dataset_artifact: Path
+) -> None:
+    with pytest.raises(ValueError, match="cannot change --dataset-from selections"):
+        create.create_experiment(
+            replace(
+                creation_request,
+                method=ExperimentMethod.SFT,
+                dataset_from=dataset_artifact,
+                exclude_tasks_from=(Path("unused.json"),),
+            )
+        )
+
+
 @pytest.mark.parametrize("test_expression", [(), ("test=job[01:2]",)])
 def test_dataset_reuse_preserves_ids_order_seeds_and_source(
     test_expression: tuple[str, ...],

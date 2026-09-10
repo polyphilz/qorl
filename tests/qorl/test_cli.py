@@ -13,7 +13,9 @@ from qorl.experiment.schemas import (
     RunStage,
     load_config,
 )
-from qorl.taskset.schemas import TaskRole
+from qorl.taskset.schemas import TaskRole, TaskSelection
+from qorl.taskset.selection import select_tasks
+from qorl.taskset.taskset import TaskSet
 
 
 def test_experiment_run_cli_forwards_the_stage_request(
@@ -78,8 +80,10 @@ def test_running_requires_an_explicit_stage() -> None:
 
 
 @pytest.mark.parametrize("openrouter", [False, True])
+@pytest.mark.parametrize("exclude", [False, True])
 def test_experiment_create_cli_writes_files_without_running(
     openrouter: bool,
+    exclude: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -87,6 +91,14 @@ def test_experiment_create_cli_writes_files_without_running(
     monkeypatch.setattr(create, "EXPERIMENTS_DIRECTORY", tmp_path / "experiments")
     execute = Mock(side_effect=AssertionError("creation executed calibration"))
     monkeypatch.setattr("qorl.experiment.run.calibrate", execute)
+    source = tmp_path / "exclude.json"
+    excluded = select_tasks(
+        ["test=ceb[2a:1]"],
+        {"ceb": TaskSet.load(cli.REPOSITORY_ROOT, "ceb")},
+        123,
+    )[TaskRole.TEST]
+    if exclude:
+        source.write_text(excluded.model_dump_json())
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -115,6 +127,7 @@ def test_experiment_create_cli_writes_files_without_running(
             "docker/postgres/configs/000-pgconf-default",
             "--pool-config",
             "docker/worker_pool/configs/002-poolconf-4x8",
+            *(["--exclude-tasks-from", str(source)] if exclude else []),
         ],
     )
     assert cli.main() == 0
@@ -128,6 +141,11 @@ def test_experiment_create_cli_writes_files_without_running(
         assert isinstance(config, CalibrationExperimentConfig)
     assert config.experiment.seed == 123
     assert "experiment created" in capsys.readouterr().out
+    selected = TaskSelection.model_validate_json(
+        (directory / "test-tasks.json").read_bytes()
+    )
+    assert len(selected.task_ids) == 1
+    assert (selected == excluded) is (not exclude)
     execute.assert_not_called()
 
 

@@ -75,6 +75,13 @@ def parser() -> argparse.ArgumentParser:
         "--dataset-from", type=Path, help="QORL conversation artifact to reuse for SFT"
     )
     create_parser.add_argument(
+        "--exclude-tasks-from",
+        type=Path,
+        action="append",
+        default=[],
+        help="exclude IDs and identical SQL from a saved task-selection JSON before sampling; repeatable",
+    )
+    create_parser.add_argument(
         "--seed",
         type=int,
         default=DEFAULT_EXPERIMENT_SEED,
@@ -153,6 +160,7 @@ def main() -> int:
                     model_provider=ModelProvider(arguments.model_provider),
                     adapter_path=arguments.adapter_path,
                     dataset_from=arguments.dataset_from,
+                    exclude_tasks_from=tuple(arguments.exclude_tasks_from),
                 )
             )
             print(f"QORL experiment created: {output_dir}")
