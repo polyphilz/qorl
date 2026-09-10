@@ -10,6 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 import verifiers.v1 as vf
+from prime_rl.orchestrator.algo.qorl_anchored_grpo import decision_from_final
 from tests.qorl.agent.test_agent import reply
 from tests.qorl.evaluation.conftest import EvaluationActivity
 from tests.qorl.evaluation.test_evaluate import run_evaluation, saved_rollouts
@@ -71,6 +72,11 @@ REJECTED_FINISHES: dict[str, JsonValue] = {
         "rejected_turns",
         "ignored_finish",
         "ignored_get_plan",
+        "default_valid",
+        "default_invalid",
+        "default_timeout",
+        "default_corrected",
+        *[f"none_{name}" for name in REJECTED_FINISHES if name.startswith("rejected_")],
     ],
 )
 def test_selected_outcome_through_active_consumers(
@@ -100,8 +106,8 @@ def test_selected_outcome_through_active_consumers(
         {"version": 1, "settings": {"seq_page_cost": float(index + 2)}}
         for index in range(count)
     ]
-    if scenario == "all_rejected":
-        actions = [{"version": 2}]
+    if scenario in {"all_rejected", "default_invalid"} or scenario.startswith("none_"):
+        actions = [{"version": 2} for _ in range(count)]
     if scenario == "ineligible":
         actions[0] = {"version": 2}
     if scenario.startswith("five_"):
@@ -128,6 +134,7 @@ def test_selected_outcome_through_active_consumers(
         "rejected_context",
         "rejected_output",
         "rejected_turns",
+        "default_corrected",
     }:
         responses.append(reply("finish", '{"selected_candidate_id":"invented"}'))
     responses.append(
@@ -146,7 +153,11 @@ def test_selected_outcome_through_active_consumers(
         or scenario in {"rejected_context", "rejected_output", "rejected_turns"}
         else reply(
             "finish",
-            "{}"
+            json.dumps({"selected_candidate_id": "default"})
+            if scenario.startswith("default_")
+            else json.dumps(REJECTED_FINISHES[scenario.removeprefix("none_")])
+            if scenario.startswith("none_")
+            else "{}"
             if scenario in {"omitted", "all_rejected", "corrected"}
             else json.dumps(
                 REJECTED_FINISHES.get(
@@ -197,7 +208,7 @@ def test_selected_outcome_through_active_consumers(
             if not responses:
                 final_hints.append(candidate)
         timed_out = candidate is not None and (
-            scenario == "all_timeouts"
+            scenario in {"all_timeouts", "default_timeout"}
             or (
                 candidate == 1
                 and (
@@ -301,7 +312,41 @@ def test_selected_outcome_through_active_consumers(
     assert not responses
     assert record.failure is None and record.final is not None
     assert record.selection == trace.selection
-    if scenario in {"planning_timeout", "execution_timeout", "all_timeouts"}:
+    assert record.selection is not None
+    if scenario.startswith("default_"):
+        assert record.final.kind == "kept_default"
+        assert record.final.speedup == 1.0
+        assert record.final.selected_candidate_id is None
+        assert record.default is not None
+        assert record.final.selected_plan_sha256 == record.default.plan_sha256
+        assert record.final.timing_reuse_key == record.default.timing_reuse_key
+        assert len(record.candidates) == count
+        assert not final_hints
+        assert record.execution_counts is not None
+        assert record.execution_counts.final_paired == 0
+        assert (
+            scalar_reward(
+                record,
+                ScalarRewardSettings(
+                    invalid_attempt_penalty=0.1,
+                    duplicate_attempt_penalty=0.02,
+                    timeout_attempt_penalty=0.1,
+                    no_valid_candidate_reward=-0.7,
+                ),
+            )
+            == 0.0
+        )
+        assert decision_from_final(record.final.to_wire()).kind == "keep_default"
+        assert training_speedup(record) == 1.0
+    elif scenario.startswith("none_"):
+        assert record.final.kind == "no_valid_candidate"
+        assert not final_hints
+        assert record.selection.status == "accepted"
+        assert (
+            record.selection.rejections[-1].arguments
+            == REJECTED_FINISHES[scenario.removeprefix("none_")]
+        )
+    elif scenario in {"planning_timeout", "execution_timeout", "all_timeouts"}:
         assert record.final.kind == "timed_out" and record.final.speedup is None
         assert record.final.timeout_ms == record.candidates[0].timeout_ms
         assert record.final.selected_candidate_id == "candidate-01"
@@ -338,13 +383,16 @@ def test_selected_outcome_through_active_consumers(
             assert len(record.candidates) == 5
             assert not record.candidates[1].selection_eligible
             assert record.execution_counts is not None
-            assert record.execution_counts.initial_default == 2
+            assert record.execution_counts.initial_default == (
+                record.measurement.default_warmups
+                + record.measurement.default_measurements
+            )
             assert record.execution_counts.candidate_feedback == 8
             assert record.execution_counts.final_paired == 8
             performance = summarize_performance([record])
             assert performance.selected_candidate_positions == {chosen: 1}
             assert performance.earlier_candidate_selection_count == (chosen == 3)
-    if scenario == "corrected":
+    if scenario in {"corrected", "default_corrected"}:
         assert (
             trace.selection.status == "accepted"
             and len(trace.selection.rejections) == 1

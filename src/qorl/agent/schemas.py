@@ -133,6 +133,7 @@ class CandidateSummary(BaseModel):
 class CandidateHistory(BaseModel):
     candidates: list[CandidateSummary]
     selectable_candidate_ids: list[str]
+    default_selector: Literal["default"] = "default"
     attempts_remaining: int
     selection_status: SelectionStatus
     selected_candidate_id: str | None

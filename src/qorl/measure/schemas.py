@@ -809,8 +809,6 @@ class RolloutRecord(Record):
             raise ValueError(
                 "baseline reuse requires matching plan and timing-reuse key"
             )
-        if isinstance(final, KeptDefaultOutcome) and self.candidates:
-            raise ValueError("keep_default cannot follow candidate attempts")
         if isinstance(final, NoValidCandidateOutcome) and any(
             item.selection_eligible for item in self.candidates
         ):

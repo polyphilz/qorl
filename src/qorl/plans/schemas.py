@@ -286,7 +286,7 @@ class JoinConstraint(ActionModel):
     )
     memoize: MemoizeRequest = Field(
         default=MemoizeMode.AUTO,
-        description="force requires a nested loop with a Memoize inner child; forbid prohibits that child.",
+        description="force requires a nested loop with an actual Memoize inner child; forbid prohibits that child. pg_hint_plan Memoize only permits memoization, so a used hint can still fail this physical requirement. Remove the requirement or revise the intervention to recover.",
     )
 
     @property

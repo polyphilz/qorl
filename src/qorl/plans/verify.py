@@ -204,7 +204,9 @@ def verify_action(
             errors.append(f"join {label} uses forbidden method {method}")
         memoized = memoized_inner(join)
         if item["memoize"] == MemoizeMode.FORCE and not memoized:
-            errors.append(f"join {label} is not memoized")
+            errors.append(
+                f"join {label} is not memoized: Memoize permits but does not guarantee a Memoize inner child, even when the hint is used; remove the memoization requirement or revise the intervention"
+            )
         if item["memoize"] == MemoizeMode.FORBID and memoized:
             errors.append(f"join {label} uses forbidden memoization")
 

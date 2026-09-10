@@ -226,14 +226,72 @@ def test_request_goldens(
     assert capsys.readouterr().out == f"[{expected_label}] candidate-01: validated\n"
     if log_label is not None:
         assert log_label not in trace.model_dump_json()
-    # Final combined interface-v6 request bytes, including the committed prompt line break.
+    # Interface-v7 default selection, finish guidance and Memoize request bytes.
     assert [
         hashlib.sha256(json.dumps(request).encode()).hexdigest()
         for request in transport.requests
     ] == [
-        "aa47d42a190e1b43412f91188e5cef0db60e35c111e7c684cb6cba86436226d3",
-        "95e97a5f9e5a41e1d65ccbd230b4b4baeb6f3d46bd9e270278ea0ab4f129990c",
+        "e9899505c033ed483c69ff6316efcd65ba9c97e3221e5996b43d52a0875fbdca",
+        "2615a2e6b3d556603799556c5b367bbe16495d27a72d9decd8c5499f9350d014",
     ]
+
+
+@pytest.mark.parametrize("valid", [True, False])
+@pytest.mark.parametrize(
+    "selector",
+    ['{"selected_candidate_id":"default"}', "{}", '{"selected_candidate_id":null}'],
+)
+def test_plan_only_finish_with_retained_history(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+    valid: bool,
+    selector: str,
+) -> None:
+    responses = [
+        reply(
+            "evaluate_candidate", json.dumps({"action": {"version": 1 if valid else 2}})
+        ),
+        reply("finish", selector),
+    ]
+    if valid and "null" in selector:
+        responses.append(reply("finish", '{"selected_candidate_id":"default"}'))
+    transport = ScriptedTransport(responses)
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert trace.selection.status == "accepted"
+    assert len(evaluator.candidates) == 1
+    assert evaluator.kept_default == (
+        '"default"' in selector or (valid and "null" in selector)
+    )
+    assert len(trace.selection.rejections) == int("null" in selector)
+    assert evaluator.default is not None
+    assert evaluator.default.median_execution_time_ms is None
+    history = JSON_OBJECT.validate_python(
+        trace.tool_events[0].result["_candidate_history"]
+    )
+    assert history["default_selector"] == "default"
+    assert history["selectable_candidate_ids"] == (["candidate-01"] if valid else [])
+
+
+def test_no_eligible_finish_resolves_prior_rejection(
+    evaluator: PlanValidationEvaluator[InspectionExecutor],
+) -> None:
+    transport = ScriptedTransport(
+        [
+            reply("finish", '{"selected_candidate_id":"invented"}'),
+            reply("evaluate_candidate", '{"action":{"version":2}}'),
+            reply("finish", '{"selected_candidate_id":null}'),
+        ]
+    )
+    trace = policy(transport).search(evaluator)
+    assert trace.stop_reason == StopReason.MODEL_FINISH
+    assert trace.selection.status == "accepted"
+    assert len(trace.selection.rejections) == 2
+    assert trace.selection.rejections[0].arguments == {
+        "selected_candidate_id": "invented"
+    }
+    assert trace.selection.rejections[1].arguments == {"selected_candidate_id": None}
+    assert trace.tool_events[-1].result["message"] == "No eligible candidate produced."
+    assert not evaluator.kept_default
 
 
 def test_evaluate_then_finish(
@@ -318,10 +376,26 @@ def test_budgets_mask_tools_and_reject_unavailable_calls(
             "Total Cost": 99.0,
         }
     for index in (2, 4):
-        assert (
-            trace.tool_events[index].result["error"]
-            == "tool is not available for this turn"
+        error = trace.tool_events[index].result["error"]
+        assert isinstance(error, str)
+        tools_for_turn = transport.requests[index]["tools"]
+        assert isinstance(tools_for_turn, list)
+        names = [
+            JSON_OBJECT.validate_python(JSON_OBJECT.validate_python(tool)["function"])[
+                "name"
+            ]
+            for tool in tools_for_turn
+        ]
+        assert error.startswith(
+            "tool is not available for this turn; available tools: "
         )
+        assert all(isinstance(name, str) and name in error for name in names)
+    assert "No candidate attempts remain; finish is available" in str(
+        trace.tool_events[4].result["error"]
+    )
+    assert "finish({}) ends with no_valid_candidate" in str(
+        trace.tool_events[4].result["error"]
+    )
     tools = transport.requests[4]["tools"]
     assert isinstance(tools, list)
     assert [JSON_OBJECT.validate_python(tool)["function"] for tool in tools] == [

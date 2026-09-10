@@ -421,6 +421,41 @@ def test_cancellation_retains_completed_candidate_validation(
     assert sum(call.analyze for call in worker.calls) == 2
 
 
+def test_three_initial_measurements_use_median_excluding_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = Worker()
+    original = worker.explain
+    timings = iter([900_000.0, 10_000.0, 30_000.0, 20_000.0])
+
+    def explain(
+        sql: str, timeout_ms: int, *, analyze: bool = False, hint: str = ""
+    ) -> ExplainResult:
+        result = original(sql, timeout_ms, analyze=analyze, hint=hint)
+        if analyze:
+            result.document["Execution Time"] = next(timings)
+        return result
+
+    monkeypatch.setattr(worker, "explain", explain)
+    run = RolloutEvaluator(
+        worker,
+        Sql(),
+        TASK,
+        measurement=SETTINGS.model_copy(update={"default_measurements": 3}),
+        max_candidates=1,
+    )
+    baseline = run.start()
+    assert baseline.median_execution_time_ms == 20_000.0
+    assert run.timeout_ms == 60_000
+    assert run.execution_counts.initial_default == 4
+    run.evaluate({"version": 2})
+    before = list(worker.calls)
+    final = run.finish(random.Random(0), selected_candidate_id="default")
+    assert final.kind == "kept_default"
+    assert worker.calls == before
+    run.record()
+
+
 def test_warmups_do_not_enter_the_paired_medians(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

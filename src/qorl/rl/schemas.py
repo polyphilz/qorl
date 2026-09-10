@@ -155,7 +155,7 @@ class QorlHarnessConfig(vf.HarnessConfig):
     )
     measurement: RolloutMeasurementSettings = RolloutMeasurementSettings(
         default_warmups=1,
-        default_measurements=1,
+        default_measurements=3,
         candidate_feedback_warmups=1,
         candidate_feedback_measurements=1,
         paired_warmups=1,

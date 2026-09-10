@@ -174,8 +174,19 @@ class QoAgentPolicy:
                 if index != 0:
                     raw_result, finished = {"error": "call one tool at a time"}, False
                 elif name not in available_names:
+                    guidance = (
+                        "tool is not available for this turn; available tools: "
+                        + ", ".join(sorted(available_names))
+                    )
+                    if len(evaluator.candidates) >= evaluator.max_candidates:
+                        guidance += (
+                            ". No candidate attempts remain; finish is available. "
+                            "Choose an eligible issued ID from _candidate_history "
+                            'or explicit "default". If no submitted candidate is '
+                            "eligible, finish({}) ends with no_valid_candidate."
+                        )
                     raw_result, finished = (
-                        {"error": "tool is not available for this turn"},
+                        {"error": guidance},
                         False,
                     )
                 else:

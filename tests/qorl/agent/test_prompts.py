@@ -24,10 +24,12 @@ def test_prompt_budget_and_join_contract(attempts: int, label: str) -> None:
         "Without leading, use subtree sets visible in the initial plan summary or get_plan.\n"
         "Omit empty constraints."
     ) in prompt
-    assert prompt.endswith(
+    assert (
         "Otherwise finish by selecting the eligible candidate you expect to execute fastest.\n"
         "You may select an earlier candidate.\n"
-    )
+    ) in prompt
+    assert 'finish with selected_candidate_id="default"' in prompt
+    assert "no valid candidate unless you select default" in prompt
 
 
 @pytest.mark.parametrize("attempts", [0, -1])

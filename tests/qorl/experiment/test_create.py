@@ -15,7 +15,6 @@ from prime_rl.configs.trainer import CosineSchedulerConfig
 
 from qorl.experiment import create
 from qorl.experiment.schemas import (
-    PLACEHOLDER,
     CalibrationExperimentConfig,
     CreateRequest,
     EvaluationExperimentConfig,
@@ -30,6 +29,7 @@ from qorl.model.schemas import (
     LocalInferenceSettings,
     ModelPreset,
     ModelProvider,
+    ModelSettings,
     ReasoningEffort,
 )
 from qorl.sft.schemas import PreparedDatasetManifest
@@ -72,6 +72,8 @@ def test_creates_each_method(
     assert config.experiment.seed == 42
     assert config.postgres.path == creation_request.postgres_config
     assert config.pool.path == creation_request.pool_config / "poolconf.json"
+    if not isinstance(config, CalibrationExperimentConfig):
+        assert config.measurement.default_measurements == 3
     expected_files = {"config.toml", "README.md", "run.py"}
     if method in (ExperimentMethod.SFT, ExperimentMethod.RL):
         expected_files |= {"training-tasks.json", "validation-tasks.json"}
@@ -81,9 +83,12 @@ def test_creates_each_method(
     assert "qorl experiment run" in (directory / "README.md").read_text()
     assert (directory / "run.py").read_text() == create.RUN_SCRIPT
     if isinstance(config, SftExperimentConfig):
-        assert config.data.generation is not None
-        assert config.data.generation.model == PLACEHOLDER
-        assert config.data.generation.generations_per_task == PLACEHOLDER
+        generation = config.data.generation
+        assert generation is not None
+        assert isinstance(generation.model, ModelSettings)
+        assert generation.model.provider == ModelProvider.OPENAI
+        assert generation.model.name_or_path == "gpt-6-astra"
+        assert generation.generations_per_task == 1
         assert config.training.epochs == 1
     if isinstance(config, CalibrationExperimentConfig):
         assert (

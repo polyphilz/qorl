@@ -77,7 +77,7 @@ def agent_tools(
         ),
         function(
             ToolName.FINISH,
-            "End the search by selecting an eligible issued candidate, including an earlier one. Supply selected_candidate_id when several are eligible; omission selects the sole eligible candidate, or retains no-valid-candidate handling when none are eligible. Timed-out candidates are selectable and retain their timeout outcome without retry. Invalid selections return diagnostics for correction.",
+            "End the search by selecting an eligible submitted candidate, including an earlier one, or selected_candidate_id='default' to keep PostgreSQL's default after searching without further execution. Omission selects the sole eligible submitted candidate; several require an explicit choice. Timed-out candidates remain eligible and retain their timeout without retry. When no submitted candidate is eligible, finish ends with no valid candidate unless explicitly selecting default. With eligible candidates, invalid selections return diagnostics for correction.",
             OBJECT.validate_python(FinishArguments.model_json_schema()),
         ),
     ]

@@ -180,7 +180,7 @@ def test_openrouter_dispatch_and_paid_failure_evidence(
             assert record.trace.usage.prompt_tokens == (
                 999999 if failure == "budget" else None
             )
-        assert sum("ANALYZE" in query for query in activity.queries) == 2
+        assert sum("ANALYZE" in query for query in activity.queries) == 4
     else:
         assert report.summary.performance.failure_count == 0
         assert record.rollout.final is not None
@@ -262,7 +262,7 @@ def test_openrouter_indexed_multiple_calls_reach_harness(
         record.rollout.final is not None
         and record.rollout.final.kind == OutcomeKind.KEPT_DEFAULT
     )
-    assert sum("ANALYZE" in query for query in activity.queries) == 2
+    assert sum("ANALYZE" in query for query in activity.queries) == 4
     assert activity.closed == activity.pools and not activity.claimed_workers
 
 
@@ -331,20 +331,20 @@ def test_openrouter_output_limit_does_not_abort_scheduled_rollout(
         and second.rollout.final.kind == OutcomeKind.MEASURED
     )
     assert len(second.trace.tool_events) == 3
-    assert sum("ANALYZE" in query for query in activity.queries) == 14
+    assert sum("ANALYZE" in query for query in activity.queries) == 18
     assert activity.closed == activity.pools and not activity.claimed_workers
 
 
 @pytest.mark.parametrize(
     "mode,kind,executions,valid,novel",
     [
-        ("measured", OutcomeKind.MEASURED, 12, 1, 1),
-        ("non_novel", OutcomeKind.MEASURED, 12, 1, 0),
-        ("duplicate", OutcomeKind.DEFAULT_DUPLICATE, 2, 1, 0),
-        ("keep", OutcomeKind.KEPT_DEFAULT, 2, 0, 0),
-        ("invalid", OutcomeKind.NO_VALID_CANDIDATE, 2, 0, 0),
-        ("candidate_timeout", OutcomeKind.TIMED_OUT, 2, 0, 0),
-        ("truncated", OutcomeKind.NO_VALID_CANDIDATE, 2, 0, 0),
+        ("measured", OutcomeKind.MEASURED, 14, 1, 1),
+        ("non_novel", OutcomeKind.MEASURED, 14, 1, 0),
+        ("duplicate", OutcomeKind.DEFAULT_DUPLICATE, 4, 1, 0),
+        ("keep", OutcomeKind.KEPT_DEFAULT, 4, 0, 0),
+        ("invalid", OutcomeKind.NO_VALID_CANDIDATE, 4, 0, 0),
+        ("candidate_timeout", OutcomeKind.TIMED_OUT, 4, 0, 0),
+        ("truncated", OutcomeKind.NO_VALID_CANDIDATE, 4, 0, 0),
     ],
 )
 def test_actual_conversation_measurements_and_reporting(

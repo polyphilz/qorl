@@ -81,6 +81,10 @@ class AgentEnvironment:
 
     def execute(self, name: str, arguments: JsonValue) -> tuple[JsonObject, bool]:
         if name == ToolName.FINISH:
+            no_eligible = bool(self.evaluator.candidates) and not any(
+                candidate.selection_eligible for candidate in self.evaluator.candidates
+            )
+            diagnostics: list[str] = []
             try:
                 request = FinishArguments.model_validate(arguments)
                 if not self.evaluator.candidates:
@@ -95,10 +99,24 @@ class AgentEnvironment:
                     else [str(error)]
                 )
                 self.evaluator.reject_selection(arguments, diagnostics)
-                return {"error": "; ".join(diagnostics)}, False
+                if not no_eligible:
+                    return {
+                        "error": "; ".join(diagnostics)
+                        + "; choose an eligible issued ID from _candidate_history "
+                        + 'or explicit "default" after submitting a candidate'
+                    }, False
+                self.evaluator.accept_selection(None)
+            if no_eligible and not self.evaluator.kept_default:
+                return {
+                    "status": ToolResultStatus.FINISHED.value,
+                    "selected_candidate_id": None,
+                    "message": "No eligible candidate produced.",
+                    "diagnostics": list(diagnostics),
+                }, True
             return {
                 "status": ToolResultStatus.FINISHED.value,
                 "selected_candidate_id": self.evaluator.selection.selected_candidate_id,
+                "kept_default": self.evaluator.kept_default,
             }, True
         if name == ToolName.EVALUATE_CANDIDATE:
             if self.evaluator.kept_default:

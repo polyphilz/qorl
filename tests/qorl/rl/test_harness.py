@@ -139,7 +139,7 @@ def test_actual_harness_uses_proxy_and_retains_records(
 
 def test_fallback_config_matches_rl_defaults(repository_root: Path) -> None:
     defaults = tomllib.loads(
-        (repository_root / "configs/defaults/000-rl.toml").read_text()
+        (repository_root / "configs/defaults/002-rl.toml").read_text()
     )
     expected = QorlHarnessConfig.model_validate(
         {key: defaults[key] for key in ("agent", "measurement", "rl")}

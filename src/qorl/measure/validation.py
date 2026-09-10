@@ -228,12 +228,14 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
             )
             if selected is None:
                 raise ValueError(
-                    "selected_candidate_id: must name an eligible issued candidate"
+                    "selected_candidate_id: must name an eligible issued candidate "
+                    f"({', '.join(item.candidate_id for item in eligible) or 'none'}) or default"
                 )
             return selected
         if len(eligible) > 1:
             raise ValueError(
-                "selected_candidate_id: required when multiple candidates are eligible"
+                "selected_candidate_id: required when multiple candidates are eligible; "
+                f"choose {', '.join(item.candidate_id for item in eligible)} or default"
             )
         return eligible[0] if eligible else None
 
@@ -247,7 +249,17 @@ class PlanValidationEvaluator[ExecutorT: QueryExecutor]:
         self.selection.selected_candidate_id = None
 
     def accept_selection(self, candidate_id: str | None) -> None:
-        selected = self.select(candidate_id)
+        if candidate_id == "default":
+            if not self.candidates:
+                raise ValueError(
+                    "finish requires an attempt; use keep_default before submitting one"
+                )
+            if self.default is None:
+                raise RuntimeError("rollout baseline has not been started")
+            self.kept_default = True
+            selected = None
+        else:
+            selected = self.select(candidate_id)
         self.selection.selected_candidate_id = (
             selected.candidate_id if selected else None
         )

@@ -208,6 +208,36 @@ class TestPlan:
 
         assert result.valid, result.errors
 
+    def test_used_memoize_hint_still_requires_physical_inner_child(self) -> None:
+        diagnostics = DIAGNOSTICS.replace("SeqScan(a)HashJoin(a b)", "Memoize(a b)")
+        assert "{used hints:Memoize(a b)}" in diagnostics
+        result = verify_action(
+            {
+                "version": 1,
+                "joins": [
+                    {
+                        "relations": ["a", "b"],
+                        "force": "auto",
+                        "forbid": [],
+                        "memoize": "force",
+                    }
+                ],
+            },
+            {
+                "Node Type": "Nested Loop",
+                "Plans": [
+                    {"Node Type": "Seq Scan", "Alias": "a"},
+                    {"Node Type": "Seq Scan", "Alias": "b"},
+                ],
+            },
+            diagnostics,
+        )
+        assert not result.valid
+        assert any("even when the hint is used" in error for error in result.errors)
+        assert any(
+            "remove the memoization requirement" in error for error in result.errors
+        )
+
     def test_rejects_disabled_index_in_actual_plan(self) -> None:
         result = verify_action(
             {

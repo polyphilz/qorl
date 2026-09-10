@@ -20,7 +20,7 @@ from qorl.model.schemas import Message, MessageRole, ToolDefinition
 from qorl.postgres.schemas import PlannerSettings, PostgresResourceLimits
 
 INSPECTION_TURNS_PER_ALIAS = 3
-AGENT_INTERFACE_VERSION = 6
+AGENT_INTERFACE_VERSION = 7
 
 
 @dataclass(frozen=True)

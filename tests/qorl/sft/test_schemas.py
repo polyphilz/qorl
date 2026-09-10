@@ -99,7 +99,7 @@ def test_teacher_inference_is_required_and_independent_of_student() -> None:
     config = load_config(latest_template(ExperimentMethod.SFT))
     assert isinstance(config, SftExperimentConfig)
     assert config.data.generation is not None
-    assert config.data.generation.inference.max_tokens == 8192
+    assert config.data.generation.inference.max_tokens == 32_768
     assert config.inference.max_tokens == 8192
     with pytest.raises(ValidationError, match="inference"):
         GenerationSettings.model_validate(

@@ -28,6 +28,10 @@ actions and refine valid plans when useful.
 Before submitting any candidate, call keep_default if you choose PostgreSQL's
 default. Otherwise finish by selecting the eligible candidate you expect to execute fastest.
 You may select an earlier candidate.
+
+After searching, you may instead finish with selected_candidate_id="default" to
+keep PostgreSQL's default without another execution. If no submitted candidate
+is eligible, finish ends the search with no valid candidate unless you select default.
 """
 
 

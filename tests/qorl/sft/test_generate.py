@@ -424,8 +424,10 @@ def test_preparation_failure_preserves_paid_work_and_input_changes_are_rejected(
 
 
 @pytest.mark.parametrize("invalidity", ["constraints", "schema", "action"])
+@pytest.mark.parametrize("selection", ["candidate-01", "default"])
 def test_feedback_repair_and_earlier_selection_use_recorded_requests(
     invalidity: str,
+    selection: str,
     configured: tuple[SftExperimentConfig, dict[TaskRole, TaskSelection]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -452,7 +454,7 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
             "evaluate_candidate",
             {"action": {"version": 1, "settings": {"seq_page_cost": 3.0}}},
         ),
-        ("finish", {"selected_candidate_id": "candidate-01"}),
+        ("finish", {"selected_candidate_id": selection}),
     ]
     if schema_invalid:
         calls[1] = (
@@ -524,7 +526,14 @@ def test_feedback_repair_and_earlier_selection_use_recorded_requests(
     generated_attempts = attempts(tmp_path / "generation")
     for attempt in generated_attempts:
         assert attempt.trace is not None and attempt.rollout is not None
-        assert attempt.trace.selection.selected_candidate_id == "candidate-01"
+        assert attempt.trace.selection.selected_candidate_id == (
+            None if selection == "default" else selection
+        )
+        assert attempt.rollout.final is not None
+        if selection == "default":
+            assert attempt.rollout.final.kind == "kept_default"
+            assert attempt.rollout.execution_counts is not None
+            assert attempt.rollout.execution_counts.final_paired == 0
         assert len(attempt.rollout.candidates) == 3
         assert not attempt.rollout.candidates[1].constraints_satisfied
         assert attempt.rollout.candidates[1].action_valid is (not excluded)

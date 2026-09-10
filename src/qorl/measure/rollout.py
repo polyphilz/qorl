@@ -264,6 +264,9 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             raise RuntimeError("rollout baseline has not been measured")
         if self.finalization_started:
             raise RuntimeError("rollout finalization has already started")
+        if selected_candidate_id == "default":
+            self.accept_selection(selected_candidate_id)
+            selected_candidate_id = None
         if self.kept_default and selected_candidate_id is not None:
             raise ValueError("keep_default cannot select a candidate")
         if self.selection.status in (SelectionStatus.REJECTED, SelectionStatus.FAILED):
@@ -271,10 +274,14 @@ class RolloutEvaluator[ExecutorT: QueryExecutor](PlanValidationEvaluator[Executo
             self.finalization_started = True
             self.final = SelectionFailedOutcome()
             return self.final
-        selected = self.select(
-            self.selection.selected_candidate_id
-            if selected_candidate_id is None
-            else selected_candidate_id
+        selected = (
+            None
+            if self.kept_default
+            else self.select(
+                self.selection.selected_candidate_id
+                if selected_candidate_id is None
+                else selected_candidate_id
+            )
         )
         self.finalization_started = True
         if self.kept_default:
