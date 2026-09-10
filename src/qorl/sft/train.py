@@ -170,7 +170,7 @@ def checkpoint_model(
     training: Path,
     checkpoint: Path,
 ) -> ModelSettings:
-    """Export explicitly selected native weights using their saved base and LoRA settings."""
+    """Export selected native weights with a verified local copy of their saved base."""
     native = SFTConfig.model_validate_json((training / TRAINER_CONFIG).read_bytes())
     identity = TrainingIdentity.model_validate_json(
         (training / TRAINING_IDENTITY).read_bytes()
@@ -184,7 +184,7 @@ def checkpoint_model(
         raise ValueError(
             "checkpoint must be a complete native checkpoint from this run"
         )
-    base = Path(native.model.name)
+    base = resolve_model(model)
     if model_weights_sha256(base) != identity.base_weights_sha256:
         raise ValueError("training base weights changed")
     lora = native.model.lora
@@ -210,7 +210,9 @@ def checkpoint_model(
         expected = export_configuration(
             base, settings, load_tensors(weights.read_bytes())
         )
-        if adapter_config(adapter) != expected:
+        if adapter_config(adapter).model_dump(
+            exclude={"base_model_name_or_path"}
+        ) != expected.model_dump(exclude={"base_model_name_or_path"}):
             raise ValueError("exported adapter differs from recorded LoRA settings")
     else:
         export_adapter(checkpoint, base, settings, adapter)
@@ -288,7 +290,8 @@ def continuation_source(
         or checkpoint / "trainer" not in checkpoint_paths(source_training)
         or not source_report.validation_losses
         or source_report.validation_losses[-1].step != completed
-        or source_report.final_adapter.resolve() != checkpoint / "adapter"
+        or source_report.final_adapter
+        != source_native.run_dir / "checkpoints" / checkpoint.name / "adapter"
     ):
         raise ValueError(
             "continuation requires the completed run's final epoch checkpoint"
@@ -302,11 +305,13 @@ def continuation_source(
     if source_native.data.type != "prepared" or native.data.type != "prepared":
         raise ValueError("continuation requires prepared data")
     if (
-        source_native.model != native.model
+        source_native.model.model_dump(exclude={"name"})
+        != native.model.model_dump(exclude={"name"})
         or source_native.optim != native.optim
         or source_native.scheduler != native.scheduler
         or source_native.renderer != native.renderer
-        or source_native.tokenizer != native.tokenizer
+        or source_native.tokenizer.model_dump(exclude={"name"})
+        != native.tokenizer.model_dump(exclude={"name"})
         or source_native.deployment != native.deployment
         or source_native.matmul_precision != native.matmul_precision
         or (
@@ -345,11 +350,14 @@ def continuation_source(
     if sha256_file(adapter / "adapter_model.safetensors") != exported.adapter_sha256:
         raise ValueError("source adapter weights changed")
     verify_adapter_base(adapter, Path(native.model.name))
-    if adapter_config(adapter) != export_configuration(
+    expected = export_configuration(
         Path(native.model.name),
         source_config.training.lora,
         load_tensors((adapter / "adapter_model.safetensors").read_bytes()),
-    ):
+    )
+    if adapter_config(adapter).model_dump(
+        exclude={"base_model_name_or_path"}
+    ) != expected.model_dump(exclude={"base_model_name_or_path"}):
         raise ValueError("source adapter LoRA settings changed")
     return SftContinuation(
         checkpoint=checkpoint, checkpoint_sha256=checksum, completed_steps=completed

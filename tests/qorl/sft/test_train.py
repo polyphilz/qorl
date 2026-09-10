@@ -342,6 +342,8 @@ def test_continue_completed_epochs_exports_only_destination(
     [
         "rows",
         "optimizer",
+        "model",
+        "tokenizer",
         "epochs",
         "dropout",
         "seed",
@@ -360,6 +362,10 @@ def test_continuation_rejects_incompatible_source(
         (destination / "dataset/training/packed.jsonl").write_text("changed")
     elif change == "optimizer":
         native.optim.lr *= 2
+    elif change == "model":
+        native.model.seq_len += 1
+    elif change == "tokenizer":
+        native.tokenizer.chat_template = "changed"
     elif change == "epochs":
         config = config.model_copy(
             update={"training": config.training.model_copy(update={"epochs": 2})}
@@ -387,6 +393,49 @@ def test_continuation_rejects_incompatible_source(
     with pytest.raises(ValueError):
         train.continuation_source(config, destination, native, checkpoint)
     assert not (destination / "training").exists()
+
+
+def test_relocated_continuation_and_checkpoint_keep_content_checks(
+    continuation: tuple[SftExperimentConfig, Path, Path],
+) -> None:
+    config, destination, checkpoint = continuation
+    report = train.prepared_report(config, destination / "dataset")
+    source = checkpoint.parents[2]
+    recorded = {
+        path.relative_to(source): sha256_file(path)
+        for path in source.rglob("*")
+        if path.is_file()
+    }
+    relocated = source.with_name("relocated-source")
+    shutil.move(source, relocated)
+    checkpoint = relocated / checkpoint.relative_to(source)
+    base = Path(config.model.name_or_path)
+    relocated_base = base.with_name("relocated-base")
+    shutil.move(base, relocated_base)
+    config = config.model_copy(
+        update={
+            "model": config.model.model_copy(
+                update={"name_or_path": str(relocated_base)}
+            )
+        }
+    )
+    native = train.trainer_config(config, destination, report)
+    result = train.continuation_source(config, destination, native, checkpoint)
+    assert result.checkpoint == checkpoint
+    assert result.completed_steps == 4
+    model = train.checkpoint_model(config.model, relocated / "training", checkpoint)
+    assert model.name_or_path == str(relocated_base)
+    assert model.adapter_path == checkpoint / "adapter"
+    assert recorded == {
+        path.relative_to(relocated): sha256_file(path)
+        for path in relocated.rglob("*")
+        if path.is_file()
+    }
+    (relocated_base / "model.safetensors").write_bytes(b"different base")
+    with pytest.raises(ValueError, match="base weights differ"):
+        train.continuation_source(config, destination, native, checkpoint)
+    with pytest.raises(ValueError, match="base weights changed"):
+        train.checkpoint_model(config.model, relocated / "training", checkpoint)
 
 
 @pytest.fixture
