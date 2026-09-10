@@ -547,6 +547,85 @@ def test_cached_adapter_rejects_changed_tensors(
         )
 
 
+def test_initial_adapter_allows_new_data_with_fresh_progress(
+    config: SftExperimentConfig,
+    prepared: Path,
+    trained: SftTrainingReport,
+    tmp_path: Path,
+) -> None:
+    source = trained.final_adapter
+    before = {path: sha256_file(path) for path in source.iterdir()}
+    destination = tmp_path / "new-data-run"
+    shutil.copytree(prepared / "dataset", destination / "dataset")
+    rows = destination / "dataset/training/packed.jsonl"
+    rows.write_text(rows.read_text().replace('"input_ids":[0,', '"input_ids":[99,'))
+    assert sha256_file(rows) != sha256_file(prepared / "dataset/training/packed.jsonl")
+    report_path = destination / "dataset/report.json"
+    report = DatasetPreparationReport.model_validate_json(report_path.read_bytes())
+    report.files["training/packed.jsonl"] = sha256_file(rows)
+    write_json(report_path, report.model_dump(mode="json"))
+    result = train.train(config, destination, init_adapter=source)
+    native = SFTConfig.model_validate_json(
+        (destination / "training" / train.TRAINER_CONFIG).read_bytes()
+    )
+    identity = TrainingIdentity.model_validate_json(
+        (destination / "training" / train.TRAINING_IDENTITY).read_bytes()
+    )
+    assert native.resume is None
+    assert native.initial_adapter == destination / "training/configs/initial_adapter"
+    assert native.initial_adapter is not None
+    assert identity.initialization is not None
+    assert identity.initialization.adapter == source
+    assert identity.continuation is None
+    assert result.starting_step == 0 and result.optimizer_updates == 4
+    assert [loss.step for loss in result.validation_losses] == [0, 2, 4]
+    assert {path: sha256_file(path) for path in before} == before
+    assert sha256_file(native.initial_adapter / "adapter_model.safetensors") == (
+        identity.initialization.adapter_sha256
+    )
+
+
+@pytest.mark.parametrize(
+    "change", ["base", "weights", "alpha", "rank", "overlap", "resume"]
+)
+def test_initial_adapter_rejects_incompatible_source(
+    config: SftExperimentConfig,
+    prepared: Path,
+    trained: SftTrainingReport,
+    tmp_path: Path,
+    change: str,
+) -> None:
+    source = trained.final_adapter
+    destination = tmp_path / "initial-destination"
+    if change == "base":
+        (Path(config.model.name_or_path) / "model.safetensors").write_bytes(b"other")
+    elif change == "weights":
+        (source / "adapter_model.safetensors").write_bytes(b"changed")
+    elif change in ("alpha", "rank"):
+        config = config.model_copy(
+            update={
+                "training": config.training.model_copy(
+                    update={
+                        "lora": config.training.lora.model_copy(update={change: 10})
+                    }
+                )
+            }
+        )
+    elif change == "overlap":
+        destination = source.parent
+    else:
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            train.train(
+                config, destination, init_adapter=source, resume_from=source.parent
+            )
+        return
+    with pytest.raises((RuntimeError, ValueError)):
+        train.initialization_source(
+            config, destination, Path(config.model.name_or_path), source
+        )
+    assert not (destination / "training").exists()
+
+
 @pytest.mark.parametrize(
     "changes",
     [

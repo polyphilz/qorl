@@ -327,6 +327,17 @@ class SftContinuation(BaseModel):
     historical_rng_restored: Literal[False] = False
 
 
+class SftInitialization(BaseModel):
+    """An exported adapter supplying weights for a fresh training schedule."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    adapter: Path
+    adapter_sha256: str
+    config_sha256: str
+    manifest_sha256: str
+
+
 class TrainingIdentity(BaseModel):
     """Recorded training inputs and the base used to export its adapters."""
 
@@ -339,6 +350,7 @@ class TrainingIdentity(BaseModel):
     trainer_source: str
     trainer_config_sha256: str
     continuation: SftContinuation | None = None
+    initialization: SftInitialization | None = None
 
 
 class TrainerMetric(BaseModel):

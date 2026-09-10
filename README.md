@@ -121,3 +121,10 @@ uv run --frozen pyright
 
 The root test suite includes CPU-side training-plugin and adapter tests. Actual
 training, vLLM serving, and benchmark-host integration checks run on Linux.
+
+To train an existing LoRA on a new prepared dataset, add
+`--init-adapter /path/to/exported/adapter` to `qorl experiment run ... --stage train --run 000`.
+The run verifies the base, adapter checksum and LoRA settings, saves its own copy
+of the incoming adapter, and starts a fresh optimizer and epoch schedule.
+`training.epochs` counts passes over the new dataset. Use `--resume-from` instead
+to continue completed epochs on identical prepared rows with optimizer state.

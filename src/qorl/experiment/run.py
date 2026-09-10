@@ -69,6 +69,11 @@ def add_run_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="continue completed SFT epochs from an external native step directory",
     )
+    parser.add_argument(
+        "--init-adapter",
+        type=Path,
+        help="start SFT on prepared data from an exported LoRA, with fresh optimizer state",
+    )
 
 
 def request_from_arguments(arguments: argparse.Namespace) -> RunRequest:
@@ -80,6 +85,7 @@ def request_from_arguments(arguments: argparse.Namespace) -> RunRequest:
         split=TaskRole(arguments.split) if arguments.split is not None else None,
         resume=arguments.resume,
         resume_from=arguments.resume_from,
+        init_adapter=arguments.init_adapter,
     )
 
 
@@ -103,6 +109,10 @@ def launch_experiment(directory: Path, request: RunRequest) -> int:
     if request.resume_from is not None:
         arguments.extend(
             ["--resume-from", str(request.resume_from.expanduser().resolve())]
+        )
+    if request.init_adapter is not None:
+        arguments.extend(
+            ["--init-adapter", str(request.init_adapter.expanduser().resolve())]
         )
     with subprocess.Popen(
         [sys.executable, str(script), *arguments],
@@ -159,6 +169,15 @@ def load_inputs(directory: Path) -> RunInputs:
 def validate_stage(config: ExperimentConfig, request: RunRequest) -> None:
     """Reject irrelevant flags and require an explicit run for subsequent stages."""
     method = config.experiment.method
+    if request.init_adapter is not None and (
+        method != ExperimentMethod.SFT
+        or request.stage != RunStage.TRAIN
+        or request.resume
+        or request.resume_from is not None
+    ):
+        raise ValueError(
+            "--init-adapter is only valid for SFT train, separately from --resume and --resume-from"
+        )
     if request.resume_from is not None and (
         method != ExperimentMethod.SFT
         or request.stage != RunStage.TRAIN
@@ -292,7 +311,12 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
         if not isinstance(config, SftExperimentConfig) or output is None:
             raise ValueError("SFT training requires an existing prepared run")
         print(f"QORL run {output.name}: {output}", flush=True)
-        training = train(config, output, resume_from=request.resume_from)
+        training = train(
+            config=config,
+            run=output,
+            resume_from=request.resume_from,
+            init_adapter=request.init_adapter,
+        )
         print(
             f"Trained {training.optimizer_updates - training.starting_step} new updates; "
             f"{training.optimizer_updates} cumulative updates across {training.epochs} total epochs.",

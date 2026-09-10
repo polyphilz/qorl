@@ -361,6 +361,7 @@ def test_launch_executes_the_experiment_entrypoint_and_forwards_flags(
         checkpoint=checkpoint,
         resume=True,
         resume_from=checkpoint,
+        init_adapter=checkpoint,
     )
     assert run.launch_experiment(calibration_experiment, request) == 7
     execute.assert_called_once_with(
@@ -378,26 +379,40 @@ def test_launch_executes_the_experiment_entrypoint_and_forwards_flags(
             "--resume",
             "--resume-from",
             str(checkpoint),
+            "--init-adapter",
+            str(checkpoint),
         ],
         cwd=run.REPOSITORY_ROOT,
         start_new_session=True,
     )
 
 
+@pytest.mark.parametrize("initialization", [False, True])
 @pytest.mark.parametrize("method", list(ExperimentMethod))
 @pytest.mark.parametrize("stage", list(RunStage))
 def test_resume_from_only_supports_sft_train(
-    method: ExperimentMethod, stage: RunStage, repository_root: Path
+    method: ExperimentMethod,
+    stage: RunStage,
+    repository_root: Path,
+    initialization: bool,
 ) -> None:
     name = "calibration" if method == ExperimentMethod.CALIBRATE else method.value
     config = load_config(repository_root / f"configs/defaults/000-{name}.toml")
     request = RunRequest(
-        stage=stage, number=0, resume_from=Path("source/checkpoints/step_2")
+        stage=stage,
+        number=0,
+        resume_from=None if initialization else Path("source/checkpoints/step_2"),
+        init_adapter=Path("source/adapter") if initialization else None,
     )
     if method == ExperimentMethod.SFT and stage == RunStage.TRAIN:
         run.validate_stage(config, request)
         with pytest.raises(ValueError, match="separately from --resume"):
             run.validate_stage(config, replace(request, resume=True))
+        if initialization:
+            with pytest.raises(ValueError, match="separately"):
+                run.validate_stage(
+                    config, replace(request, resume_from=Path("source/step_2"))
+                )
     else:
         with pytest.raises(ValueError, match="only valid for SFT train"):
             run.validate_stage(config, request)

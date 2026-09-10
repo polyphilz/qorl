@@ -44,7 +44,7 @@ environments = [
 ]
 
 [tool.uv.sources]
-prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "a42621e" }
+prime-rl = { git = "https://github.com/polyphilz/prime-rl.git", rev = "d4636a5" }
 
 # uv reads metadata corrections from the root project. These match Prime-RL's.
 # ModelExpress's generated protobuf code supports v6 despite its published <6 cap.

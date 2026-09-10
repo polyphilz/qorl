@@ -55,6 +55,7 @@ class RunRequest:
     split: TaskRole | None = None
     resume: bool = False
     resume_from: Path | None = None
+    init_adapter: Path | None = None
 
 
 @dataclass(frozen=True)

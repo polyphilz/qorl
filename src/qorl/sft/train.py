@@ -2,6 +2,7 @@
 
 import math
 import os
+import shutil
 import subprocess
 import sys
 from importlib.metadata import distribution
@@ -31,7 +32,7 @@ from qorl.adapters.export import (
     export_configuration,
 )
 from qorl.adapters.schemas import AdapterExportManifest, LoraSettings
-from qorl.adapters.verify import verify_adapter_base
+from qorl.adapters.verify import verify_adapter_base, verify_adapter_weights
 from qorl.experiment.schemas import SftExperimentConfig, load_config
 from qorl.model.files import model_weights_sha256, resolve_model
 from qorl.model.schemas import ModelSettings
@@ -41,6 +42,7 @@ from qorl.sft.schemas import (
     DatasetPreparationIdentity,
     DatasetPreparationReport,
     SftContinuation,
+    SftInitialization,
     SftTrainingReport,
     TrainerMetric,
     TrainingIdentity,
@@ -364,13 +366,42 @@ def continuation_source(
     )
 
 
+def initialization_source(
+    config: SftExperimentConfig,
+    run: Path,
+    base: Path,
+    adapter: Path,
+) -> SftInitialization:
+    """Verify an exported adapter without depending on its original dataset or optimizer."""
+    adapter = adapter.expanduser().resolve()
+    if adapter.is_relative_to(run.resolve()) or run.resolve().is_relative_to(adapter):
+        raise ValueError("initial adapter and destination run must not overlap")
+    manifest = verify_adapter_weights(adapter)
+    verify_adapter_base(adapter, base)
+    tensors = load_tensors((adapter / "adapter_model.safetensors").read_bytes())
+    expected = export_configuration(base, config.training.lora, tensors)
+    if adapter_config(adapter).model_dump(
+        exclude={"base_model_name_or_path"}
+    ) != expected.model_dump(exclude={"base_model_name_or_path"}):
+        raise ValueError("initial adapter differs from the experiment's LoRA settings")
+    return SftInitialization(
+        adapter=adapter,
+        adapter_sha256=manifest.adapter_sha256,
+        config_sha256=sha256_file(adapter / "adapter_config.json"),
+        manifest_sha256=sha256_file(adapter / "qorl-manifest.json"),
+    )
+
+
 def train(
     config: SftExperimentConfig,
     run: Path,
     *,
     resume_from: Path | None = None,
+    init_adapter: Path | None = None,
 ) -> SftTrainingReport:
     """Run a fixed prepared schedule without replacing an existing training attempt."""
+    if resume_from is not None and init_adapter is not None:
+        raise ValueError("--init-adapter and --resume-from are mutually exclusive")
     run = run.resolve()
     training = run / "training"
     if (training / "report.json").exists():
@@ -387,6 +418,23 @@ def train(
     starting_step = continuation.completed_steps if continuation else 0
     if continuation:
         native.resume = ResumeConfig(step=None, dir=continuation.checkpoint)
+    initialization = (
+        initialization_source(config, run, Path(native.model.name), init_adapter)
+        if init_adapter is not None
+        else None
+    )
+    if initialization:
+        snapshot = training / "configs/initial_adapter"
+        snapshot.mkdir(parents=True)
+        for name, checksum in (
+            ("adapter_model.safetensors", initialization.adapter_sha256),
+            ("adapter_config.json", initialization.config_sha256),
+            ("qorl-manifest.json", initialization.manifest_sha256),
+        ):
+            shutil.copyfile(initialization.adapter / name, snapshot / name)
+            if sha256_file(snapshot / name) != checksum:
+                raise ValueError(f"initial adapter changed while copying: {name}")
+        native.initial_adapter = snapshot
     identity = TrainingIdentity(
         experiment_sha256=sha256_json(config.model_dump(mode="json")),
         preparation_sha256=sha256_file(run / "dataset/report.json"),
@@ -394,6 +442,7 @@ def train(
         trainer_source=distribution("prime-rl").read_text("direct_url.json") or "",
         trainer_config_sha256=sha256_json(native.model_dump(mode="json")),
         continuation=continuation,
+        initialization=initialization,
     )
     write_json(training / TRAINING_IDENTITY, identity.model_dump(mode="json"))
     write_json(training / TRAINER_CONFIG, native.model_dump(mode="json"))
