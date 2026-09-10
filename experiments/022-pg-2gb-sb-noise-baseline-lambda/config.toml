@@ -1,0 +1,20 @@
+[experiment]
+name = "pg-2gb-sb-noise-baseline-lambda"
+method = "calibrate"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
+
+[pool]
+path = "docker/worker_pool/configs/003-poolconf-lambda-4x8/poolconf.json"
+
+[data.test]
+file = "test-tasks.json"
+selection_seed = 42
+expression = "test=job"
+
+[measurement]
+max_warmup_runs = 5
+num_trials = 20
+default_timeout_seconds = 300.0

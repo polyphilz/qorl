@@ -283,7 +283,10 @@ def capture_host() -> HostCapture:
                 [
                     "lscpu",
                     "--json",
-                    "--extended=CPU,CORE,SOCKET,NODE,CACHE,ONLINE,MAXMHZ,MINMHZ",
+                    # Some guests expose no frequency limits; util-linux 2.39
+                    # emits bare '-' values for those columns, invalidating JSON.
+                    # Available frequency evidence remains in summary/power_policies.
+                    "--extended=CPU,CORE,SOCKET,NODE,CACHE,ONLINE",
                 ]
             ),
             microcode=parse_cpu_microcode(),

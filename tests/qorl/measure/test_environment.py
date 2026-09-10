@@ -397,7 +397,7 @@ def test_direct_capture_complete_wire_and_artifacts(
         [
             "lscpu",
             "--json",
-            "--extended=CPU,CORE,SOCKET,NODE,CACHE,ONLINE,MAXMHZ,MINMHZ",
+            "--extended=CPU,CORE,SOCKET,NODE,CACHE,ONLINE",
         ],
         [
             "findmnt",
@@ -435,6 +435,26 @@ def test_direct_capture_complete_wire_and_artifacts(
             "/usr/lib/postgresql/18/lib/pg_hint_plan.so",
         ]
     ]
+
+
+def test_host_capture_without_guest_frequency_limits(
+    commands: list[list[str]],
+    host_files: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = environment.run
+    topology = {"cpus": [{"cpu": 0, "core": 0, "socket": 0, "node": 0}]}
+
+    def command(arguments: list[str], *, check: bool = True) -> str:
+        if arguments[0] == "lscpu" and arguments[-1].startswith("--extended="):
+            if "MAXMHZ" in arguments[-1] or "MINMHZ" in arguments[-1]:
+                # Actual util-linux 2.39 output on Lambda, where limits are unknown.
+                return '{"cpus":[{"cpu":0,"maxmhz":-,"minmhz":-}]}'
+            return json.dumps(topology)
+        return original(arguments, check=check)
+
+    monkeypatch.setattr(environment, "run", command)
+    assert environment.capture_host().cpu.topology == topology
 
 
 def test_gpu_csv_preserves_strings_and_topology(
