@@ -104,3 +104,26 @@ Run `002` trains for one epoch from experiment 020's epoch-2 adapter
 (`020-sft-astra-ceb-epoch2/000/training/checkpoints/step_764/adapter`), using
 `--init-adapter` and fresh optimizer state. The source adapter is preserved;
 the experiment's configuration and task selections are unchanged.
+
+Completed training and JOB evaluation analysis: [results.md](results.md).
+
+## Evaluate the trained adapter on JOB
+
+Run `002`'s checkpoint, exported adapter, and recorded run inputs were copied
+from Lambda to FLOPper and verified there. The SFT evaluation stage uses the
+existing test split directly; no separate experiment is needed. From FLOPper's
+QORL repository:
+
+```bash
+uv run --frozen --extra gpu qorl experiment run \
+  experiments/025-sft-astra-ceb-300 \
+  --stage evaluate --run 002 --split test \
+  --checkpoint outputs/025-sft-astra-ceb-300/002/training/checkpoints/step_1102
+```
+
+`--checkpoint` selects the native step directory; the evaluator verifies and
+uses its exported adapter. Evaluation settings and all 113 JOB tasks match
+experiment 026. The first invocation writes to
+`outputs/025-sft-astra-ceb-300/002/evaluation/test/000`; later invocations receive
+new numbered evaluation directories. Prepared training rows remain on Lambda
+and are not required for this evaluation.
