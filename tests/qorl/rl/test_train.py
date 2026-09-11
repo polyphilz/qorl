@@ -176,6 +176,43 @@ def test_explicit_harness_settings_survive_construction(
     assert actual.model is not None and actual.model.max_concurrent_requests == 2
 
 
+def test_measurement_leases_and_concurrency_survive_native_roundtrip(
+    config: RlExperimentConfig, run: Path
+) -> None:
+    doc = config.model_dump()
+    assert "worker_lease_scope" not in doc["rl"]
+    doc["rl"]["worker_lease_scope"] = "measurement"
+    doc["training"].update(max_inflight=12, batch_size=8)
+    doc["model"]["max_concurrent_requests"] = 16
+    doc["inference"]["serving"]["max_num_seqs"] = 16
+    native = train.native_config(RlExperimentConfig.model_validate(doc), run)
+    native = RLConfig.model_validate_json(native.model_dump_json())
+    source = native.orchestrator.train.source[0]
+    assert isinstance(source.env, QorlEnvironmentConfig)
+    harness = source.env.agent.harness
+    assert isinstance(harness, QorlHarnessConfig)
+    assert harness.rl.worker_lease_scope == "measurement"
+    assert harness.model is not None and harness.model.max_concurrent_requests == 16
+    assert source.serve.max_concurrent == 12
+    assert native.orchestrator.concurrency.initial_inflight == 12
+    assert native.orchestrator.concurrency.max_inflight == 12
+    assert native.inference is not None
+    assert native.inference.vllm.model_dump()["max_num_seqs"] == 16
+
+
+@pytest.mark.parametrize(
+    "field", ["default_warmups", "candidate_feedback_warmups", "paired_warmups"]
+)
+def test_measurement_leases_require_warmups(
+    config: RlExperimentConfig, field: str
+) -> None:
+    doc = config.model_dump()
+    doc["rl"]["worker_lease_scope"] = "measurement"
+    doc["measurement"][field] = 0
+    with pytest.raises(ValueError, match="warmups for every timed phase"):
+        RlExperimentConfig.model_validate(doc)
+
+
 @pytest.mark.parametrize(
     "field,value,match",
     [

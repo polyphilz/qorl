@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import random
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from threading import Event
 
 import verifiers.v1 as vf
 
 from qorl.agent.agent import QoAgentPolicy
+from qorl.agent.types import InspectionExecutor
 from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutRecord
 from qorl.model.client import HttpTransport, LocalModelClient
@@ -19,6 +20,7 @@ from qorl.rl.schemas import (
     QorlTaskData,
     RlRolloutRecord,
 )
+from qorl.rl.workers import PooledExecutor, PooledRolloutEvaluator
 from qorl.util.hashing import sha256_json
 from qorl.util.seeds import derive_seed
 
@@ -109,15 +111,30 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
             seed=None,  # The environment supplies the recorded native per-rollout seed.
         )
 
-        with active.claim_worker() as slot:
-            evaluator = RolloutEvaluator(
-                slot.client,
-                active.task_set,
-                task,
-                measurement=self.config.measurement,
-                max_candidates=self.config.agent.candidate_attempts,
-                cancel=cancel,
-            )
+        with ExitStack() as ownership:
+            pooled = None
+            slot = None
+            evaluator: RolloutEvaluator[InspectionExecutor]
+            if self.config.rl.worker_lease_scope == "measurement":
+                pooled = PooledExecutor(active, cancel)
+                evaluator = PooledRolloutEvaluator(
+                    pooled,
+                    active.task_set,
+                    task,
+                    measurement=self.config.measurement,
+                    max_candidates=self.config.agent.candidate_attempts,
+                    cancel=cancel,
+                )
+            else:
+                slot = ownership.enter_context(active.claim_worker())
+                evaluator = RolloutEvaluator(
+                    slot.client,
+                    active.task_set,
+                    task,
+                    measurement=self.config.measurement,
+                    max_candidates=self.config.agent.candidate_attempts,
+                    cancel=cancel,
+                )
 
             def store_record(record: RolloutRecord) -> None:
                 reward = (
@@ -128,7 +145,10 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                 result = RlRolloutRecord(
                     **record.model_dump(),
                     database_pool=active.pool_manifest(),
-                    database_worker=slot.resources.manifest(),
+                    database_worker=slot.resources.manifest()
+                    if slot is not None
+                    else None,
+                    database_worker_leases=pooled.leases if pooled is not None else [],
                     scalar_reward=reward,
                 )
                 trace.info["qorl"] = result.to_wire()

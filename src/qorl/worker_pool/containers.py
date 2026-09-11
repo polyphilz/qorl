@@ -8,9 +8,10 @@ import re
 import subprocess
 import time
 from collections.abc import Callable, Generator
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path, PurePosixPath
+from threading import Event
 
 from qorl.paths import REPOSITORY_ROOT
 from qorl.postgres.client import PostgresClient
@@ -28,6 +29,7 @@ from qorl.worker_pool.schemas import (
 STOP_TIMEOUT_SECONDS = 60
 STARTUP_TIMEOUT_SECONDS = 60
 STARTUP_POLL_SECONDS = 1
+CLAIM_POLL_SECONDS = 0.1
 logger = logging.getLogger(__name__)
 
 
@@ -321,9 +323,22 @@ test ! -e "/target/$2/postmaster.pid"
                 slot.container_id = ""
 
     @contextlib.contextmanager
-    def claim_worker(self) -> Generator[WorkerSlot, None, None]:
-        slot = self._available.get()
+    def claim_worker(
+        self, *, cancel: Event | None = None
+    ) -> Generator[WorkerSlot, None, None]:
+        while True:
+            if cancel is not None and cancel.is_set():
+                raise CancelledError("rollout cancelled while waiting for a worker")
+            try:
+                slot = self._available.get(
+                    timeout=CLAIM_POLL_SECONDS if cancel is not None else None
+                )
+                break
+            except queue.Empty:
+                continue
         try:
+            if cancel is not None and cancel.is_set():
+                raise CancelledError("rollout cancelled before using a worker")
             yield slot
         finally:
             self._available.put(slot)

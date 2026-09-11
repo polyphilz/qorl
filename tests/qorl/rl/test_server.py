@@ -187,6 +187,112 @@ def test_remote_endpoint_mismatch(
         train.native_config(RlExperimentConfig.model_validate(data), inputs)
 
 
+@pytest.mark.parametrize(
+    "outcomes,error,match",
+    [
+        pytest.param(
+            ["timeout", "ok", "cancel"],
+            asyncio.CancelledError,
+            None,
+            id="recovers-after-timeout",
+        ),
+        pytest.param(
+            ["timeout", "timeout", "ok", "timeout", "timeout", "ok", "cancel"],
+            asyncio.CancelledError,
+            None,
+            id="success-resets-timeout-count",
+        ),
+        pytest.param(
+            ["timeout", "timeout", "timeout"],
+            RuntimeError,
+            "health timed out 3 consecutive times",
+            id="three-consecutive-timeouts",
+        ),
+        pytest.param(
+            ["replaced"], RuntimeError, "identity changed", id="changed-identity"
+        ),
+        pytest.param(
+            ["timeout", "timeout", "replaced"],
+            RuntimeError,
+            "identity changed",
+            id="changed-identity-after-timeouts",
+        ),
+        pytest.param(
+            ["missing"], RuntimeError, "identity changed", id="missing-identity"
+        ),
+        pytest.param(["cancel"], asyncio.CancelledError, None, id="cancellation"),
+        pytest.param(["error"], RuntimeError, "control failed", id="control-error"),
+    ],
+)
+def test_health_monitor_timeout_tolerance(
+    hybrid: tuple[RlExperimentConfig, Path, Path],
+    repository_root: Path,
+    postgres_config: PostgresConfig,
+    pool_config: PoolConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    outcomes: list[str],
+    error: type[BaseException],
+    match: str | None,
+) -> None:
+    config, inputs, assets = hybrid
+    active = QorlRuntime(
+        TaskSet.load(repository_root, "job"),
+        pool_config,
+        "health-test",
+        postgres_config,
+    )
+    identity = EnvironmentServiceIdentity(
+        service_id="service",
+        hostname="PG",
+        repository=repository_root,
+        renderer_model=assets,
+        evidence_directory=inputs,
+        address="tcp://127.0.0.1:5000",
+        contract=server.contract(config, inputs, assets),
+        code_commit="test",
+        database_pool=active.pool_manifest(),
+    )
+    seen: list[str] = []
+
+    async def control(
+        self: server.QorlEnvClient,
+        request: EnvironmentControlRequest,
+        *,
+        timeout: float = server.CONTROL_TIMEOUT,
+    ) -> EnvironmentControlResponse:
+        assert self.address == identity.address
+        assert request.operation == "identity" and timeout == server.CONTROL_TIMEOUT
+        outcome = outcomes[len(seen)]
+        seen.append(outcome)
+        if outcome == "timeout":
+            raise TimeoutError("control timed out")
+        if outcome == "cancel":
+            raise asyncio.CancelledError
+        if outcome == "error":
+            raise RuntimeError("control failed")
+        if outcome == "missing":
+            return EnvironmentControlResponse()
+        return EnvironmentControlResponse(
+            identity=identity
+            if outcome == "ok"
+            else identity.model_copy(update={"service_id": "replacement"})
+        )
+
+    monkeypatch.setattr(server.QorlEnvClient, "control", control)
+    monkeypatch.setattr(server, "HEALTH_INTERVAL", 0)
+
+    async def monitor() -> None:
+        client = server.QorlEnvClient(identity.address)
+        try:
+            await client.monitor(identity.service_id)
+        finally:
+            await client.close()
+
+    with pytest.raises(error, match=match):
+        asyncio.run(monitor())
+    assert seen == outcomes
+
+
 @pytest.mark.parametrize("thinking", [False, True])
 def test_native_remote_episode_and_disconnect(
     hybrid: tuple[RlExperimentConfig, Path, Path],

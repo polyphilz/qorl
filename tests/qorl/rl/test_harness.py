@@ -9,6 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 import verifiers.v1 as vf
+from tests.qorl.rl.test_workers import assert_pool_released
 
 from qorl.agent.schemas import AgentTrace
 from qorl.agent.types import StopReason
@@ -28,12 +29,14 @@ WAIT_SECONDS = 2.0
 
 
 @pytest.mark.parametrize("model_fails", [False, True])
+@pytest.mark.parametrize("scope", ["episode", "measurement"])
 def test_actual_harness_uses_proxy_and_retains_records(
     repository_root: Path,
     postgres_config: PostgresConfig,
     pool_config: PoolConfig,
     monkeypatch: pytest.MonkeyPatch,
     model_fails: bool,
+    scope: str,
 ) -> None:
     defaults = tomllib.loads(
         (repository_root / "configs/defaults/000-rl.toml").read_text()
@@ -42,6 +45,12 @@ def test_actual_harness_uses_proxy_and_retains_records(
         {
             key: defaults[key]
             for key in ("agent", "measurement", "rl", "model", "inference")
+        }
+    )
+    config = QorlHarnessConfig.model_validate(
+        {
+            **config.model_dump(),
+            "rl": {**config.rl.model_dump(), "worker_lease_scope": scope},
         }
     )
     assert config.model is not None
@@ -75,6 +84,8 @@ def test_actual_harness_uses_proxy_and_retains_records(
         transport: HttpTransport, path: str, body: JsonObject | None = None
     ) -> JsonObject:
         assert body is not None and config.model is not None
+        if scope == "measurement":
+            assert_pool_released(runtime)
         requests.append((transport.base_url, path, body))
         if path == "../tokenize":
             return {"count": 1, "max_model_len": config.model.context_length}
@@ -109,7 +120,7 @@ def test_actual_harness_uses_proxy_and_retains_records(
         Mock(),
         "http://proxy.test/v1",
         "rollout-secret",
-        {},
+        dict[str, str](),
         QorlTaskData(task_id=task.task_id, template_id=task.template_id),
     )
     harness = QorlHarness(config)
@@ -128,7 +139,14 @@ def test_actual_harness_uses_proxy_and_retains_records(
     record = RlRolloutRecord.model_validate(trace.info["qorl"])
     policy_trace = AgentTrace.model_validate(trace.info["qorl_policy"])
     assert record.task_id == task.task_id
-    assert record.database_worker == worker.resources.manifest()
+    if scope == "episode":
+        assert record.database_worker == worker.resources.manifest()
+        assert not record.database_worker_leases
+    else:
+        assert record.database_worker is None
+        assert [lease.operation for lease in record.database_worker_leases] == (
+            ["initial_default"] if model_fails else ["initial_default", "final"]
+        )
     if model_fails:
         assert record.final is None and record.failure is not None
         assert policy_trace.stop_reason is None
@@ -145,7 +163,7 @@ def test_fallback_config_matches_rl_defaults(repository_root: Path) -> None:
         {key: defaults[key] for key in ("agent", "measurement", "rl")}
     )
 
-    fallback = QorlHarnessConfig(id="qorl")
+    fallback = QorlHarnessConfig.model_validate({"id": "qorl"})
 
     assert fallback.agent == expected.agent
     assert fallback.measurement == expected.measurement

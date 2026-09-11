@@ -49,6 +49,7 @@ from qorl.worker_pool.config import load_pool_config
 
 CONTROL_TIMEOUT = 10.0
 HEALTH_INTERVAL = 2.0
+HEALTH_TIMEOUT_LIMIT = 3
 logger = logging.getLogger(__name__)
 
 
@@ -169,6 +170,7 @@ class QorlEnvClient(EnvClient):
         return await self._request(request, EnvironmentControlResponse, timeout=timeout)
 
     async def monitor(self, service_id: str) -> None:
+        timeouts = 0
         while True:
             try:
                 response = await self.control(
@@ -176,13 +178,27 @@ class QorlEnvClient(EnvClient):
                     timeout=CONTROL_TIMEOUT,
                 )
             except TimeoutError as error:
-                raise RuntimeError(
-                    f"remote environment health timed out: {self.address}"
-                ) from error
-            if response.identity is None or response.identity.service_id != service_id:
-                raise RuntimeError(
-                    "remote environment service identity changed during training"
+                timeouts += 1
+                logger.warning(
+                    "Remote environment health timed out (%d/%d): %s",
+                    timeouts,
+                    HEALTH_TIMEOUT_LIMIT,
+                    self.address,
                 )
+                if timeouts >= HEALTH_TIMEOUT_LIMIT:
+                    raise RuntimeError(
+                        f"remote environment health timed out {timeouts} consecutive "
+                        f"times: {self.address}"
+                    ) from error
+            else:
+                if (
+                    response.identity is None
+                    or response.identity.service_id != service_id
+                ):
+                    raise RuntimeError(
+                        "remote environment service identity changed during training"
+                    )
+                timeouts = 0
             await asyncio.sleep(HEALTH_INTERVAL)
 
 

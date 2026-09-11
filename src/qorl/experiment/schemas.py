@@ -272,6 +272,20 @@ class RlExperimentConfig(ModelExperimentConfig):
     rl: RlSettings
 
     @model_validator(mode="after")
+    def warm_measurement_leases(self) -> Self:
+        measured = self.measurement
+        if self.rl.worker_lease_scope == "measurement" and (
+            not measured.default_warmups
+            or not measured.paired_warmups
+            or (
+                measured.candidate_feedback_measurements
+                and not measured.candidate_feedback_warmups
+            )
+        ):
+            raise ValueError("measurement leases require warmups for every timed phase")
+        return self
+
+    @model_validator(mode="after")
     def separate_training_and_serving(self) -> Self:
         """RL training and inference use disjoint GPU groups concurrently."""
         if self.resources is not None and (

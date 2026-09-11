@@ -128,6 +128,9 @@ class RlSettings(BaseModel):
     environment: RemoteEnvironmentSettings | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    worker_lease_scope: Literal["episode", "measurement"] = Field(
+        default="episode", exclude_if=lambda value: value == "episode"
+    )
 
     @model_validator(mode="after")
     def consumed_reward_settings(self) -> Self:
@@ -139,11 +142,25 @@ class RlSettings(BaseModel):
         return self
 
 
+class DatabaseWorkerLease(BaseModel):
+    """One uninterrupted database phase, including pool wait and ownership time."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    operation: str
+    worker_slot: int
+    wait_seconds: float = Field(ge=0, allow_inf_nan=False)
+    held_seconds: float = Field(ge=0, allow_inf_nan=False)
+
+
 class RlRolloutRecord(RolloutRecord):
     """Measurement facts plus runtime scope and optional ordinary-GRPO scalar reward."""
 
     database_pool: PoolManifest
-    database_worker: WorkerManifest
+    database_worker: WorkerManifest | None
+    database_worker_leases: list[DatabaseWorkerLease] = Field(
+        default_factory=list[DatabaseWorkerLease], exclude_if=lambda value: not value
+    )
     scalar_reward: float | None
 
 

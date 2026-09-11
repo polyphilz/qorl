@@ -122,6 +122,17 @@ uv run --frozen pyright
 The root test suite includes CPU-side training-plugin and adapter tests. Actual
 training, vLLM serving, and benchmark-host integration checks run on Linux.
 
+RL defaults to holding one database worker for each episode. Set
+`rl.worker_lease_scope = "measurement"` to release workers during model turns.
+Each initial baseline, candidate evaluation and final paired measurement keeps
+one worker for its entire warmup/measurement sequence; inspection calls borrow
+a worker individually. This mode requires warmups and uniform worker capacities.
+`training.max_inflight` can then exceed the worker count, with inference capacity
+configured separately. Evaluation and calibration keep their existing ownership.
+RL records each phase's worker, queue wait and ownership time. Preliminary
+feedback can span workers; final pairs stay together. Cache interference and
+feedback-derived timeouts still require checking when comparing performance.
+
 To train an existing LoRA on a new prepared dataset, add
 `--init-adapter /path/to/exported/adapter` to `qorl experiment run ... --stage train --run 000`.
 The run verifies the base, adapter checksum and LoRA settings, saves its own copy
