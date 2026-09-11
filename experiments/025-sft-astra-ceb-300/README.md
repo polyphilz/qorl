@@ -74,8 +74,8 @@ batches can repeat `--exclude-tasks-from` for both 017 and 025 training files.
 
 ## Training exclusions
 
-For the next SFT dataset, remove these six conversations from the Lambda copy of
-run `001` before rendering and packing. Each ended with `keep_default` without
+These six conversations were removed from the Lambda copy of run `001` before
+rendering and packing. Each ended with `keep_default` without
 calling `evaluate_candidate`. This is a curriculum choice to favor trying
 interventions, not evidence that PostgreSQL's default was wrong.
 
@@ -88,9 +88,19 @@ interventions, not evidence that PostgreSQL's default was wrong.
 | `65c71eed4ae9d21fd0efa6ec` | `ceb-4a-4a161` |
 | `522b384060cd445fa3883806` | `ceb-4a-4a229` |
 
-Keep the original generation artifacts on FLOPper. Remove whole conversations
-before packing so shared packed rows do not cause unrelated turns to be removed.
-Keep the 19 available validation conversations unchanged and retain post-search
-default selections. No other outcome-based filtering is applied. The training
-source then has 294 conversations; the existing 49,152-token limit is expected
-to reject the same one overlong conversation, leaving 293 usable demonstrations.
+The original generation artifacts on FLOPper are unchanged. Whole conversations
+were removed before packing, preserving unrelated turns that share packed rows.
+The 19 available validation conversations and post-search default selections
+were retained. No other outcome-based filtering was applied.
+
+Lambda's prepared dataset is at `outputs/025-sft-astra-ceb-300/002/dataset`:
+293 training conversations in 1,102 packed rows, and 19 validation conversations
+in 73 rows. Of the 294 training conversations entering preparation, `ceb-7a-7a72`
+exceeded the unchanged 49,152-token context limit. Packing verification found
+none of the six excluded IDs and confirmed that skipped malformed/action-invalid
+replies remain excluded from supervision.
+
+Run `002` trains for one epoch from experiment 020's epoch-2 adapter
+(`020-sft-astra-ceb-epoch2/000/training/checkpoints/step_764/adapter`), using
+`--init-adapter` and fresh optimizer state. The source adapter is preserved;
+the experiment's configuration and task selections are unchanged.
