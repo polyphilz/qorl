@@ -25,3 +25,5 @@ Adapter: experiment 020, step 764 (epoch 2). Tensor SHA-256:
 The serving base and exported adapter checksums were verified on FLOPper.
 Interface v7 comes from the executing checkout; the experiment config does not
 pin harness code.
+
+Completed run analysis: [results.md](results.md).
