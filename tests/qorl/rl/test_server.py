@@ -604,14 +604,23 @@ def test_hanging_probe_is_bounded(
 
 
 @pytest.mark.parametrize(
-    ("floor", "http_seconds", "attempts", "expected"),
-    [(5.0, 2.0, 1, 910.0), (1200.0, 2.0, 1, 1210.0), (5.0, 300.0, 3, 7690.0)],
+    ("floor", "http_seconds", "attempts", "rollouts", "capacity", "expected"),
+    [
+        (5.0, 2.0, 1, 4, 8, 910.0),
+        (1200.0, 2.0, 1, 4, 8, 1210.0),
+        (5.0, 300.0, 3, 4, 8, 1930.0),
+        (5.0, 300.0, 3, 4, 4, 1930.0),
+        (5.0, 300.0, 3, 4, 2, 7690.0),
+        (5.0, 300.0, 3, 1, 1, 1930.0),
+    ],
 )
 def test_cancellation_deadlines_include_candidate_floor_multiplier_and_http_retries(
     hybrid: tuple[RlExperimentConfig, Path, Path],
     floor: float,
     http_seconds: float,
     attempts: int,
+    rollouts: int,
+    capacity: int,
     expected: float,
 ) -> None:
     config, inputs, _ = hybrid
@@ -624,9 +633,10 @@ def test_cancellation_deadlines_include_candidate_floor_multiplier_and_http_retr
         candidate_timeout_multiplier=3.0,
     )
     body["model"]["request_timeout_seconds"] = http_seconds
+    body["model"]["max_concurrent_requests"] = capacity
     body["model"]["retry"].update(max_attempts=attempts, maximum_delay_seconds=30.0)
     resolved = QorlHarnessConfig.model_validate(body)
-    assert train.cancellation_timeout(resolved, 4) == expected
+    assert train.cancellation_timeout(resolved, rollouts) == expected
 
 
 def test_service_startup_failure_closes_owned_resources(

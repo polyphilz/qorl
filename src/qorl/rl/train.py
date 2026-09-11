@@ -366,7 +366,8 @@ def cancellation_timeout(harness: QorlHarnessConfig, max_inflight: int) -> float
     )
     # Cancellation is checked between turns/statements. Each local model turn can
     # finish tokenization and generation, including retries and semaphore waits.
-    model_seconds = 2 * max_inflight * request_seconds
+    queued_turns = 1 if model.max_concurrent_requests >= max_inflight else max_inflight
+    model_seconds = 2 * queued_turns * request_seconds
     return (
         max(measurement.default_timeout_seconds, candidate_seconds, model_seconds)
         + CANCELLATION_GRACE_SECONDS
