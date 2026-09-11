@@ -71,3 +71,26 @@ Creation copies the current defaults; set the resulting student context to
 49,152 to match this experiment. Exclusion flags are only needed when creating
 another selection, not when running these saved task files. Future disjoint
 batches can repeat `--exclude-tasks-from` for both 017 and 025 training files.
+
+## Training exclusions
+
+For the next SFT dataset, remove these six conversations from the Lambda copy of
+run `001` before rendering and packing. Each ended with `keep_default` without
+calling `evaluate_candidate`. This is a curriculum choice to favor trying
+interventions, not evidence that PostgreSQL's default was wrong.
+
+| Conversation ID | Task ID |
+| --- | --- |
+| `2401568d3b17f9c62358225b` | `ceb-10a-313ab31ee4152e47a96bee795ed218b846cb5e1f` |
+| `a7354a68a5f24cc683af6823` | `ceb-10a-a8f7f25f983efd310329121f06c8647471355803` |
+| `2d2b09c794047b662d52b245` | `ceb-10a-f2a3d4276497bb81578f5588fabc559a57977ccb` |
+| `1ccc99f376dcae902e16b3c2` | `ceb-10a-feb4a84432cbf3c03659dec9f994e45c20117dce` |
+| `65c71eed4ae9d21fd0efa6ec` | `ceb-4a-4a161` |
+| `522b384060cd445fa3883806` | `ceb-4a-4a229` |
+
+Keep the original generation artifacts on FLOPper. Remove whole conversations
+before packing so shared packed rows do not cause unrelated turns to be removed.
+Keep the 19 available validation conversations unchanged and retain post-search
+default selections. No other outcome-based filtering is applied. The training
+source then has 294 conversations; the existing 49,152-token limit is expected
+to reject the same one overlong conversation, leaving 293 usable demonstrations.
