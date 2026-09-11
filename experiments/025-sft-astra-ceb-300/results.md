@@ -365,3 +365,181 @@ matching the earlier check-ins.
 | 1061–1080 | 0.245760 |
 | 1081–1100 | 0.234828 |
 | 1101–1102 | 0.187891 |
+
+## Analysis
+
+Added September 11, 2026, from the per-query records of this run
+(`outputs/025-sft-astra-ceb-300/002/evaluation/test/000/rollouts/<task-id>/000.json`),
+the 026 baseline (`outputs/026-qwen-4b-job-epoch2-v7-5cand-1rollout/000/evaluation/test/000`),
+the Astra generation attempts behind the training data
+(`outputs/025-sft-astra-ceb-300/001/generation/attempts/`), and Astra's own JOB
+run (`outputs/011-astra-med-test-5cand-1rollout/000/evaluation/test/000`), all
+on FLOPper.
+
+Definitions used throughout: an *eligible* candidate is one the harness marked
+`selection_eligible` in the candidate history shown to the model. That includes
+candidates whose timing was reused from the default or an earlier candidate, and
+candidates that timed out. Its *feedback ratio* is the
+`preliminary_ratio_to_initial_default` from that history: the initial default
+median divided by the candidate's feedback execution time, or exactly 1.0 for a
+default-plan duplicate. Timed-out candidates have no ratio. The *best* candidate
+in a rollout is the eligible candidate with the highest ratio. The band is
+`abs(log(ratio)) <= 0.05`, as elsewhere in this document.
+
+The mixed result has a single explanation. The additional demonstrations
+improved what teacher-state SFT teaches directly, which actions to try, and did
+little for decisions in states the teacher rarely visits, which it reaches only
+indirectly. The validity drop is the price of the more ambitious actions.
+
+### The selection failure is covariate shift, not a data-quantity problem
+
+The state each policy is in when it finishes, classified by the best eligible
+candidate in the candidate history it was shown. The teacher column covers the
+294 conversations actually trained on; the six excluded conversations all fall
+in the no-eligible row. The Astra-on-JOB column is experiment 011, the only
+teacher run on JOB with the same five-attempt budget.
+
+| Finish state | Astra on CEB, 294 trained-on demonstrations | Astra on JOB, 011 | 026 student | 025 student |
+| --- | ---: | ---: | ---: | ---: |
+| Best candidate faster than 1.05× | 258 (88%) | 8 | 18 (16%) | 29 (26%) |
+| Best candidate within the band | 27 (9%) | 2 | 46 (41%) | 15 (13%) |
+| Best candidate slower than 0.95× | 8 (2.7%) | 0 | 21 (19%) | 31 (27%) |
+| Only timed-out candidates | 0 | 0 | 0 | 2 (1.8%) |
+| No eligible candidate | 1 (0.3%) | 0 | 28 (25%) | 36 (32%) |
+
+An earlier version of this table counted only freshly measured feedback and
+therefore placed default-plan duplicates, which are eligible at exactly 1.0×,
+in the slower and no-eligible rows. The corrected counts are within one
+boundary case of an independent recount.
+
+The teacher almost never holds a losing hand: the training data demonstrates
+"choose default over a slower candidate" eight times in 294 conversations, and
+on JOB itself Astra never faced that state in ten queries. The student's best
+option fails to beat 1.05× in 84% of 026 rollouts and 74% of 025 rollouts, and
+it learned the majority behavior, finish by selecting the best candidate. That
+is the 16 slower-than-default selections, up from nine in 026, despite three
+times the demonstrations. More passes over the same teacher-state data, or more
+unselected teacher demonstrations, address this only indirectly, through
+repetition of the eight examples. The direct fixes label the student's own
+states: teacher corrections on student-generated histories, which is also SFT,
+RL, or a harness rule. Experiment 027, a second epoch over these demonstrations,
+tests the indirect route.
+
+### A mechanical selection rule removes the regressions, and 025 wins under it
+
+Counterfactual replay of both runs with the rule "select the best candidate if
+its feedback ratio is at least 1.05×, otherwise default". Where the rule's pick
+equals the actual measured selection, the final paired speedup is used;
+otherwise the candidate's feedback ratio stands in. Rollouts with neither a
+score nor an eligible candidate are excluded, giving n = 109 for 026 (108 scored
+plus job-33a, which had a 2.26× candidate but failed selection) and n = 101 for
+025 (its 12 unscored rollouts had no eligible candidate).
+
+| | 026 | 025 |
+| --- | ---: | ---: |
+| Actual geometric mean | 1.075× | 1.103× |
+| Actual choices, default substituted where the selected candidate's ratio was below 1.05× | 1.138× | 1.284× |
+| Mechanical rule | 1.163× | 1.285× |
+| Rule, excluding the largest win | 1.115× | 1.228× |
+| Rule, excluding the three largest wins | 1.082× | 1.166× |
+| Improvements / regressions outside the 0.05 log band under the rule | 14 / 0 | 29 / 0 |
+
+The second row is the narrower diagnostic: it keeps every choice the model made
+and replaces only selections that the model's own feedback already showed as
+slower, so it uses final paired measurements for every retained candidate. It
+reaches almost the full-rule value in 025, so nearly the entire counterfactual
+gain comes from avoiding visibly bad choices rather than from candidates the
+model passed over. The full rule differs from the model's choices on unmeasured
+candidates in only one 025 rollout (job-17e at 1.053×) and three 026 rollouts
+(job-12a, job-17e, job-33a).
+
+Thresholds of 1.0×, 1.05× and 1.10× give the same geometric means to within
+0.002 for both runs; at 1.0× the 026 replay has one regression. At 1.25× the
+025 estimate falls to 1.274× and 026 stays at 1.163×.
+
+The feedback ratios show little winner's-curse inflation. For candidates the
+students actually selected with feedback at or above 1.05×, one feedback
+execution predicted the final paired result almost exactly: in 025, 28 such
+selections had a feedback geometric mean of 2.492× and a final one of 2.466×; in
+026, 15 had 2.602× and 2.537×. None regressed in final timing. Over all selected
+and measured candidates, feedback and final geometric means were 1.202× and
+1.202× in 025, and 1.225× and 1.216× in 026. Zero regressions in 43 selections
+bounds the rule's false-positive rate at roughly 7% (rule of three); it does not
+establish zero future regressions, and the replay remains an estimate rather
+than a completed evaluation.
+
+Under the rule, 025 is the better candidate generator by a margin that survives
+dropping its three largest wins. Its worse final decisions hide that in the
+headline comparison.
+
+### The validity drop is a reliability problem, not truncation
+
+All 93 string-wrapped `action` values in this run are invalid JSON, with no
+recorded output truncation, and 69 contain a Leading tree. A repair that closes
+unbalanced brackets and quotes was tested: 71 of the 93 parse afterward, but 70
+of those still fail the recorded `evaluate_candidate` parameter schema; one
+passes. In 026, the transcripts contain 104 string-wrapped actions, of which 25
+were valid JSON strings, 79 were invalid, 33 parse after repair, and all 33 fail
+the schema. The model is not forgetting closing brackets; it emits the nested
+Leading structure unreliably.
+
+That reliability is improving with training rather than fixed: Leading-containing
+attempts that passed action and plan constraints rose from 18/142 in 026 to
+41/161 here, even as overall validity fell. The demonstrations pulled the policy
+toward Astra's richer repertoire (row corrections 13 → 166 attempts, parallelism
+31 → 244, planner settings 53 → 156, Leading trees 142 → 161). That produced the
+29 improvements and the first useful Leading trees, and a third more invalid
+attempts. Bracket repair recovers nothing useful. Further training can help;
+the most direct signal is a penalty on the student's own invalid outputs,
+meaning RL, and a simpler action grammar remains an option.
+
+### Five of the twelve no-valid-candidate endings were premature
+
+Candidates tried before the terminal call, for the 12 `no_valid_candidate`
+rollouts: job-05c 1; job-01a 3; job-10a 3; job-01b 4; job-31c 4; the remaining
+seven (job-02a, 07c, 11c, 19b, 19c, 20b, 27b) used all five. job-01a and job-01b
+were the 7.207× and 108.730× wins in 026. The v7 rule that ends a conversation
+immediately on an ineligible finish with no eligible candidate makes quitting
+free at evaluation time; under the anchored algorithm a `no_valid_candidate`
+ending costs c, which is the signal RL would use against it. When attempts
+remain, that finish should return one corrective error naming the remaining
+budget, with bounded retries so the earlier loops do not return. Deliberate
+early stopping through `keep_default` or `finish("default")` stays available.
+
+### What the validation loss does and does not show
+
+The initialization record and adapter checksums are the direct evidence that the
+epoch-2 weights loaded. The starting value of 0.362505 is consistent with that:
+it is far below the 0.4851 the base model scored at step 0 in experiment 018 on
+the earlier validation conversations. It says nothing separable about interface
+drift, because the validation trajectories were also refreshed. The 7.3%
+reduction measures fit to teacher tokens, which this run shows is decoupled from
+student decisions. It remains a useful training-health signal alongside
+autonomous evaluation, but it should not be used to rank checkpoints.
+
+### Recommended order of work
+
+1. Run experiment 027, a second epoch over these demonstrations by native resume
+   from step 1102. It is the direct test of whether more training on the same
+   data helps, at about two hours plus a 32-minute evaluation. Prediction on
+   record: validity and Leading usage may keep improving; the
+   slower-than-default selections will not move much.
+2. Add mechanical final selection to the harness as a switchable rule: the best
+   eligible candidate by feedback at 1.05× or above, otherwise default. In the
+   replay it deletes the entire regression class in both runs. Keep the model's
+   own choice recorded and report both numbers. Which one is the headline
+   depends on whether the agent's final decision remains part of the research
+   question; it should remain the agent's if RL follows, since the reward
+   trains that decision directly.
+3. Return one corrective error, with bounded retries, on an ineligible finish
+   while candidate attempts remain.
+4. Re-evaluate both adapters with three rollouts per query under those rules,
+   about 1.6 hours each on FLOPper. One rollout cannot rank them: 29 queries lost
+   validity and 21 gained it between 026 and this run.
+5. If the same failures persist, prefer teacher corrections on student-generated
+   CEB histories or RL from this run's adapter over another large, unselected
+   batch of teacher demonstrations. At roughly one minute per rollout per
+   worker, 100 RL steps at batch 16 is an overnight run.
+
+Not worth doing: JSON repair of string-wrapped actions, or another large
+unselected batch of teacher demonstrations before the above.
