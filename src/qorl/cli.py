@@ -28,6 +28,20 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(prog="qorl")
     root.add_argument("--version", action="version", version=__version__)
     commands = root.add_subparsers(dest="command")
+    rl_parser = commands.add_parser("rl", help="RL environment service")
+    rl_commands = rl_parser.add_subparsers(dest="rl_command", required=True)
+    serve_parser = rl_commands.add_parser(
+        "serve", help="host the native environment and PostgreSQL pool"
+    )
+    serve_parser.add_argument("experiment_directory", type=Path)
+    serve_parser.add_argument("--bind", required=True)
+    serve_parser.add_argument("--renderer-model", type=Path, required=True)
+    serve_parser.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="new directory for owned service logs and evidence",
+    )
     model_parser = commands.add_parser("model", help="model artifacts")
     model_commands = model_parser.add_subparsers(dest="model_command", required=True)
     merge_parser = model_commands.add_parser(
@@ -121,6 +135,16 @@ def main() -> int:
         root.print_help()
         return 0
     try:
+        if arguments.command == "rl":
+            from qorl.rl.server import serve
+
+            serve(
+                arguments.experiment_directory,
+                arguments.bind,
+                arguments.renderer_model,
+                arguments.output,
+            )
+            return 0
         if arguments.command == "model":
             adapter = arguments.adapter_path.expanduser().resolve()
             config = MergeLoraConfig.model_validate_json(

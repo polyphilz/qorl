@@ -12,12 +12,14 @@ from qorl.measure.rollout import RolloutEvaluator
 from qorl.measure.schemas import RolloutRecord
 from qorl.model.client import HttpTransport, LocalModelClient
 from qorl.rl import runtime as shared_runtime
+from qorl.rl.evidence import write_native
 from qorl.rl.reward import scalar_reward
 from qorl.rl.schemas import (
     QorlHarnessConfig,
     QorlTaskData,
     RlRolloutRecord,
 )
+from qorl.util.hashing import sha256_json
 from qorl.util.seeds import derive_seed
 
 
@@ -130,6 +132,13 @@ class QorlHarness(vf.Harness[QorlHarnessConfig]):
                     scalar_reward=reward,
                 )
                 trace.info["qorl"] = result.to_wire()
+                if self.config.evidence_directory is not None:
+                    write_native(
+                        self.config.evidence_directory
+                        / "rollouts"
+                        / f"{sha256_json(trace.id)}.msgpack",
+                        trace,
+                    )
 
             try:
                 evaluator.start()

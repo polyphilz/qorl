@@ -99,6 +99,7 @@ class QorlTaskset(vf.Taskset[QorlTask, QorlTasksetConfig]):
                     prompt=task.task_id,
                     task_id=task.task_id,
                     template_id=task.template_id,
+                    remote_run=self.config.remote_run,
                 ),
                 self.config.task,
             )

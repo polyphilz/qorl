@@ -2,11 +2,13 @@
 
 import asyncio
 import os
+import socket
 import sys
 from contextlib import suppress
 from importlib.metadata import distribution
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import renderers.base as rendering
 import verifiers.v1 as vf
@@ -27,6 +29,7 @@ from qorl.adapters.export import checkpoint_sha256, export_adapter, export_confi
 from qorl.adapters.schemas import AdapterExportManifest, LoraSettings
 from qorl.adapters.verify import verify_adapter_base
 from qorl.experiment.schemas import RlExperimentConfig
+from qorl.measure.timeouts import candidate_timeout_ms, seconds_to_ms
 from qorl.model.files import model_weights_sha256, resolve_model
 from qorl.model.schemas import LocalInferenceSettings, ModelSettings
 from qorl.paths import REPOSITORY_ROOT
@@ -34,6 +37,10 @@ from qorl.postgres.config import PostgresConfig
 from qorl.rl.report import write_report
 from qorl.rl.schemas import (
     AnchoredGrpoSettings,
+    EnvironmentClaim,
+    EnvironmentCleanup,
+    EnvironmentControlRequest,
+    EnvironmentControlResponse,
     QorlEnvironmentConfig,
     QorlHarnessConfig,
     QorlTasksetConfig,
@@ -47,6 +54,7 @@ from qorl.util.seeds import derive_seed
 from qorl.worker_pool.config import load_pool_config
 
 NATIVE_CONFIG = Path("configs/qorl.json")
+CANCELLATION_GRACE_SECONDS = 10.0
 TRAINING_IDENTITY = Path("configs/identity.json")
 RENDERER_CONFIG: TypeAdapter[RendererConfig] = TypeAdapter(RendererConfig)
 
@@ -85,6 +93,47 @@ def renderer_config(config: RlExperimentConfig) -> RendererConfig:
     return RENDERER_CONFIG.validate_python(options)
 
 
+def environment_config(
+    config: RlExperimentConfig, inputs: Path, model: ModelSettings
+) -> QorlEnvironmentConfig:
+    """Resolve execution inputs on the host that will open them."""
+    if not isinstance(config.inference, LocalInferenceSettings):
+        raise ValueError("RL requires local inference")
+    selection_path = (inputs / config.data.training.file).resolve()
+    selection = TaskSelection.model_validate_json(selection_path.read_bytes())
+    task_set = TaskSet.load(REPOSITORY_ROOT, selection.benchmark_id.value)
+    for task in task_set.resolve(selection):
+        task_set.load_sql(task)
+    postgres = (REPOSITORY_ROOT / config.postgres.path).resolve()
+    pool = (REPOSITORY_ROOT / config.pool.path).resolve()
+    PostgresConfig.load(postgres)
+    load_pool_config(pool)
+    return QorlEnvironmentConfig(
+        id="qorl",
+        max_concurrent_agents=1,
+        postgres_config=postgres,
+        pool_config=pool,
+        taskset=QorlTasksetConfig(
+            id="qorl",
+            repository=REPOSITORY_ROOT,
+            selection=selection_path,
+            shuffle_seed=derive_seed(config.experiment.seed, "rl-task-order"),
+        ),
+        agent=vf.AgentConfig(
+            harness=QorlHarnessConfig(
+                model=model,
+                inference=config.inference,
+                agent=config.agent,
+                measurement=config.measurement,
+                rl=config.rl,
+                tool_timeout=600.0,
+                seed=config.experiment.seed,
+            ),
+            runtime=vf.SubprocessConfig(),
+        ),
+    )
+
+
 def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
     """Validate complete trainer, orchestrator and inference models before any launch."""
     config = RlExperimentConfig.model_validate(config.model_dump())
@@ -105,6 +154,12 @@ def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
     serving = inference.serving
     address = urlsplit(config.model.base_url or "")
     host = "127.0.0.1" if serving.host == "0.0.0.0" else serving.host
+    if config.rl.environment is not None and serving.host in {"0.0.0.0", "::"}:
+        raise ValueError("remote RL requires a concrete inference bind/advertised host")
+    if address.username or address.password or address.query or address.fragment:
+        raise ValueError(
+            "RL inference URL cannot contain credentials, query or fragment"
+        )
     if (address.scheme, address.hostname, address.port, address.path.rstrip("/")) != (
         "http",
         host,
@@ -126,39 +181,15 @@ def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
     training = config.training
     base = resolve_model(config.model)
     selected_renderer = renderer_config(config)
-    # Resolve and verify the saved selection, including SQL, without resampling.
-    selection_path = (run / config.data.training.file).resolve()
-    selection = TaskSelection.model_validate_json(selection_path.read_bytes())
-    task_set = TaskSet.load(REPOSITORY_ROOT, selection.benchmark_id.value)
-    for task in task_set.resolve(selection):
-        task_set.load_sql(task)
-    postgres = (REPOSITORY_ROOT / config.postgres.path).resolve()
-    pool = (REPOSITORY_ROOT / config.pool.path).resolve()
-    PostgresConfig.load(postgres)
-    load_pool_config(pool)
-    harness = QorlHarnessConfig(
-        model=config.model.model_copy(
-            update={"name_or_path": str(base), "revision": None}
-        ),
-        inference=inference,
-        agent=config.agent,
-        measurement=config.measurement,
-        rl=config.rl,
-        tool_timeout=600.0,
-        seed=config.experiment.seed,
+    environment = environment_config(
+        config,
+        run,
+        config.model.model_copy(update={"name_or_path": str(base), "revision": None}),
     )
-    environment = QorlEnvironmentConfig(
-        id="qorl",
-        max_concurrent_agents=1,
-        postgres_config=postgres,
-        pool_config=pool,
-        taskset=QorlTasksetConfig(
-            id="qorl",
-            selection=selection_path,
-            shuffle_seed=derive_seed(config.experiment.seed, "rl-task-order"),
-        ),
-        agent=vf.AgentConfig(harness=harness, runtime=vf.SubprocessConfig()),
-    )
+    if config.rl.environment is not None:
+        # Only the task loader is used on this host; the service owns execution config.
+        environment.postgres_config = None
+        environment.pool_config = None
     algorithm = config.rl.algorithm
     native_algorithm = (
         QorlAnchoredGRPOAlgoConfig(
@@ -236,7 +267,9 @@ def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
                         ratio=1.0,
                         env=environment,
                         serve=vf.ServeConfig(
-                            address="tcp://127.0.0.1:0",
+                            address=config.rl.environment.address
+                            if config.rl.environment
+                            else "tcp://127.0.0.1:0",
                             pool=vf.StaticPoolConfig(num_workers=1),
                             max_concurrent=training.max_inflight,
                         ),
@@ -312,23 +345,96 @@ def native_config(config: RlExperimentConfig, run: Path) -> RLConfig:
     )
 
 
-async def launch(native: RLConfig, devices: list[int]) -> None:
+def cancellation_timeout(harness: QorlHarnessConfig, max_inflight: int) -> float:
+    """Allow outstanding statements and queued, retried model turns to drain."""
+    measurement = harness.measurement
+    candidate_seconds = (
+        candidate_timeout_ms(
+            seconds_to_ms(measurement.default_timeout_seconds), measurement
+        )
+        / 1000
+    )
+    model = harness.model
+    if model is None or model.request_timeout_seconds is None:
+        raise ValueError(
+            "RL cancellation requires the configured model request timeout"
+        )
+    retry = model.retry
+    request_seconds = (
+        retry.max_attempts * model.request_timeout_seconds
+        + (retry.max_attempts - 1) * retry.maximum_delay_seconds
+    )
+    # Cancellation is checked between turns/statements. Each local model turn can
+    # finish tokenization and generation, including retries and semaphore waits.
+    model_seconds = 2 * max_inflight * request_seconds
+    return (
+        max(measurement.default_timeout_seconds, candidate_seconds, model_seconds)
+        + CANCELLATION_GRACE_SECONDS
+    )
+
+
+async def launch(
+    native: RLConfig, devices: list[int], claim: EnvironmentClaim | None = None
+) -> None:
     """Host the normal env server while the native launcher owns GPU processes."""
+    from qorl.rl.server import CONTROL_TIMEOUT, QorlEnvClient
+
     source = native.orchestrator.train.source[0]
-    server = EnvServer(
-        source.env,
-        address="tcp://127.0.0.1:0",
-        max_concurrent=source.serve.max_concurrent,
+    if not isinstance(source.env, QorlEnvironmentConfig):
+        raise ValueError("RL launch requires the resolved QORL environment")
+    harness = source.env.agent.harness
+    if not isinstance(harness, QorlHarnessConfig):
+        raise ValueError("RL launch requires the resolved QORL harness")
+    max_inflight = native.orchestrator.concurrency.initial_inflight
+    if max_inflight is None:
+        raise ValueError("RL launch requires a resolved rollout concurrency")
+    drain_timeout = cancellation_timeout(harness, max_inflight)
+    server = (
+        None
+        if claim
+        else EnvServer(
+            source.env,
+            address="tcp://127.0.0.1:0",
+            max_concurrent=source.serve.max_concurrent,
+        )
     )
     training = native.run_dir
     serving: asyncio.Task[None] | None = None
     process: asyncio.subprocess.Process | None = None
+    client: QorlEnvClient | None = None
+    probing: asyncio.Task[EnvironmentControlResponse] | None = None
+    waiting: asyncio.Task[int] | None = None
+    startup_timeout = native.orchestrator.model.client.wait_for_ready_timeout
     try:
-        source.serve.address = server.address
+        if claim is not None:
+            if source.serve.address is None:
+                raise ValueError("remote RL requires an explicit environment address")
+            client = QorlEnvClient(source.serve.address)
+            await client.wait_for_server_startup(timeout=startup_timeout)
+            checked = await client.control(
+                EnvironmentControlRequest(operation="claim", claim=claim)
+            )
+            if checked.identity is None or checked.identity.contract != claim.contract:
+                raise ValueError("remote environment returned a conflicting identity")
+            write_json(
+                training / "configs/remote-environment.json",
+                checked.identity.model_dump(mode="json"),
+            )
+            write_json(
+                training / "configs/remote-claim.json", claim.model_dump(mode="json")
+            )
+            taskset = source.env.taskset
+            if not isinstance(taskset, QorlTasksetConfig):
+                raise ValueError("remote RL requires the QORL taskset")
+            taskset.remote_run = claim.run_id
+            serving = asyncio.create_task(client.monitor(checked.identity.service_id))
+        else:
+            assert server is not None
+            source.serve.address = server.address
+            serving = asyncio.create_task(server.run())
         # Validate the exact config written, including the allocated server address.
         native = RLConfig.model_validate(native.model_dump())
         write_json(training / NATIVE_CONFIG, native.model_dump(mode="json"))
-        serving = asyncio.create_task(server.run())
         process = await asyncio.create_subprocess_exec(
             sys.executable,
             "-m",
@@ -339,12 +445,37 @@ async def launch(native: RLConfig, devices: list[int]) -> None:
             env=os.environ
             | {
                 "CUDA_VISIBLE_DEVICES": ",".join(map(str, devices)),
+                "VIRTUAL_ENV": sys.prefix,
                 "PATH": str(Path(sys.executable).parent)
                 + os.pathsep
                 + os.environ.get("PATH", ""),
             },
         )
         waiting = asyncio.create_task(process.wait())
+        if client is not None and claim is not None:
+            probing = asyncio.create_task(
+                client.control(
+                    EnvironmentControlRequest(operation="probe", run_id=claim.run_id),
+                    timeout=startup_timeout + CONTROL_TIMEOUT,
+                )
+            )
+            done, _ = await asyncio.wait(
+                (serving, waiting, probing), return_when=asyncio.FIRST_COMPLETED
+            )
+            if probing in done:
+                readiness = probing.result()
+                if not readiness.inference_ready:
+                    raise RuntimeError(
+                        "remote service did not verify inference readiness"
+                    )
+                write_json(
+                    training / "remote-readiness.json",
+                    readiness.model_dump(mode="json"),
+                )
+            elif waiting in done and waiting.result() == 0:
+                raise RuntimeError(
+                    "training exited before remote inference readiness was verified"
+                )
         done, _ = await asyncio.wait(
             (serving, waiting), return_when=asyncio.FIRST_COMPLETED
         )
@@ -358,18 +489,71 @@ async def launch(native: RLConfig, devices: list[int]) -> None:
     finally:
 
         async def cleanup() -> None:
+            cleanup_record = None
+            if client is not None and claim is not None:
+                healthy = serving is not None and not serving.done()
+                cancelling = asyncio.create_task(
+                    client.control(
+                        EnvironmentControlRequest(
+                            operation="cancel", run_id=claim.run_id
+                        ),
+                        timeout=drain_timeout if healthy else CONTROL_TIMEOUT,
+                    )
+                )
+                try:
+                    if healthy and serving is not None:
+                        done, _ = await asyncio.wait(
+                            (serving, cancelling), return_when=asyncio.FIRST_COMPLETED
+                        )
+                        if cancelling not in done:
+                            raise RuntimeError(
+                                "remote health failed during drain; cancellation acknowledgement is unknown"
+                            )
+                    await cancelling
+                    cleanup_record = EnvironmentCleanup(cancellation_acknowledged=True)
+                except (TimeoutError, RuntimeError) as error:
+                    cleanup_record = EnvironmentCleanup(
+                        cancellation_acknowledged=False, error=str(error)
+                    )
+                finally:
+                    cancelling.cancel()
+                    with suppress(Exception, asyncio.CancelledError):
+                        await cancelling
             if process is not None and process.returncode is None:
                 with suppress(ProcessLookupError):
                     process.terminate()
-                await process.wait()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=60)
+                except TimeoutError:
+                    import signal
+
+                    from prime_rl.utils.process import cleanup_process
+
+                    cleanup_process(process.pid, signal.SIGKILL)
+                    await process.wait()
             try:
                 if serving is not None:
                     serving.cancel()
-                    with suppress(asyncio.CancelledError):
+                    # The main wait already propagates this task's original failure.
+                    with suppress(Exception, asyncio.CancelledError):
                         await serving
             finally:
-                server.frontend.close()
-                server.ctx.term()
+                if probing is not None:
+                    probing.cancel()
+                    with suppress(asyncio.CancelledError, RuntimeError, TimeoutError):
+                        await probing
+                if client is not None:
+                    await client.close()
+                if server is not None:
+                    server.frontend.close()
+                    server.ctx.term()
+                if waiting is not None:
+                    await waiting
+            if cleanup_record is not None:
+                write_json(
+                    training / "remote-cleanup.json",
+                    cleanup_record.model_dump(mode="json"),
+                )
 
         cleaning = asyncio.create_task(cleanup())
         while not cleaning.done():
@@ -385,6 +569,19 @@ def train(config: RlExperimentConfig, run: Path) -> None:
     if training.exists():
         raise ValueError("training output exists; start a new run")
     native = native_config(config, run)
+    claim = None
+    if config.rl.environment is not None:
+        from qorl.rl.server import code_commit, contract
+
+        claim = EnvironmentClaim(
+            run_id=uuid4().hex,
+            contract=contract(config, run, Path(native.trainer.model.name)),
+            renderer_source=native.trainer.model.name,
+            hostname=socket.gethostname(),
+            repository=REPOSITORY_ROOT,
+            training_directory=training,
+            code_commit=code_commit(REPOSITORY_ROOT),
+        )
     training.mkdir()
     identity = RlTrainingIdentity(
         experiment_sha256=sha256_json(config.model_dump(mode="json")),
@@ -394,7 +591,7 @@ def train(config: RlExperimentConfig, run: Path) -> None:
     )
     write_json(training / TRAINING_IDENTITY, identity.model_dump(mode="json"))
     try:
-        asyncio.run(launch(native, gpu_ids(config)))
+        asyncio.run(launch(native, gpu_ids(config), claim))
     finally:
         report = write_report(
             training,

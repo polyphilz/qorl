@@ -1,7 +1,8 @@
 """RL batch settings and the parameters consumed by each learning algorithm."""
 
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, ClassVar, Literal, Self
+from urllib.parse import urlsplit
 
 import verifiers.v1 as vf
 from prime_rl.configs.trainer import validate_scheduler
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from renderers import AutoRendererConfig, RendererConfig
 from verifiers.v1.envs.single_agent import SingleAgentEnvConfig
 from verifiers.v1.episode import GroupInfo, TrainRunInfo
+from verifiers.v1.serve.types import BaseRequest, BaseResponse
 from verifiers.v1.trace import Error, TraceTask
 
 from qorl.adapters.schemas import LoraSettings
@@ -91,6 +93,31 @@ class ScalarRewardSettings(BaseModel):
     no_valid_candidate_reward: float
 
 
+class RemoteEnvironmentSettings(BaseModel):
+    """One externally owned native environment server."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    address: str
+
+    @model_validator(mode="after")
+    def tcp_address(self) -> Self:
+        parsed = urlsplit(self.address)
+        if (
+            parsed.scheme != "tcp"
+            or not parsed.hostname
+            or not parsed.port
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.hostname in {"0.0.0.0", "::", "*"}
+        ):
+            raise ValueError(
+                "environment address must be tcp://HOST:PORT with a concrete host"
+            )
+        return self
+
+
 class RlSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -98,6 +125,9 @@ class RlSettings(BaseModel):
         AnchoredGrpoSettings | GrpoSettings, Field(discriminator="type")
     ]
     reward: ScalarRewardSettings | None = None
+    environment: RemoteEnvironmentSettings | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def consumed_reward_settings(self) -> Self:
@@ -133,12 +163,14 @@ class QorlTasksetConfig(vf.TasksetConfig):
     repository: Path = REPOSITORY_ROOT
     selection: Path | None = None
     shuffle_seed: int | None = None
+    remote_run: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class QorlTaskData(vf.TaskData):
     task_id: str
     template_id: str
     rollout_index: int = 0
+    remote_run: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class QorlHarnessConfig(vf.HarnessConfig):
@@ -146,6 +178,9 @@ class QorlHarnessConfig(vf.HarnessConfig):
 
     id: str = "qorl"
     seed: int = 42
+    evidence_directory: Path | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     model: ModelSettings | None = None
     inference: LocalInferenceSettings | None = None
     agent: AgentSettings = AgentSettings(
@@ -179,6 +214,65 @@ class QorlHarnessConfig(vf.HarnessConfig):
 class QorlEnvironmentConfig(SingleAgentEnvConfig):
     postgres_config: Path | None = None
     pool_config: Path | None = None
+
+
+class EnvironmentContract(BaseModel):
+    """Portable execution inputs; host-local paths are recorded separately."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    experiment_sha256: str
+    selection_sha256: str
+    task_sql_sha256: dict[str, str]
+    tasks_sha256: str
+    postgres_sha256: str
+    postgres_expected_sha256: str
+    pool_sha256: str
+    renderer_assets: dict[str, str]
+    renderer: RendererConfig
+    dependencies: dict[str, str]
+    source_sha256: str
+
+
+class EnvironmentServiceIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    service_id: str
+    hostname: str
+    repository: Path
+    renderer_model: Path
+    evidence_directory: Path
+    address: str
+    contract: EnvironmentContract
+    code_commit: str
+    database_pool: PoolManifest
+
+
+class EnvironmentClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    run_id: str
+    contract: EnvironmentContract
+    renderer_source: str
+    hostname: str
+    repository: Path
+    training_directory: Path
+    code_commit: str
+
+
+class EnvironmentControlRequest(BaseRequest):
+    method: ClassVar[str] = "qorl_control"
+    operation: Literal["identity", "claim", "probe", "cancel"]
+    claim: EnvironmentClaim | None = None
+    run_id: str | None = None
+
+
+class EnvironmentControlResponse(BaseResponse):
+    identity: EnvironmentServiceIdentity | None = None
+    inference_ready: bool = False
+
+
+class EnvironmentCleanup(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    cancellation_acknowledged: bool
+    error: str | None = None
 
 
 class AnchoredCredit(BaseModel):

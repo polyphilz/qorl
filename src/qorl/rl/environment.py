@@ -1,6 +1,7 @@
 """The native Verifiers environment owns one PostgreSQL pool for all rollouts."""
 
 import asyncio
+from contextlib import suppress
 from dataclasses import replace
 from typing import Protocol
 
@@ -100,7 +101,11 @@ class QorlEnvironment(vf.Env[QorlEnvironmentConfig]):
 
     async def stop(self) -> None:
         await runtime.drain()
-        await asyncio.to_thread(runtime.stop)
+        closing = asyncio.create_task(asyncio.to_thread(runtime.stop))
+        while not closing.done():
+            with suppress(asyncio.CancelledError):
+                await asyncio.shield(closing)
+        closing.result()
 
 
 async def run_seeded_agent(agent: RolloutAgent, task: QorlTask, seed: int) -> None:
