@@ -1,0 +1,140 @@
+[experiment]
+name = "hybrid-rl-smoke"
+method = "rl"
+seed = 42
+
+[postgres]
+path = "docker/postgres/configs/001-pgconf-2gb-sb"
+
+[pool]
+path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
+
+[model]
+provider = "local"
+name_or_path = "/lambda/nfs/qorl/models/qwen-4b-sft-027-step-2204"
+context_length = 49152
+base_url = "http://100.67.134.116:8000/v1"
+request_timeout_seconds = 300
+max_concurrent_requests = 8
+
+[model.retry]
+max_attempts = 3
+initial_delay_seconds = 2.0
+maximum_delay_seconds = 30.0
+
+[agent]
+candidate_attempts = 5
+maximum_model_turns = 64
+inspection_turns_per_alias = 3
+
+[evaluation]
+rollouts_per_task = 1
+
+[measurement]
+default_warmups = 1
+default_measurements = 3
+candidate_feedback_warmups = 1
+candidate_feedback_measurements = 1
+paired_warmups = 1
+paired_measurements = 3
+default_timeout_seconds = 300.0
+candidate_timeout_floor_seconds = 5.0
+candidate_timeout_multiplier = 3.0
+
+[inference]
+max_tokens = 8192
+temperature = 1.0
+top_p = 1.0
+top_k = 20
+min_p = 0.0
+presence_penalty = 0.0
+repetition_penalty = 1.0
+thinking = true
+
+[inference.serving]
+host = "100.67.134.116"
+port = 8000
+dtype = "bfloat16"
+tool_call_parser = "qwen3_coder"
+reasoning_parser = "qwen3"
+max_num_seqs = 4
+gpu_memory_utilization = 0.9
+enable_prefix_caching = true
+use_flashinfer_sampler = false
+startup_timeout_seconds = 600
+
+[resources]
+training_gpu_ids = [
+    0,
+]
+serving_gpu_ids = [
+    1,
+]
+
+[data.training]
+file = "training-tasks.json"
+selection_seed = 42
+expression = "train=ceb[1a:1,2a:1]"
+
+[data.validation]
+file = "validation-tasks.json"
+selection_seed = 42
+expression = "validation=ceb[5a:1]"
+
+[training]
+batch_size = 4
+group_size = 4
+max_steps = 4
+max_off_policy_steps = 1
+max_inflight = 4
+max_grad_norm = 1.0
+
+[training.runtime]
+implementation = "custom"
+attention = "flash_attention_2"
+optimization_dtype = "bfloat16"
+reduce_dtype = "bfloat16"
+compile = false
+
+[training.lora]
+rank = 16
+alpha = 32.0
+dropout = 0.0
+target_modules = [
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
+
+[training.optimizer]
+type = "adamw"
+lr = 1e-06
+weight_decay = 0.0
+betas1 = 0.9
+betas2 = 0.999
+
+[training.optimizer.scheduler]
+type = "constant"
+
+[training.checkpoints]
+type = "interval"
+interval = 1
+keep_last = 4
+
+[training.renderer]
+name = "qwen3.5"
+
+[rl.algorithm]
+type = "qorl_anchored_grpo"
+tau = 0.05
+c = 0.1
+d = 0.02
+t = 0.1
+min_peers = 2
+
+[rl.environment]
+address = "tcp://100.84.223.59:5000"
