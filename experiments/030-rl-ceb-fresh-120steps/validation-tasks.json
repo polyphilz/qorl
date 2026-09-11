@@ -1,0 +1,25 @@
+{
+  "benchmark_id": "ceb",
+  "task_ids": [
+    "ceb-5a-5a129",
+    "ceb-5a-5a2",
+    "ceb-5a-5a231",
+    "ceb-5a-5a279",
+    "ceb-5a-5a288",
+    "ceb-5a-5a351",
+    "ceb-5a-5a548",
+    "ceb-5a-5a732",
+    "ceb-5a-5a8",
+    "ceb-5a-5a908",
+    "ceb-8a-8a103",
+    "ceb-8a-8a170",
+    "ceb-8a-8a199",
+    "ceb-8a-8a247",
+    "ceb-8a-8a274",
+    "ceb-8a-8a303",
+    "ceb-8a-8a330",
+    "ceb-8a-8a332",
+    "ceb-8a-8a424",
+    "ceb-8a-8a426"
+  ]
+}

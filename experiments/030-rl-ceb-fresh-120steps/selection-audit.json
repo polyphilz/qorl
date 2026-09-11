@@ -1,0 +1,85 @@
+{
+  "training": {
+    "count": 300,
+    "unique_sql": 300,
+    "templates": {
+      "ceb-10a": 30,
+      "ceb-11a": 30,
+      "ceb-11b": 30,
+      "ceb-1a": 30,
+      "ceb-2a": 30,
+      "ceb-3a": 30,
+      "ceb-4a": 30,
+      "ceb-6a": 30,
+      "ceb-7a": 30,
+      "ceb-9a": 30
+    },
+    "prior_id_overlap": 0,
+    "prior_sql_overlap": 0
+  },
+  "validation": {
+    "count": 20,
+    "unique_sql": 20,
+    "templates": {
+      "ceb-5a": 10,
+      "ceb-8a": 10
+    },
+    "prior_id_overlap": 0,
+    "prior_sql_overlap": 0
+  },
+  "test": {
+    "count": 113,
+    "unique_sql": 113,
+    "templates": {
+      "job-01": 4,
+      "job-02": 4,
+      "job-03": 3,
+      "job-04": 3,
+      "job-05": 3,
+      "job-06": 6,
+      "job-07": 3,
+      "job-08": 4,
+      "job-09": 4,
+      "job-10": 3,
+      "job-11": 4,
+      "job-12": 3,
+      "job-13": 4,
+      "job-14": 3,
+      "job-15": 4,
+      "job-16": 4,
+      "job-17": 6,
+      "job-18": 3,
+      "job-19": 4,
+      "job-20": 3,
+      "job-21": 3,
+      "job-22": 4,
+      "job-23": 3,
+      "job-24": 2,
+      "job-25": 3,
+      "job-26": 3,
+      "job-27": 3,
+      "job-28": 3,
+      "job-29": 3,
+      "job-30": 3,
+      "job-31": 3,
+      "job-32": 2,
+      "job-33": 3
+    },
+    "prior_id_overlap": 0,
+    "prior_sql_overlap": 0
+  },
+  "excluded_unique_ids": 420,
+  "excluded_unique_sql": 420,
+  "seed": 43,
+  "sha256": {
+    "excluded-tasks-000.json": "0c72e30bf2e1e10f9424ce95cec086c476665bab7150492abe0a492f6efc9602",
+    "excluded-tasks-001.json": "ecf4bb48b0be90d0a177a25c7a45791f703c9fbf077b10653ebcc42e56cbc42f",
+    "excluded-tasks-002.json": "cc8d24f03c553e9d61bb8fcf296f583b3649bcae3ac1dbd80bd7275bd4ef165b",
+    "excluded-tasks-003.json": "cc8d24f03c553e9d61bb8fcf296f583b3649bcae3ac1dbd80bd7275bd4ef165b",
+    "excluded-tasks-004.json": "2addabeebebdbea6f9faded9cb7b7b192fb68524352e396519f1ed8e68a45857",
+    "excluded-tasks-005.json": "966f97514970a2f92e708b713ef5aeabcb3ae21be6168dac58afdd53530c697a",
+    "test-tasks.json": "b3784578c30aacb96014dd95d8fbf670293578cdeecae536339752221be6d0e2",
+    "training-tasks.json": "67b5f05d7ff9ea0749ae901dcb634782e50c6e3868af8603ab5ff53be4f25d86",
+    "validation-tasks.json": "849dd9baca85293f07528b25b4fd8fdafe3f8b3bec86b6b1d36e306e40ea884d"
+  }
+}
