@@ -70,6 +70,18 @@ is repeatable; requested counts must fit the remaining queries. Creation saves
 frozen `excluded-tasks-*.json` inputs alongside the resolved selections. The flag
 cannot be combined with `--dataset-from`, which preserves its original selections.
 
+Set `[evaluation] selection_policy = "best_feedback"` to add an evaluation-only
+selection ablation (the default is `"model"`). After the same conversation, the
+rule chooses the eligible, non-timeout candidate with the highest completed
+feedback ratio, requiring at least 1.05x; otherwise it keeps the default. Ties
+choose the earliest attempt. The choice is fixed before final timing. Different
+choices receive fresh final pairs; identical choices reuse the same final result,
+including timeouts. Records and summaries retain the model outcome under
+`rollout` / `performance` and the rule's result under `feedback_selection`.
+Search failures remain failures in both summaries; keeping default does not
+count as producing a valid candidate. Additional executions are counted separately.
+Training and teacher generation always retain the model's own final decision.
+
 ## Run a calibration experiment
 
 On the database host, run the experiment directory printed by creation:

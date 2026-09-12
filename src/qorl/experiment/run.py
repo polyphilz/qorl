@@ -394,6 +394,19 @@ def run_experiment(directory: Path, request: RunRequest) -> Path:
             f"timeouts: {summary.performance.timeout_count}.",
             flush=True,
         )
+        if summary.feedback_selection is not None:
+            comparison = summary.feedback_selection
+            speedup = comparison.performance.geometric_mean_speedup
+            displayed = f"{speedup:.4f}x" if speedup is not None else "unscored"
+            print(
+                f"Best-feedback selection (minimum {comparison.minimum_speedup}x): "
+                f"{comparison.changed_selection_count} changed choices; "
+                f"geometric mean speedup {displayed}; "
+                f"{comparison.performance.scored_rollout_count} speedup-bearing outcomes; "
+                f"{comparison.performance.timeout_count} timeouts. "
+                "Model-selected results are retained separately.",
+                flush=True,
+            )
     return output
 
 

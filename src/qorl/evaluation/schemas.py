@@ -17,6 +17,7 @@ class EvaluationSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     rollouts_per_task: int = Field(ge=1)
+    selection_policy: Literal["model", "best_feedback"] = "model"
 
 
 class PerformanceSummary(BaseModel):
@@ -54,6 +55,31 @@ class EvaluationItem:
     rollout_index: int
 
 
+class FeedbackSelection(BaseModel):
+    """A rule chosen before final timing, alongside the unchanged model outcome."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    minimum_speedup: float = Field(default=1.05, ge=1.05, le=1.05)
+    model_selected_candidate_id: str | None
+    selected_candidate_id: str
+    measurement_seed: int
+    reused_model_result: bool
+    rollout: RolloutRecord
+
+
+class FeedbackSelectionSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    minimum_speedup: float = Field(default=1.05, ge=1.05, le=1.05)
+    applied_rollout_count: int
+    changed_selection_count: int
+    default_selection_count: int
+    reused_model_result_count: int
+    performance: PerformanceSummary
+    additional_execution_counts: ExecutionCounts
+
+
 class EvaluationRollout(BaseModel):
     """A conversation and its measurement evidence, including partial failures."""
 
@@ -68,6 +94,9 @@ class EvaluationRollout(BaseModel):
     worker: WorkerManifest | None
     rollout: RolloutRecord
     trace: AgentTrace | None
+    feedback_selection: FeedbackSelection | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class EvaluationSummary(BaseModel):
@@ -94,6 +123,9 @@ class EvaluationSummary(BaseModel):
     stop_reason_counts: dict[StopReason, int]
     usage: TokenUsage
     performance: PerformanceSummary
+    feedback_selection: FeedbackSelectionSummary | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class EvaluationReport(BaseModel):

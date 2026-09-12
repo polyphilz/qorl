@@ -16,6 +16,7 @@ from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from threading import Event
+from typing import Literal
 from uuid import uuid4
 
 from qorl.agent.agent import QoAgentPolicy, total_usage
@@ -27,8 +28,11 @@ from qorl.evaluation.schemas import (
     EvaluationRollout,
     EvaluationSettings,
     EvaluationSummary,
+    FeedbackSelection,
+    FeedbackSelectionSummary,
     PerformanceSummary,
 )
+from qorl.evaluation.selection import feedback_selection_evaluator
 from qorl.inference.local import serve_local_model
 from qorl.measure.environment import capture_environment
 from qorl.measure.rollout import RolloutEvaluator
@@ -137,7 +141,10 @@ def summarize_performance(records: list[RolloutRecord]) -> PerformanceSummary:
 
 
 def summarize_evaluation(
-    records: list[EvaluationRollout], expected_rollouts: int
+    records: list[EvaluationRollout],
+    expected_rollouts: int,
+    *,
+    feedback_selection_enabled: bool = False,
 ) -> EvaluationSummary:
     """Count saved evidence, keeping structural novelty independent of timing reuse."""
     rollouts = [record.rollout for record in records]
@@ -159,6 +166,38 @@ def summarize_evaluation(
         if candidate.structurally_novel
     }
     count = len(records)
+    comparisons = [
+        record.feedback_selection
+        for record in records
+        if record.feedback_selection is not None
+    ]
+    feedback_summary = None
+    if feedback_selection_enabled or comparisons:
+        feedback_summary = FeedbackSelectionSummary(
+            applied_rollout_count=len(comparisons),
+            changed_selection_count=sum(
+                item.model_selected_candidate_id != item.selected_candidate_id
+                for item in comparisons
+            ),
+            default_selection_count=sum(
+                item.selected_candidate_id == "default" for item in comparisons
+            ),
+            reused_model_result_count=sum(
+                item.reused_model_result for item in comparisons
+            ),
+            # A setup/search failure remains a failure in both policies' totals.
+            performance=summarize_performance(
+                [
+                    record.feedback_selection.rollout
+                    if record.feedback_selection is not None
+                    else record.rollout
+                    for record in records
+                ]
+            ),
+            additional_execution_counts=summarize_performance(
+                [item.rollout for item in comparisons if not item.reused_model_result]
+            ).execution_counts,
+        )
     return EvaluationSummary(
         recorded_rollout_count=count,
         unrecorded_rollout_count=expected_rollouts - count,
@@ -186,6 +225,7 @@ def summarize_evaluation(
         },
         usage=total_usage([record.trace.usage for record in records if record.trace]),
         performance=summarize_performance(rollouts),
+        feedback_selection=feedback_summary,
     )
 
 
@@ -202,6 +242,7 @@ def evaluate_rollout(
     seed: int,
     stop: Event,
     output_dir: Path,
+    selection_policy: Literal["model", "best_feedback"] = "model",
 ) -> EvaluationRollout:
     """Save a completed or failed attempt before releasing it to the task scheduler."""
     if stop.is_set():
@@ -223,6 +264,8 @@ def evaluate_rollout(
     evaluator: RolloutEvaluator[PostgresClient] | None = None
     worker: WorkerManifest | None = None
     error: BaseException | None = None
+    model_record: RolloutRecord | None = None
+    feedback_selection: FeedbackSelection | None = None
     try:
         with pool.claim_worker() as slot:
             worker = slot.resources.manifest()
@@ -239,10 +282,46 @@ def evaluate_rollout(
                 evaluator,
                 log_label=f"{item.task.task_id} rollout={item.rollout_index}",
             )
+            alternate = (
+                feedback_selection_evaluator(evaluator)
+                if selection_policy == "best_feedback"
+                else None
+            )
             evaluator.finish(
                 random.Random(measurement_seed),
                 selected_candidate_id=policy_trace.selection.selected_candidate_id,
             )
+            model_record = evaluator.record()
+            if alternate is not None:
+                selected, alternate_evaluator = alternate
+                model_selected = (
+                    "default"
+                    if evaluator.kept_default
+                    else model_record.final.selected_candidate_id
+                    if model_record.final is not None
+                    else None
+                )
+                reused = selected == model_selected
+                alternate_seed = derive_seed(
+                    measurement_seed, "evaluation-best-feedback-pairs"
+                )
+                alternate_error: BaseException | None = None
+                try:
+                    if not reused:
+                        alternate_evaluator.finish(random.Random(alternate_seed))
+                except BaseException as caught:
+                    alternate_error = caught
+                    raise
+                finally:
+                    feedback_selection = FeedbackSelection(
+                        model_selected_candidate_id=model_selected,
+                        selected_candidate_id=selected,
+                        measurement_seed=measurement_seed if reused else alternate_seed,
+                        reused_model_result=reused,
+                        rollout=model_record
+                        if reused
+                        else alternate_evaluator.record(alternate_error),
+                    )
     except BaseException as caught:
         error = caught
         if not isinstance(caught, (PostgresError, ContainerError)):
@@ -255,7 +334,9 @@ def evaluate_rollout(
         started_at_utc=started,
         completed_at_utc=utc_now(),
         worker=worker,
-        rollout=evaluator.record(error)
+        rollout=model_record
+        if model_record is not None
+        else evaluator.record(error)
         if evaluator is not None
         else RolloutRecord(
             task_id=item.task.task_id,
@@ -272,6 +353,7 @@ def evaluate_rollout(
             ),
         ),
         trace=policy.trace,
+        feedback_selection=feedback_selection,
     )
     write_json(
         output_dir
@@ -304,6 +386,11 @@ def evaluate(
     pool_config: PoolConfig,
 ) -> EvaluationReport:
     """Own serving and PostgreSQL until all threads finish; never resume or overwrite."""
+    feedback_enabled = settings.selection_policy == "best_feedback"
+    if feedback_enabled and not measurement.candidate_feedback_measurements:
+        raise ValueError(
+            "best_feedback evaluation requires candidate execution feedback"
+        )
     tasks = task_set.resolve(selection)
     expected = len(tasks) * settings.rollouts_per_task
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -324,7 +411,9 @@ def evaluate(
         settings=settings,
         plan_fingerprint_version=PLAN_FINGERPRINT_VERSION,
         started_at_utc=utc_now(),
-        summary=summarize_evaluation([], expected),
+        summary=summarize_evaluation(
+            [], expected, feedback_selection_enabled=feedback_enabled
+        ),
     )
     write_json(report_path, report.model_dump(mode="json"))
     started = time.monotonic()
@@ -375,6 +464,7 @@ def evaluate(
                 seed=seed,
                 stop=stop,
                 output_dir=output_dir,
+                selection_policy=settings.selection_policy,
             )
             with ThreadPoolExecutor(max_workers=len(pool.workers)) as executor:
                 futures: list[Future[EvaluationRollout]] = []
@@ -434,18 +524,29 @@ def evaluate(
             EvaluationRollout.model_validate_json(path.read_bytes())
             for path in sorted((output_dir / "rollouts").glob("*/*.json"))
         ]
-        report.summary = summarize_evaluation(records, expected)
-        if (
-            report.status == RunStatus.COMPLETED
-            and report.summary.performance.failure_count
+        report.summary = summarize_evaluation(
+            records, expected, feedback_selection_enabled=feedback_enabled
+        )
+        if report.status == RunStatus.COMPLETED and (
+            report.summary.performance.failure_count
+            or (
+                report.summary.feedback_selection is not None
+                and report.summary.feedback_selection.performance.failure_count
+            )
         ):
             report.status = RunStatus.COMPLETED_WITH_FAILURES
         report.completed_at_utc = utc_now()
         report.elapsed_seconds = time.monotonic() - started
         write_json(report_path, report.model_dump(mode="json"))
     if report.status == RunStatus.COMPLETED_WITH_FAILURES:
+        feedback_failures = (
+            report.summary.feedback_selection.performance.failure_count
+            if report.summary.feedback_selection is not None
+            else 0
+        )
         raise RuntimeError(
-            f"evaluation completed with {report.summary.performance.failure_count} failed rollouts; "
+            f"evaluation completed with {report.summary.performance.failure_count} failed rollouts (model)"
+            f" and {feedback_failures} failed feedback-selection rollouts; "
             f"results: {output_dir}"
         )
     return report

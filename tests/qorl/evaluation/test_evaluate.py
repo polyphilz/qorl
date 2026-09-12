@@ -77,7 +77,7 @@ def run_evaluation(
         serving_gpu_ids=config.resources.serving_gpu_ids if config.resources else None,
         agent=config.agent,
         measurement=config.measurement,
-        settings=EvaluationSettings(rollouts_per_task=rollouts),
+        settings=config.evaluation.model_copy(update={"rollouts_per_task": rollouts}),
         seed=config.experiment.seed,
         postgres_config=postgres_config,
         pool_config=pool_config,

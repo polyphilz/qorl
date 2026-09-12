@@ -228,6 +228,13 @@ class ModelExperimentConfig(BaseExperimentConfig):
                 raise ValueError("hosted models do not accept revisions or adapters")
         if self.inference.max_tokens > self.model.context_length:
             raise ValueError("inference.max_tokens exceeds model.context_length")
+        if (
+            self.evaluation.selection_policy == "best_feedback"
+            and not self.measurement.candidate_feedback_measurements
+        ):
+            raise ValueError(
+                "best_feedback evaluation requires candidate execution feedback"
+            )
         if self.method != ExperimentMethod.EVAL:
             if (
                 self.model.provider != ModelProvider.LOCAL
