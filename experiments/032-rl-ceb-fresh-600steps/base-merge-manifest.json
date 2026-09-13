@@ -1,0 +1,65 @@
+{
+  "adapter_config_sha256": "fdde5c0400bd477c12d7b8c4d2bc6121291c42162eea561c35bb41ce247d3e4c",
+  "adapter_manifest_sha256": "ea97d633a25fb6209799d7256d17bd35dc8e0ab572f1f01a1159daec206e8a35",
+  "adapter_model_sha256": "96d195b4187645769621307552b84f9a8c830602b7a01f751e1fc5f3aa14715f",
+  "artifacts": [
+    {
+      "bytes": 7756,
+      "path": "chat_template.jinja",
+      "sha256": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715"
+    },
+    {
+      "bytes": 2772,
+      "path": "config.json",
+      "sha256": "0d721c3b6d378efee9b92741e8e4a05018882d4441c2fbf4f793be9ffff1376f"
+    },
+    {
+      "bytes": 164,
+      "path": "generation_config.json",
+      "sha256": "f703e9fc5d6929b4e9e344a0cf4a188da6717da217fa24031067e35ab730ee53"
+    },
+    {
+      "bytes": 3353259,
+      "path": "merges.txt",
+      "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d"
+    },
+    {
+      "bytes": 9319821272,
+      "path": "model.safetensors",
+      "sha256": "5de0270bf5329657364c9f86c344527f6a0af5aac989195fd9e8a6aa2df2619d"
+    },
+    {
+      "bytes": 390,
+      "path": "preprocessor_config.json",
+      "sha256": "27225450ac9c6529872ee1924fcb0962ff5634834f817040f444118116f4e516"
+    },
+    {
+      "bytes": 12807982,
+      "path": "tokenizer.json",
+      "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+    },
+    {
+      "bytes": 16710,
+      "path": "tokenizer_config.json",
+      "sha256": "316230d6a809701f4db5ea8f8fc862bc3a6f3229c937c174e674ff3ca0a64ac8"
+    },
+    {
+      "bytes": 385,
+      "path": "video_preprocessor_config.json",
+      "sha256": "7768af27c1fafa9cc9011c1dc20067e03f8915e03b63504550e11d5066986d13"
+    },
+    {
+      "bytes": 6722759,
+      "path": "vocab.json",
+      "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003"
+    }
+  ],
+  "base_model_sha256": "a2fd098341e57376695a986454e35ab38c9594c0a41b736abff16f9683205709",
+  "lora_alpha": 32.0,
+  "lora_rank": 16,
+  "lora_scale": 2.0,
+  "merged_model_sha256": "5de0270bf5329657364c9f86c344527f6a0af5aac989195fd9e8a6aa2df2619d",
+  "merged_tensor_count": 128,
+  "operation": "merge_lora_into_base",
+  "schema_version": 1
+}
