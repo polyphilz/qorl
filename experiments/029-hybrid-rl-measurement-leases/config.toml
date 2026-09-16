@@ -13,7 +13,7 @@ path = "docker/worker_pool/configs/002-poolconf-4x8/poolconf.json"
 provider = "local"
 name_or_path = "/lambda/nfs/qorl/models/qwen-4b-sft-027-step-2204"
 context_length = 49152
-base_url = "http://100.67.134.116:8000/v1"
+base_url = "http://192.0.2.10:8000/v1"
 request_timeout_seconds = 300
 max_concurrent_requests = 16
 
@@ -52,7 +52,7 @@ repetition_penalty = 1.0
 thinking = true
 
 [inference.serving]
-host = "100.67.134.116"
+host = "192.0.2.10"
 port = 8000
 dtype = "bfloat16"
 tool_call_parser = "qwen3_coder"
@@ -140,4 +140,4 @@ t = 0.1
 min_peers = 2
 
 [rl.environment]
-address = "tcp://100.84.223.59:5000"
+address = "tcp://192.0.2.20:5000"

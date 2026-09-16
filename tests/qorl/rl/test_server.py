@@ -173,7 +173,7 @@ def test_remote_translation_and_portable_identity(
     "bind,advertised",
     [
         ("0.0.0.0", "http://127.0.0.1:8000/v1"),
-        ("100.67.134.116", "http://127.0.0.1:8000/v1"),
+        ("192.0.2.10", "http://127.0.0.1:8000/v1"),
     ],
 )
 def test_remote_endpoint_mismatch(
@@ -796,7 +796,7 @@ def test_service_cli_forwards_explicit_paths(monkeypatch: pytest.MonkeyPatch) ->
             "serve",
             "experiments/new",
             "--bind",
-            "tcp://100.84.223.59:5000",
+            "tcp://192.0.2.20:5000",
             "--renderer-model",
             "/pg/assets",
             "--output",
@@ -807,7 +807,7 @@ def test_service_cli_forwards_explicit_paths(monkeypatch: pytest.MonkeyPatch) ->
     assert calls == [
         (
             Path("experiments/new"),
-            "tcp://100.84.223.59:5000",
+            "tcp://192.0.2.20:5000",
             Path("/pg/assets"),
             Path("/pg/service"),
         )
