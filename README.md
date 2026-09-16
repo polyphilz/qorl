@@ -4,7 +4,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/qorl-gh-banner-dark-optimized.gif">
     <source media="(prefers-color-scheme: light)" srcset="assets/qorl-gh-banner-light-optimized.gif">
-    <img src="assets/qorl-gh-banner-light-optimized.gif" width="640" alt="Animated QORL banner">
+    <img src="assets/qorl-gh-banner-light-optimized.gif" width="100%" alt="Animated QORL banner">
   </picture>
 </p>
 
