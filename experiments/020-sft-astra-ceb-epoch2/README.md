@@ -7,10 +7,10 @@ native CPU-offload settings. Seed: 42. `config.toml` owns the active values.
 
 Dataset input (read-only): `outputs/018-sft-astra-ceb-100-remasked/000/dataset`. Original split assignments and seeds are retained.
 
-Training uses GPU 0 on Lambda. Source artifacts remain unchanged; the new checkpoint
+Training uses GPU 0 on the training host. Source artifacts remain unchanged; the new checkpoint
 goes under `outputs/020-sft-astra-ceb-epoch2/000/`. Validation runs on the incoming
 weights at step 382 and after the added epoch at step 764. Run the subsequent JOB
-rollout evaluation on FLOPper to retain the database setup used for 018 and 019.
+rollout evaluation on the benchmark host to retain the database setup used for 018 and 019.
 
 Stage commands:
 

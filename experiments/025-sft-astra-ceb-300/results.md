@@ -1,8 +1,8 @@
 # Results: additional Astra SFT and JOB evaluation, run 002
 
-Training completed successfully on Lambda on **September 10, 2026, at 22:34
+Training completed successfully on the training host on **September 10, 2026, at 22:34
 America/New_York** (September 11, 02:34 UTC). The resulting adapter's JOB
-evaluation completed on FLOPper on **September 11 at 00:00:54 America/New_York**.
+evaluation completed on the benchmark host on **September 11 at 00:00:54 America/New_York**.
 
 **The rollout result is mixed.** Compared with the epoch-2 baseline in 026,
 the new adapter found more improvements and used a broader range of
@@ -22,7 +22,6 @@ evaluates the weights after the new training epoch.
 The launcher exited with status 0, the final native checkpoint and exported
 adapter exist, and the exported tensor checksum matches its manifest. All 1,102
 updates have recorded losses, with no nonfinite losses or recorded NaN counts.
-Both Lambda GPUs were idle when checked after completion.
 
 The validation improvement measures prediction of held-out teacher
 conversations. As the JOB results below show, that improvement did not translate
@@ -39,7 +38,7 @@ into uniformly better autonomous behavior.
 | LoRA | Rank 16, alpha 32, dropout 0 |
 | Learning rate | Constant `1e-4` |
 | Context / packed row length | 49,152 tokens |
-| Hardware | One H100 80 GB on Lambda; second GPU unused |
+| Hardware | One H100 80 GB on the training host; second GPU unused |
 | Training data | 293 conversations; 2,180 supervised requests; 1,102 packed rows |
 | Validation data | 19 conversations; 131 supervised requests; 73 packed rows |
 | Supervised tokens | 376,847 training; 24,459 validation |
@@ -75,10 +74,10 @@ The last update's very small loss alone is not informative: it supervised only
 
 ## Final adapter and evaluation provenance
 
-On Lambda, the exported adapter is at:
+The exported adapter is at:
 
 ```text
-/lambda/nfs/qorl/projects/qorl/outputs/025-sft-astra-ceb-300/002/training/checkpoints/step_1102/adapter
+outputs/025-sft-astra-ceb-300/002/training/checkpoints/step_1102/adapter
 ```
 
 `adapter_model.safetensors` is **42,500,760 bytes (40.5 MiB)**. Its computed
@@ -95,8 +94,6 @@ JOB queries, one rollout each, seed 42, five candidate attempts, thinking enable
 settings, three initial default measurements, one candidate feedback
 measurement, and three final measured pairs also match.
 
-The checkpoint, exported adapter, and run metadata have also been transferred
-to `/home/rohan/projects/qorl/outputs/025-sft-astra-ceb-300/002` on FLOPper.
 The native checkpoint, exported tensor checksum, LoRA settings, and local base
 passed the evaluation entrypoint's verification. Experiment/run inputs agree,
 and JOB selections and evaluation settings match 026. The source epoch-2
@@ -110,7 +107,7 @@ same pinned base. All **803 model responses identify `qorl-adapter`**, and all
 default timing-reuse keys match for all 113 queries. This comparison is not
 confounded by another harness revision or different default plans.
 
-Evidence lives under the Lambda run directory above: `training/report.json`,
+Evidence lives under `outputs/025-sft-astra-ceb-300/002`: `training/report.json`,
 `training/monitors/file/metrics.jsonl`, `training/logs/attempt_1/trainer.log`,
 `training-launch.exit`, and the checkpoint's adapter manifest.
 
@@ -293,8 +290,8 @@ the default before finishing. This run gives a reason to retain 025 as a more
 varied search policy, but does not by itself justify another unfiltered SFT
 epoch or establish an overall improvement over the starting adapter.
 
-Evaluation report on FLOPper:
-`/home/rohan/projects/qorl/outputs/025-sft-astra-ceb-300/002/evaluation/test/000/evaluation.json`.
+Evaluation report:
+`outputs/025-sft-astra-ceb-300/002/evaluation/test/000/evaluation.json`.
 Per-query evidence is under that evaluation directory at
 `rollouts/<task-id>/000.json`. Report SHA-256:
 `b42115ce79aabd67208938466a1141288607a3611ef23d35e3e0b76eb646bd49`.
@@ -373,8 +370,7 @@ Added September 11, 2026, from the per-query records of this run
 the 026 baseline (`outputs/026-qwen-4b-job-epoch2-v7-5cand-1rollout/000/evaluation/test/000`),
 the Astra generation attempts behind the training data
 (`outputs/025-sft-astra-ceb-300/001/generation/attempts/`), and Astra's own JOB
-run (`outputs/011-astra-med-test-5cand-1rollout/000/evaluation/test/000`), all
-on FLOPper.
+run (`outputs/011-astra-med-test-5cand-1rollout/000/evaluation/test/000`).
 
 Definitions used throughout: an *eligible* candidate is one the harness marked
 `selection_eligible` in the candidate history shown to the model. That includes
@@ -534,7 +530,7 @@ autonomous evaluation, but it should not be used to rank checkpoints.
 3. Return one corrective error, with bounded retries, on an ineligible finish
    while candidate attempts remain.
 4. Re-evaluate both adapters with three rollouts per query under those rules,
-   about 1.6 hours each on FLOPper. One rollout cannot rank them: 29 queries lost
+   about 1.6 hours each on the benchmark host. One rollout cannot rank them: 29 queries lost
    validity and 21 gained it between 026 and this run.
 5. If the same failures persist, prefer teacher corrections on student-generated
    CEB histories or RL from this run's adapter over another large, unselected

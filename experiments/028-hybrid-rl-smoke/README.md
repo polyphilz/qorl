@@ -1,9 +1,9 @@
 # 028 — Hybrid RL smoke
 
 Four optimizer updates to test [044's hybrid architecture](../../.plans/044-hybrid-rl-machinery.md):
-Lambda owns training and inference on its two H100s; FLOPper owns qo-agent,
-rendering and all PostgreSQL work. This is an integration test, not a policy
-quality comparison. Run `000` completed all four updates on September 11, 2026,
+The training host runs training and inference on two H100s; a separate benchmark
+host runs qo-agent, rendering and all PostgreSQL work. This is an integration
+test, not a policy quality comparison. Run `000` completed all four updates on September 11, 2026,
 from **16:19:05 to 16:30:20 UTC (12:19–12:30 EDT)**. See
 [results.md](results.md) for the live audit, checkpoint and cleanup evidence.
 
@@ -19,8 +19,8 @@ from **16:19:05 to 16:30:20 UTC (12:19–12:30 EDT)**. See
 | Agent | v7, five candidate attempts, 64 model turns, thinking enabled |
 | Context / maximum reply | 49,152 / 8,192 tokens |
 | Measurement | Existing three initial default measurements, one candidate feedback measurement, three final pairs; normal warmups |
-| PostgreSQL | FLOPper's `001-pgconf-2gb-sb`, `002-poolconf-4x8` |
-| GPUs on Lambda | GPU 0 training; GPU 1 inference |
+| PostgreSQL | Benchmark host: `001-pgconf-2gb-sb`, `002-poolconf-4x8` |
+| Training host GPUs | GPU 0 training; GPU 1 inference |
 | Checkpoints | Every update; retain all four |
 | Seed | 42 |
 
@@ -49,10 +49,10 @@ Created through `qorl experiment create`, using seed 42 and expressions
 `configs/defaults/002-rl.toml` for this smoke. No defaults were edited.
 The saved task files own the IDs and are not resampled at execution.
 
-## Starting model, already prepared on Lambda
+## Starting model
 
 ```text
-/lambda/nfs/qorl/models/qwen-4b-sft-027-step-2204
+models/qwen-4b-sft-027-step-2204
 ```
 
 Built with `qorl model merge` from the original pinned
@@ -68,8 +68,7 @@ and does not resume the SFT optimizer or modify its checkpoints.
 | Source SFT adapter | `f20c171c1da2cdf45f4d84bd945877702214e4b81d3586b3a0abef201ea3ed4f` |
 | Merged base weights | `a2fd098341e57376695a986454e35ab38c9594c0a41b736abff16f9683205709` |
 
-The merge manifest is `qorl-merge.json` inside that directory. FLOPper can use
-its already-cached original model directory for renderer assets: all six
+The merge manifest is `qorl-merge.json` inside that directory. All six original
 config/tokenizer/template asset hashes match the merged model exactly. The
 environment service reads those assets, not the original model's weights.
 Later evaluation of an RL adapter will require the **merged base**, since that
@@ -93,8 +92,9 @@ host throughout the run.
 ## What constitutes a useful smoke result
 
 Record results in this experiment's `results.md` after the run. Check the gates
-in order: matching claim, successful FLOPper-to-Lambda inference probe, a
-complete native episode, then optimizer updates and weight publication.
+in order: matching claim, successful inference probe from the benchmark host to
+the training host, a complete native episode, then optimizer updates and weight
+publication.
 
 Verify all four updates and their saved checkpoints, returned logprobs/token
 masks, anchored advantages, and subsequent rollouts carrying an updated policy
@@ -106,5 +106,5 @@ evidence. A working transport with invalid actions is still not policy-quality
 evidence.
 
 At exit, the trainer drains its remote work but does not terminate the
-externally owned service. Stop the FLOPper service with Ctrl-C in its terminal,
-then confirm its pool has shut down before another database experiment.
+externally owned service. Stop the environment service, then confirm its pool
+has shut down before another database experiment.

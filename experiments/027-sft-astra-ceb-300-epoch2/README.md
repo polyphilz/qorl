@@ -30,18 +30,18 @@ the source run's settings except experiment name, dataset import and total
 epochs. Validation runs on the incoming weights at step 1,102 and after the
 additional epoch at step 2,204.
 
-Run `000` has been prepared on Lambda. Both packed splits match the source
+Run `000` has been prepared on the training host. Both packed splits match the source
 byte for byte, and the full native continuation check passed. Training was
 launched on September 11, 2026, at 04:40 UTC, from step 1,102 to step 2,204.
 The original checkpoint checksum remains
 `a91ee09bea645a93fb8316ec9d7813fe7e18557d98ffa2839aa3b12d53d219c8`.
 
-The commands below use the same installed GPU environment and code snapshot as
-025, from `~/qorl/projects/qorl`. Activate it so the trainer also resolves that
-environment's `torchrun`:
+Use the same pinned GPU dependencies and code snapshot as 025. From the
+repository root, activate the project environment so the trainer also resolves
+its `torchrun`:
 
 ```bash
-source ~/.venvs/qorl-025-training/bin/activate
+source .venv/bin/activate
 qorl experiment run \
   experiments/027-sft-astra-ceb-300-epoch2 --stage prepare
 ```
@@ -59,7 +59,3 @@ startup, then `000/training/logs/attempt_1/trainer.log` for training progress.
 Launch metadata and eventual exit status are recorded in `training-launch.json`
 and `training-launch.exit`; verification evidence is in
 `continuation-preflight.json`.
-
-The first launch picked up the system `torchrun` and failed before model loading
-or optimizer updates. Its files are retained under `000/startup-failures/000/`.
-The retry activates the GPU environment in the launch process's `PATH`.

@@ -16,8 +16,8 @@ Adapter: `outputs/023-sft-astra-ceb-epoch3/000/training/checkpoints/step_1146/ad
 Adapter weights SHA-256:
 `84ee7a07696fea72027588d49a1d4d2d0925220ad8790a5231bf3b4ff72dc1b8`.
 
-The adapter is copied to FLOPper and verified against its cached base weights.
-After pulling this experiment and the current harness onto FLOPper, run:
+The adapter was verified against the serving base weights. Run from the
+repository root on the benchmark host:
 
 ```bash
 uv run --frozen --extra gpu qorl experiment run experiments/024-qwen-4b-job-epoch3-5cand-1rollout --stage evaluate --split test

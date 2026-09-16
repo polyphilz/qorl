@@ -1,6 +1,6 @@
 # Results: third SFT epoch on the original Astra dataset, evaluated on JOB
 
-Evaluation completed on **September 10, 2026**, on FLOPper: run `000`, split
+Evaluation completed on **September 10, 2026**, on the benchmark host: run `000`, split
 `test`, evaluation `000`.
 
 **The third epoch was a regression, and epoch 2 was the better checkpoint to
@@ -35,7 +35,7 @@ on the additional demonstrations later collected in 025.
 | Agent budget | Five candidate attempts; 64 model turns |
 | Model settings | Thinking enabled; 49,152-token context; 8,192-token maximum reply |
 | Sampling | Temperature 1.0, top-p 1.0, top-k 20 |
-| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, FLOPper GPU 0 |
+| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, benchmark host GPU 0 |
 | Harness / fingerprints | qo-agent v7 / plan fingerprint v4 |
 | PostgreSQL / pool | `001-pgconf-2gb-sb` / `002-poolconf-4x8` |
 | Evaluation wall time | **37m 28s**, 13:49:41–14:27:09 America/New_York |
@@ -272,7 +272,7 @@ over 025's larger, different dataset.
 
 ## Evidence and definitions
 
-Primary evaluation artifacts are on FLOPper:
+Primary evaluation artifacts:
 
 - `outputs/024-qwen-4b-job-epoch3-5cand-1rollout/000/evaluation/test/000/evaluation.json`
 - Per-query records in the same directory: `rollouts/<task-id>/000.json`.
@@ -282,10 +282,10 @@ Primary evaluation artifacts are on FLOPper:
 024 report SHA-256:
 `e28817c2f5e764a5cbc96bfd3d5066caad44a45f07eed384f306c85ac85cab21`.
 
-Training evidence is in Lambda's
+Training evidence is in
 `outputs/023-sft-astra-ceb-epoch3/000/training/{report.json,configs/identity.json}`
 and the corresponding 020 files. Epoch-1 validation comes from 018's training
-report on FLOPper. See [023's README](../023-sft-astra-ceb-epoch3/README.md) for
+report. See [023's README](../023-sft-astra-ceb-epoch3/README.md) for
 the continuation setup.
 
 Geometric mean is `exp(mean(log(default_ms / candidate_ms)))` over outcomes with

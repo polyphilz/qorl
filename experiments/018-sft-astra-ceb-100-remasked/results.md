@@ -1,7 +1,8 @@
 # Results: first Astra-demonstration adapter, one epoch, run 000
 
-Training completed on FLOPper on **September 9, 2026, at 18:21:13
-America/New_York** (22:21:13 UTC) after **13m 17s**. Evaluation of the resulting
+Training completed on the benchmark host on **September 9, 2026, at 18:21:13
+America/New_York** (22:21:13 UTC) after **4h 13m 20s**, of which the 382 updates took
+4h 00m at a mean of 37.8 s per update. Evaluation of the resulting
 step-382 adapter on all 113 JOB queries completed at **19:44:49
 America/New_York** (23:44:49 UTC), after **1h 18m 05s**. All 113 rollouts were
 recorded; there were no infrastructure or model-call failures.
@@ -23,7 +24,7 @@ regressions** among the 27 measured queries, for a geometric-mean speedup of
 | Learning rate / batch | Constant `1e-4`; batch and microbatch size 1; AdamW |
 | Context / precision | 49,152 tokens; BF16; flash attention 2 |
 | Updates | 382, one epoch, one packed row per update |
-| Hardware | One RTX 3090 on FLOPper; peak memory 21.5 GiB |
+| Hardware | One RTX 3090 on the benchmark host; peak memory 21.5 GiB |
 | Training data | 99 Astra conversations on 100 CEB training tasks (ten from each of ten templates); 781 supervised requests; 55 requests excluded from supervision; 382 packed rows; 132,706 supervised tokens |
 | Validation data | 19 conversations on 20 CEB tasks from two held-out templates; 136 supervised requests; 71 packed rows; 26,463 supervised tokens |
 

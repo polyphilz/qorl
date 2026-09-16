@@ -18,11 +18,11 @@ run in experiment 025. Matches experiment 024's 113 JOB tasks and all evaluation
 settings; only the adapter and experiment name differ. Five candidate attempts,
 one rollout per task, seed 42, thinking enabled, 49,152-token context, and
 8,192-token maximum replies. Uses three initial default measurements and the
-FLOPper four-worker pool with 2 GiB PostgreSQL shared buffers.
+benchmark host's four-worker pool with 2 GiB PostgreSQL shared buffers.
 
 Adapter: experiment 020, step 764 (epoch 2). Tensor SHA-256:
 `d1f055e4a347fca34185a34d2f9baf22f9197e006dacfb0b018b52f178c918f4`.
-The serving base and exported adapter checksums were verified on FLOPper.
+The serving base and exported adapter checksums were verified on the benchmark host.
 Interface v7 comes from the executing checkout; the experiment config does not
 pin harness code.
 

@@ -31,7 +31,7 @@ with no recorded inference/infrastructure failures or context-limit stops.
 | Algorithm | Anchored GRPO: `tau=0.05`, `c=0.1`, `d=0.02`, `t=0.1`, `min_peers=2` |
 | Agent | Five candidate attempts; thinking enabled; at most 64 model turns |
 | Token limits | 49,152 context; 8,192 maximum reply |
-| Hardware | Two H100 80 GB GPUs for training/inference; PostgreSQL on FLOPper |
+| Hardware | Two H100 80 GB GPUs for training/inference; PostgreSQL on the benchmark host |
 | Database workers | Four workers, each with four physical cores and 8 GiB; 2 GiB shared buffers |
 | RL worker ownership | A worker is held for each complete measurement phase and released during inference |
 | Checkpoints | Every 20 updates; all 30 scheduled checkpoints retained through step 600 |

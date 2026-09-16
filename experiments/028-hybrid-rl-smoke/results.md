@@ -1,6 +1,6 @@
 # 028 — Hybrid RL smoke results
 
-**The first live FLOPper/Lambda RL smoke passed.** Four optimizer updates trained
+**The first live hybrid RL smoke passed.** Four optimizer updates trained
 on 16 episodes, changed adapter weights, refreshed inference and retained all
 four checkpoints. Both network directions, the actual native client/renderer
 contract, anchored credit, token masks and cancellation/draining worked.
@@ -9,12 +9,12 @@ This establishes integration; it does not establish an improvement in policy qua
 ## Run
 
 - Date: September 11, 2026.
-- Run: `outputs/028-hybrid-rl-smoke/000` on Lambda.
+- Run: `outputs/028-hybrid-rl-smoke/000`.
 - Launch: **16:19:05 UTC / 12:19:05 EDT**; successful exit:
   **16:30:20 UTC / 12:30:20 EDT**, approximately **11 min 15 sec** including startup,
   checkpoint writes and shutdown.
-- Lambda: training on H100 GPU 0, inference on H100 GPU 1.
-- FLOPper: shared agent, renderer and PostgreSQL; four workers with four physical
+- Training host: training on H100 GPU 0, inference on H100 GPU 1.
+- Benchmark host: shared agent, renderer and PostgreSQL; four workers with four physical
   cores and 8 GiB each, existing 2 GiB shared-buffers configuration.
 - Source on both hosts: `45693b2168c2057b95b61857830d66e165d52f1d`.
 - Prime-RL, vendored Verifiers and renderers origin:
@@ -29,7 +29,7 @@ This establishes integration; it does not establish an improvement in policy qua
 | Check | Observed result |
 | --- | --- |
 | Remote claim | Accepted with matching execution contract |
-| FLOPper → Lambda inference | Model probe and native generation requests returned successfully |
+| Benchmark host → training host inference | Model probe and native generation requests returned successfully |
 | Actual native episode path | 21 recorded episodes, zero episode failures |
 | Training consumption | Four groups of four episodes: 16 used, five completed but unused |
 | Native token data | 147 model calls; 36,624 sampled tokens across all recorded episodes |
@@ -41,7 +41,7 @@ This establishes integration; it does not establish an improvement in policy qua
 | Inference refresh | Adapters 1–4 loaded; completed episodes recorded updated policy versions through version 3 |
 | Checkpoints | Complete native checkpoints retained for steps 1–4; step 4 exported successfully |
 | Remote cleanup | `cancellation_acknowledged=true`, no cleanup error |
-| Resource cleanup | Both Lambda GPUs idle; FLOPper service exited successfully and its four containers were removed |
+| Resource cleanup | Both training host GPUs idle; benchmark host service exited successfully and its four containers were removed |
 
 The recorded policy start/end versions were `(0,0)` for seven episodes, `(0,1)`
 for four, `(1,2)` for four, `(2,2)` for two and `(2,3)` for four. This exercises
@@ -130,18 +130,18 @@ to complete the training run.
 
 ## Saved checkpoint and evidence
 
-Final exported adapter, on Lambda:
+Final exported adapter:
 
 ```text
-/lambda/nfs/qorl/projects/qorl/outputs/028-hybrid-rl-smoke/000/training/checkpoints/step_4/adapter
+outputs/028-hybrid-rl-smoke/000/training/checkpoints/step_4/adapter
 ```
 
 Adapter weights: **42,500,760 bytes (40.53 MiB)**.
 SHA-256: `933c3d5786f6a85472d5f315a944afaf18da7f6b2059d1d34f3714fa0f0e7b02`.
-It must be used with `/lambda/nfs/qorl/models/qwen-4b-sft-027-step-2204`, the
+It must be used with `models/qwen-4b-sft-027-step-2204`, the
 merged base used in training, rather than the original pre-SFT base.
 
-Primary artifacts on Lambda:
+Training artifacts:
 
 - `outputs/028-hybrid-rl-smoke/000/training/report.json`
 - `000/training/configs/remote-claim.json` and `remote-environment.json`
@@ -152,11 +152,10 @@ Primary artifacts on Lambda:
   `smoke-audit.json`, `shipped-mask-audit.json`, `weight-change-audit.json` and
   `final-adapter-export.json`
 
-Primary artifacts on FLOPper:
+Environment service artifacts:
 
 - `outputs/028-hybrid-rl-smoke/service-000/` for identity, claim, service log,
   full native episodes and QORL rollout records
 - `outputs/028-hybrid-rl-smoke/deployment/service-audit.json` and service exit record
 
-Service cleanup finished at **16:31:21 UTC**. Another run needs a fresh service
-instance/output and a fresh training run.
+Service cleanup finished at **16:31:21 UTC**.

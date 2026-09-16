@@ -1,6 +1,6 @@
 # Results: epoch-2 adapter on JOB under harness v7
 
-Completed September 10, 2026, on FLOPper. Run `000`, evaluation `test/000`.
+Completed September 10, 2026, on the benchmark host. Run `000`, evaluation `test/000`.
 
 **The epoch-2 adapter remains the stronger checkpoint.** This run produced a
 valid candidate on **85/113 queries (75.2%)** and achieved **1.075× geometric-mean
@@ -21,7 +21,7 @@ the original epoch-2 adapter; it does **not** include training on the new
 | Base | `empero-ai/Qwen3.8-4B-Distill` |
 | Base revision | `c83cb7aa2999d2f35c43e9ae0634a30eb8985a1e` |
 | Adapter | Experiment 020, step 764: two epochs on the original SFT dataset |
-| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, FLOPper GPU 0 |
+| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, benchmark host GPU 0 |
 | Harness / fingerprints | qo-agent v7 / plan fingerprint v4 |
 | Agent budget | Up to five candidate attempts; 64 model turns |
 | Model settings | Thinking enabled; 49,152-token context; 8,192-token maximum reply |
@@ -246,8 +246,8 @@ used repeatedly during iteration; it should be described that way in the write-u
 
 ## Evidence and metric definitions
 
-Primary report on FLOPper:
-`/home/rohan/projects/qorl/outputs/026-qwen-4b-job-epoch2-v7-5cand-1rollout/000/evaluation/test/000/evaluation.json`.
+Primary report:
+`outputs/026-qwen-4b-job-epoch2-v7-5cand-1rollout/000/evaluation/test/000/evaluation.json`.
 
 Report SHA-256:
 `4974825b610d87b70a36b6ca51638d56fa5f67d1711ee6e7151b2449920c82a1`.

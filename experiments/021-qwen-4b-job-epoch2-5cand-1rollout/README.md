@@ -6,7 +6,7 @@ experiment 018 and vanilla experiment 019.
 
 Settings match those evaluations: seed 42, one rollout per task, up to five
 candidate attempts, thinking enabled, 49,152-token context, 8,192 output tokens
-per turn, and FLOPper's existing four-worker pool with 2 GiB shared buffers.
+per turn, and the benchmark host's existing four-worker pool with 2 GiB shared buffers.
 Resolved test task IDs are identical to 018 and 019.
 
 The pinned base is `empero-ai/Qwen3.8-4B-Distill` at revision
@@ -16,7 +16,7 @@ exported after two total SFT epochs (764 cumulative optimizer updates).
 Adapter weights SHA-256:
 `d1f055e4a347fca34185a34d2f9baf22f9197e006dacfb0b018b52f178c918f4`.
 
-Run from the repository root on FLOPper, where the adapter has been copied:
+Run from the repository root on the benchmark host:
 
 ```bash
 uv run --frozen --extra gpu qorl experiment run experiments/021-qwen-4b-job-epoch2-5cand-1rollout --stage evaluate --split test

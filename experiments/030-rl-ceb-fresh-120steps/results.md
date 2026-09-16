@@ -25,7 +25,7 @@ difference described below prevent attributing small changes confidently to RL.
 - Five candidate attempts; thinking enabled; 49,152-token context and 8,192-token
   reply limit. Harness interface v7 and the recorded renderer remained unchanged.
 - Two H100s handled training and inference. PostgreSQL used four calibrated
-  workers on FLOPper, each with four physical cores, 8 GiB and 2 GiB shared buffers.
+  workers on the benchmark host, each with four physical cores, 8 GiB and 2 GiB shared buffers.
 - Prime-RL/Verifiers/renderers source pin: `d4636a532d668ffbe727eb9e7730e7ea24ca384c`.
 - Matched QORL source contract hash:
   `4334425cd1906976880da7b30463b0abd98ac81b17adc96f8373de00a647c638`.
@@ -138,22 +138,20 @@ The final RL adapter was evaluated within this experiment at
 `outputs/030-rl-ceb-fresh-120steps/000/evaluation/test/000`. Evaluation started
 **September 11, 2026, at 21:50:35 UTC** and completed at **22:25:50 UTC**
 (18:25:50 America/New_York), taking **2,114.38 seconds**. The launcher exited 0;
-the four owned PostgreSQL containers were removed. The requested 75-minute
-foreground wait completed before inspection. Detailed analysis used downloaded
-records locally after confirming evaluation had stopped.
+the four owned PostgreSQL containers were removed.
 
 - **113 JOB queries, one rollout each, seed 43**, five candidate attempts,
   thinking enabled, 49,152-token context, 8,192-token maximum reply, temperature
   1.0, top-p 1.0 and top-k 20.
 - The exported **step-120 RL adapter** ran on its exact **merged 027 step-2204
-  base**. Transfer checks matched the model artifacts, recorded training-base
+  base**. Integrity checks matched the model artifacts, recorded training-base
   hash, adapter checksum and the source checkpoint's verified export manifest.
   Applying this RL adapter directly to the original pretrained base would be
   incorrect; that was not done.
 - vLLM 0.28.0 served the model on one RTX 3090. All **810 recorded requests and
   responses** identify `qorl-adapter`, and the server records that adapter's
-  parent as the transferred merged base. Local serving used four sequences.
-- PostgreSQL used the usual FLOPper configurations, `001-pgconf-2gb-sb` and
+  parent as the merged base. Local serving used four sequences.
+- PostgreSQL used the benchmark host configurations, `001-pgconf-2gb-sb` and
   `002-poolconf-4x8`: four workers, four physical cores and 8 GiB per worker.
   **Standalone evaluation retained a worker for each complete rollout**;
   measurement-phase leasing applied to RL collection, not this evaluation.
@@ -374,13 +372,13 @@ failure was found that warrants changing the measurement protocol here.
 
 ## Saved model and evidence
 
-Final exported adapter on Lambda:
+Final exported adapter:
 
 ```text
-/lambda/nfs/qorl/projects/qorl/outputs/030-rl-ceb-fresh-120steps/000/training/checkpoints/step_120/adapter
+outputs/030-rl-ceb-fresh-120steps/000/training/checkpoints/step_120/adapter
 ```
 
-Use it with the merged base `/lambda/nfs/qorl/models/qwen-4b-sft-027-step-2204`.
+Use it with the merged base `models/qwen-4b-sft-027-step-2204`.
 Adapter weights are **42,500,760 bytes (40.53 MiB)**, SHA-256
 `1b5f449a22e68881d6eddf3a9c470366b3cde5acff522d5641be7ad5a31628c4`.
 

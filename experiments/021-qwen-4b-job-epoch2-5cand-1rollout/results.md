@@ -1,6 +1,6 @@
 # Results: second SFT epoch on the original Astra dataset, evaluated on JOB
 
-Evaluation completed on **September 10, 2026**, on FLOPper: run `000`, split
+Evaluation completed on **September 10, 2026**, on the benchmark host: run `000`, split
 `test`, evaluation `000`.
 
 **The second epoch substantially improved candidate generation, but this run did
@@ -36,7 +36,7 @@ demonstrations, before the additional data collected in 025.
 | Agent budget | Five candidate attempts; 64 model turns |
 | Model settings | Thinking enabled; 49,152-token context; 8,192-token maximum reply |
 | Sampling | Temperature 1.0, top-p 1.0, top-k 20 |
-| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, FLOPper GPU 0 |
+| Serving | vLLM 0.28.0, `qorl-adapter` over `qorl-base`, benchmark host GPU 0 |
 | Harness / fingerprints | qo-agent v6 / plan fingerprint v4 |
 | PostgreSQL / pool | `001-pgconf-2gb-sb` / `002-poolconf-4x8` |
 | Evaluation wall time | **53m 18s**, 01:07:15–02:00:33 America/New_York |
@@ -221,7 +221,7 @@ plans or teach the model to find better ones.
 ## Training evidence and later clarification
 
 020's validation measured the incoming and outgoing weights on the same held-out
-teacher data on Lambda:
+teacher data on the training host:
 
 | Checkpoint | Held-out teacher loss |
 | --- | ---: |
@@ -266,7 +266,7 @@ summaries were optimal or compare them with raw teacher reasoning.
 
 ## Evidence and definitions
 
-Primary evaluation artifacts are on FLOPper:
+Primary evaluation artifacts:
 
 - `outputs/021-qwen-4b-job-epoch2-5cand-1rollout/000/evaluation/test/000/evaluation.json`
 - Per-query records in the same directory: `rollouts/<task-id>/000.json`.
@@ -276,7 +276,7 @@ Primary evaluation artifacts are on FLOPper:
 021 report SHA-256:
 `96ded2c4c945b087f15ef5ef59fa9218b6349ae048a27e71e7fd5d09a3e37fcd`.
 
-Training counts and paired incoming/final validation losses come from Lambda's
+Training counts and paired incoming/final validation losses come from
 `outputs/020-sft-astra-ceb-epoch2/000/training/report.json`.
 See [020's README](../020-sft-astra-ceb-epoch2/README.md) for the continuation setup.
 

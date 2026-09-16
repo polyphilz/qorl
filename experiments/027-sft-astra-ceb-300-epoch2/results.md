@@ -1,8 +1,8 @@
 # Results: second epoch on the additional Astra demonstrations, run 000
 
-Training completed on Lambda on **September 11, 2026, at 02:51:57
+Training completed on the training host on **September 11, 2026, at 02:51:57
 America/New_York** (06:51:57 UTC). Evaluation of the resulting step-2204 adapter
-completed on FLOPper at **03:34:03 America/New_York** (07:34:03 UTC), after
+completed on the benchmark host at **03:34:03 America/New_York** (07:34:03 UTC), after
 **34m 22s**. All 113 JOB rollouts were recorded; there were no recorded
 infrastructure or model-call failures.
 
@@ -26,7 +26,7 @@ and also produced substantially more malformed string actions.
 | LoRA | Rank 16, alpha 32, dropout 0 |
 | Learning rate / batch | Constant `1e-4`; batch and microbatch size 1 |
 | Context / precision | 49,152 tokens; BF16 |
-| Hardware | One H100 80 GB on Lambda |
+| Hardware | One H100 80 GB on the training host |
 | Training data | 293 conversations; 2,180 supervised requests; 1,102 packed rows |
 | Validation data | 19 conversations; 131 supervised requests; 73 packed rows |
 | Supervised tokens per epoch | 376,847 training; 24,459 validation |
@@ -70,7 +70,7 @@ held-out teacher messages; autonomous JOB behavior must be assessed separately.
 
 The evaluation used **all 113 JOB queries, one rollout per query, seed 42,
 five candidate attempts, thinking enabled, 49,152-token context and an
-8,192-token maximum reply**. Temperature was 1.0. PostgreSQL ran on FLOPper
+8,192-token maximum reply**. Temperature was 1.0. PostgreSQL ran on the benchmark host
 with `001-pgconf-2gb-sb` and `002-poolconf-4x8`: four workers, four physical
 cores and 8 GiB per worker. Candidate selection remained the model's decision.
 
@@ -83,7 +83,7 @@ final paired score.
 All **817 model responses identify `qorl-adapter`**. The completed serving
 report identifies its parent as `qorl-base` and its adapter path as this run's
 `training/checkpoints/step_2204/adapter`; it reports vLLM 0.28.0. The exported
-adapter and native checkpoint passed the transfer/evaluation verification.
+adapter and native checkpoint passed the integrity and evaluation checks.
 
 All 113 traces record **interface v7 and plan fingerprint v4**. Compared
 query by query with both 025 and 026, the system prompts, tool-definition
@@ -356,27 +356,24 @@ separately; completion alone can improve through defaulting.
 JOB has now been used repeatedly to guide development and checkpoint choices.
 It is a useful comparison workload, but should not be described as an untouched
 final test set. These results also do not establish superiority over a mechanical
-hint sweep or end-to-end savings after the search cost. No new training,
-evaluation or RL smoke was launched during this analysis.
+hint sweep or end-to-end savings after the search cost.
 
 ## Evidence and reproduction
 
-The completed run exists on both hosts:
+Run directory:
 
 ```text
-Lambda:  /lambda/nfs/qorl/projects/qorl/outputs/027-sft-astra-ceb-300-epoch2/000
-FLOPper: /home/rohan/projects/qorl/outputs/027-sft-astra-ceb-300-epoch2/000
+outputs/027-sft-astra-ceb-300-epoch2/000
 ```
 
-Training evidence originated on Lambda and was copied to FLOPper. Evaluation
-evidence is on FLOPper. Paths below are relative to the run directory:
+Paths below are relative to the run directory:
 
 - `training/report.json`: preparation counts, continuation progress and validation losses.
 - `training/configs/identity.json`: source checkpoint, base hash and trainer provenance.
 - `training/monitors/file/metrics.jsonl`: every new optimizer update and the validation measurements.
 - `training-launch.exit`: successful training exit.
 - `training/checkpoints/step_2204/adapter/qorl-manifest.json`: exported tensor and native checkpoint hashes.
-- `transfer-from-lambda.json` and `evaluation-preflight.json`: transfer and evaluation verification.
+- `transfer-from-lambda.json` and `evaluation-preflight.json`: artifact integrity and evaluation verification.
 - `evaluation/test/000/evaluation.json`: completed report and served model identity.
 - `evaluation/test/000/rollouts/<task-id>/000.json`: raw actions, requests, feedback, selection and paired timings.
 

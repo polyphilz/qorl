@@ -270,7 +270,7 @@ checkpoints remain intact; merge provenance is in
 | Agent limits | Five attempts; 64 model turns; thinking enabled |
 | Context / maximum reply | 49,152 / 8,192 tokens |
 | Sampling | Temperature 1.0; top-p 1.0; top-k 20; seed 42 |
-| Hardware | Two H100 80 GB GPUs for training/inference; PostgreSQL on FLOPper |
+| Hardware | Two H100 80 GB GPUs for training/inference; PostgreSQL on the benchmark host |
 | PostgreSQL pool | Four workers, four physical cores and 8 GiB each; 2 GiB shared buffers |
 | Worker ownership | Measurement-phase leases during RL; whole-rollout leases during JOB evaluation |
 | Checkpoints / validation | Every 20 updates, all 30 retained; no in-run validation |

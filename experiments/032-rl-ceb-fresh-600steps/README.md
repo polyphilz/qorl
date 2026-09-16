@@ -9,7 +9,7 @@ Outputs: `outputs/032-rl-ceb-fresh-600steps/<run-number>/`.
 **Continue learning from 031's final step-600 policy on 600 fresh CEB queries.**
 The verified 031 RL adapter was merged into its exact merged 027 SFT base using
 `qorl model merge`. The resulting complete model is
-`/lambda/nfs/qorl/models/qwen-4b-rl-031-step-600`.
+`models/qwen-4b-rl-031-step-600`.
 Its weight identity and merge provenance are recorded in
 [base-merge-manifest.json](base-merge-manifest.json). Both source artifacts remain
 intact. The merge incorporated all 128 adapted weight matrices.

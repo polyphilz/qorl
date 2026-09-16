@@ -21,13 +21,13 @@ context set to the demonstrated 49,152-token limit. It uses Astra medium with
 `reasoning_summary = "auto"`, one rollout per query, up to five candidate
 attempts, execution feedback and three initial default measurements. Astra has
 a 262,144-token context and 32,768 output-token limit per request. The PostgreSQL
-profile has 2 GiB shared buffers; the pool is FLOPper's four-worker CPU layout.
-Generation and database measurements stay on FLOPper after calibration 022 found
-higher estimated no-op error rates on Lambda. Lambda remains suitable for the
-subsequent GPU training on the prepared dataset.
+profile has 2 GiB shared buffers; the pool uses the benchmark host's four-worker
+CPU layout. Generation and database measurements use the benchmark host after
+calibration 022 found higher estimated no-op error rates on the training host.
+GPU training uses the prepared dataset on the training host.
 
-After these changes are available on FLOPper, from its QORL checkout with
-`OPENAI_API_KEY` set and the existing model/IMDB assets present:
+Run from the repository root on the benchmark host with `OPENAI_API_KEY` set
+and the model/IMDb assets present:
 
 ```bash
 uv run --frozen --extra gpu qorl experiment run experiments/025-sft-astra-ceb-300 --stage prepare
@@ -74,8 +74,8 @@ batches can repeat `--exclude-tasks-from` for both 017 and 025 training files.
 
 ## Training exclusions
 
-These six conversations were removed from the Lambda copy of run `001` before
-rendering and packing. Each ended with `keep_default` without
+These six conversations were excluded from the training copy of run `001`
+before rendering and packing. Each ended with `keep_default` without
 calling `evaluate_candidate`. This is a curriculum choice to favor trying
 interventions, not evidence that PostgreSQL's default was wrong.
 
@@ -88,12 +88,12 @@ interventions, not evidence that PostgreSQL's default was wrong.
 | `65c71eed4ae9d21fd0efa6ec` | `ceb-4a-4a161` |
 | `522b384060cd445fa3883806` | `ceb-4a-4a229` |
 
-The original generation artifacts on FLOPper are unchanged. Whole conversations
+The original generation artifacts are unchanged. Whole conversations
 were removed before packing, preserving unrelated turns that share packed rows.
 The 19 available validation conversations and post-search default selections
 were retained. No other outcome-based filtering was applied.
 
-Lambda's prepared dataset is at `outputs/025-sft-astra-ceb-300/002/dataset`:
+The prepared dataset is at `outputs/025-sft-astra-ceb-300/002/dataset`:
 293 training conversations in 1,102 packed rows, and 19 validation conversations
 in 73 rows. Of the 294 training conversations entering preparation, `ceb-7a-7a72`
 exceeded the unchanged 49,152-token context limit. Packing verification found
@@ -109,10 +109,10 @@ Completed training and JOB evaluation analysis: [results.md](results.md).
 
 ## Evaluate the trained adapter on JOB
 
-Run `002`'s checkpoint, exported adapter, and recorded run inputs were copied
-from Lambda to FLOPper and verified there. The SFT evaluation stage uses the
-existing test split directly; no separate experiment is needed. From FLOPper's
-QORL repository:
+Run `002`'s checkpoint, exported adapter, and recorded run inputs were verified
+for evaluation. The SFT evaluation stage uses the existing test split directly;
+no separate experiment is needed. Run from the repository root on the benchmark
+host:
 
 ```bash
 uv run --frozen --extra gpu qorl experiment run \
@@ -125,5 +125,5 @@ uv run --frozen --extra gpu qorl experiment run \
 uses its exported adapter. Evaluation settings and all 113 JOB tasks match
 experiment 026. The first invocation writes to
 `outputs/025-sft-astra-ceb-300/002/evaluation/test/000`; later invocations receive
-new numbered evaluation directories. Prepared training rows remain on Lambda
-and are not required for this evaluation.
+new numbered evaluation directories. Prepared training rows are not required
+for this evaluation.
