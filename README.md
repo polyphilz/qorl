@@ -1,6 +1,10 @@
 <h1 align="center">QORL: Query Optimization via Reinforcement Learning</h1>
 
 <p align="center">
+  <a href="https://rohanbansal.com/qorl" target="_blank" rel="noopener noreferrer"><strong>Read the technical writeup</strong></a>
+</p>
+
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/qorl-gh-banner-dark-optimized.gif">
     <source media="(prefers-color-scheme: light)" srcset="assets/qorl-gh-banner-light-optimized.gif">
