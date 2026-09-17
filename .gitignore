@@ -1,5 +1,6 @@
 **/.DS_Store
 .plans/
+demo/
 .venv/
 .venv-vllm/
 __pycache__/
@@ -12,3 +13,4 @@ dist/
 benchmarks/raw/
 data/
 outputs/
+
